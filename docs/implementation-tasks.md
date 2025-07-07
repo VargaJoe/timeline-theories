@@ -8,7 +8,11 @@ _No stories completed yet_
 ---
 
 ## In Progress Stories
-_No stories in progress yet_
+- [x] Technical setup: Downgraded React and types to v17, installed @sensenet/authentication-oidc-react and @material-ui/core@4.12.4 for OIDC authentication (Story 08, Story 01)
+- [x] Attempted OIDC/RepositoryContext integration, but reverted to JWT-based authentication and custom AuthContext due to compatibility and type issues (Story 08, Story 01)
+- [x] Removed all sensenet/JWT logic. Switched to local mock authentication and local timeline creation. App is now backend-agnostic and ready for integration with PostgreSQL or any REST API (Story 08, Story 01)
+- [x] Integrated with SenseNet repository for authentication and timeline storage. Timeline creation and listing now use SenseNet repository client and OIDC authentication (Story 08, Story 01)
+- [ ] Test full login and timeline creation flow in the running app
 
 ---
 
@@ -36,7 +40,7 @@ _No stories in progress yet_
 - [ ] Design timeline creation form UI
 - [ ] Implement timeline creation form
 - [ ] Add form validation for required fields
-- [ ] Implement timeline save functionality
+- [x] Implement timeline save functionality (SenseNet repository)
 - [ ] Add timeline-user relationship
 - [ ] Create timeline view redirect
 - [ ] Test timeline creation flow
