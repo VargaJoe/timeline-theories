@@ -22,6 +22,10 @@ _No stories completed yet_
     - [ ] Improve form and input styling for better UX
     - [ ] Fix error on timeline creation (investigate backend/frontend integration)
     - [ ] Fix error: Failed to load timelines (investigate backend API and integration)
+    - [x] Add debug logging to LoginButton.tsx to inspect OIDC state and diagnose loading issue (2025-07-09)
+    - [x] Add top-level console.log to LoginButton.tsx to confirm component rendering for OIDC debug (2025-07-09)
+    - [x] Inject OIDC access token into repository client on login/logout (2025-07-09)
+    - [x] Move OIDC token injection to OidcTokenInjector inside provider context (fixes useOidcAuthentication error) (2025-07-09)
 
 ---
 

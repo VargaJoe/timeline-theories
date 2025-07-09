@@ -10,9 +10,9 @@ export interface Timeline {
 }
 
 export async function createTimeline(data: { name: string; description?: string; sortOrder?: string }): Promise<Timeline> {
-  // Create a Memo content under /Root
+  // Create a Memo content under /Root/Content/SampleTimelines
   const result = await repository.create({
-    parentPath: '/Root',
+    parentPath: '/Root/Content/SampleTimelines',
     contentTypeName: 'Memo',
     name: data.name.replace(/\s+/g, '-').toLowerCase(),
     fields: {
