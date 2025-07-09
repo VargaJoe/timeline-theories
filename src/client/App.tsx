@@ -1,27 +1,17 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
 import { LoginButton } from './components/LoginButton';
 import { OidcProtected } from './components/OidcProtected';
-import { setRepositoryAccessToken } from './services/sensenet';
 import { TimelineCreatePage } from './pages/TimelineCreatePage';
 import { TimelineViewPage } from './pages/TimelineViewPage';
 import { TimelineListPage } from './pages/TimelineListPage.tsx';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { OidcTokenInjector } from './components/OidcTokenInjector';
 
 function App() {
-  const { oidcUser } = useOidcAuthentication();
-
-  useEffect(() => {
-    if (oidcUser && oidcUser.access_token) {
-      setRepositoryAccessToken(oidcUser.access_token);
-    } else {
-      setRepositoryAccessToken(''); // Clear token on logout
-    }
-  }, [oidcUser]);
-
   return (
     <AppProviders>
+      <OidcTokenInjector />
       <BrowserRouter>
         <div className="app-container">
           <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
