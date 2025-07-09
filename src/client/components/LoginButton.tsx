@@ -1,6 +1,8 @@
 import React from 'react';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 
+console.log('[LoginButton] Component loaded');
+
 export const LoginButton: React.FC = () => {
   const { oidcUser, login, logout, isLoading, error } = useOidcAuthentication();
 
