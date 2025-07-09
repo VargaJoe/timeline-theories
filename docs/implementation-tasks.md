@@ -12,7 +12,16 @@ _No stories completed yet_
 - [x] Attempted OIDC/RepositoryContext integration, but reverted to JWT-based authentication and custom AuthContext due to compatibility and type issues (Story 08, Story 01)
 - [x] Removed all sensenet/JWT logic. Switched to local mock authentication and local timeline creation. App is now backend-agnostic and ready for integration with PostgreSQL or any REST API (Story 08, Story 01)
 - [x] Integrated with SenseNet repository for authentication and timeline storage. Timeline creation and listing now use SenseNet repository client and OIDC authentication (Story 08, Story 01)
+- [x] TypeScript import/module resolution issues fixed for TimelineListPage. Type-only import used for Timeline type. AppProviders.tsx confirmed correct for OIDC context. (2025-07-09)
+- [x] App starts and loads in browser using Vite. (2025-07-09)
 - [ ] Test full login and timeline creation flow in the running app
+- [ ] **NEW: Public timeline browsing and UI improvements** (High priority, branch: feature/public-timeline-browsing-and-ui-improvements, started 2025-07-07T19:22:22+02:00)
+    - [ ] Allow unauthenticated users to browse timelines
+    - [ ] Only require login for timeline creation or editing
+    - [ ] Add a login button, do not auto-initiate login
+    - [ ] Improve form and input styling for better UX
+    - [ ] Fix error on timeline creation (investigate backend/frontend integration)
+    - [ ] Fix error: Failed to load timelines (investigate backend API and integration)
 
 ---
 

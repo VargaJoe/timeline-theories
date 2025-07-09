@@ -31,11 +31,14 @@ export async function createTimeline(data: { name: string; description?: string;
 }
 
 export async function getTimelines(): Promise<Timeline[]> {
-  // List Memo contents under /Root
-  const result = await repository.getList({
-    path: '/Root',
-    contentType: 'Memo',
-    select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
+  // List Memo contents under /Root/Content/SampleTimelines using sn-client loadCollection
+  const result = await repository.loadCollection({
+    path: '/Root/Content/SampleTimelines',
+    oDataOptions: {
+      query: 'TypeIs:Memo',
+      select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
+      orderby: ['DisplayName'],
+    },
   });
   return result.d.results.map((item: any) => ({
     id: item.Id,
