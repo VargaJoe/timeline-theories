@@ -28,6 +28,7 @@ _No stories completed yet_
     - [x] Move OIDC token injection to OidcTokenInjector inside provider context (fixes useOidcAuthentication error) (2025-07-09)
     - [x] **Successfully started client app** - Resolved dependency conflicts by downgrading React to v17.0.2 and installing @material-ui/core@4.12.4. App running on http://localhost:5173/ (2025-07-10T22:21)
     - [x] **Fixed OIDC login button loading issue** - Removed persistent loading state that prevented login button from showing. Login button now appears immediately and is clickable (2025-07-10T22:35)
+    - [x] **Fixed logout navigation issue** - Implemented complete local logout to avoid external identity server redirect. Uses manual storage clearing and page refresh instead of OIDC redirect logout (2025-07-10T23:05)
 
 ---
 

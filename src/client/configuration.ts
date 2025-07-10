@@ -9,4 +9,8 @@ export const configuration = {
   silent_redirect_uri: `${window.location.origin}/authentication/silent_callback`,
   automaticSilentRenew: true,
   extraQueryParams: { snrepo: repositoryUrl },
+  // Try to disable automatic logout redirects
+  monitorSession: false,
+  checkSessionInterval: 2000,
+  revokeAccessTokenOnSignout: true,
 };
