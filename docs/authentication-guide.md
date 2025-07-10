@@ -35,11 +35,11 @@ npm install react@17.0.2 react-dom@17.0.2 @types/react@17.0.87 @types/react-dom@
 ```ts
 import { createBrowserHistory } from 'history';
 
-export const repositoryUrl = 'https://mcp-sandbox.test.sensenet.cloud';
+export const repositoryUrl = import.meta.env.VITE_SENSENET_REPO_URL || 'https://your-sensenet-repo-url';
 export const browserHistory = createBrowserHistory();
 export const configuration = {
-  client_id: 'LCNi1qxzo2q9YjNU',
-  authority: 'https://mcp-sandbox-is.test.sensenet.cloud',
+  client_id: import.meta.env.VITE_OIDC_CLIENT_ID || 'your-client-id',
+  authority: import.meta.env.VITE_OIDC_AUTHORITY || 'https://your-identity-server-url',
   redirect_uri: `${window.location.origin}/authentication/callback`,
   post_logout_redirect_uri: `${window.location.origin}/`,
   response_type: 'code',
@@ -108,8 +108,8 @@ export const LoginButton: React.FC = () => {
       setRepositoryAccessToken('');
       
       // Clear OIDC storage manually
-      const authority = 'https://mcp-sandbox-is.test.sensenet.cloud';
-      const clientId = 'LCNi1qxzo2q9YjNU';
+      const authority = import.meta.env.VITE_OIDC_AUTHORITY || 'https://your-identity-server-url';
+      const clientId = import.meta.env.VITE_OIDC_CLIENT_ID || 'your-client-id';
       const storageKey = `oidc.user:${authority}:${clientId}`;
       
       localStorage.removeItem(storageKey);
@@ -198,7 +198,7 @@ export const setRepositoryAccessToken = (token: string) => {
 
 ```js
 // In browser console - check OIDC state
-localStorage.getItem('oidc.user:https://mcp-sandbox-is.test.sensenet.cloud:LCNi1qxzo2q9YjNU')
+localStorage.getItem('oidc.user:https://your-identity-server-url:your-client-id')
 
 // Check available methods
 console.log(Object.keys(useOidcAuthentication()))

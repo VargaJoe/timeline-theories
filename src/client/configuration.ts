@@ -1,7 +1,7 @@
-export const repositoryUrl = 'https://mcp-sandbox.test.sensenet.cloud'; // 'https://insql-daily.test.sensenet.cloud';
+export const repositoryUrl = import.meta.env.VITE_SENSENET_REPO_URL || 'https://your-sensenet-repo-url';
 export const configuration = {
-  client_id: 'LCNi1qxzo2q9YjNU',
-  authority: 'https://mcp-sandbox-is.test.sensenet.cloud',//'https://insql-daily-is.test.sensenet.cloud',
+  client_id: import.meta.env.VITE_OIDC_CLIENT_ID || 'your-client-id',
+  authority: import.meta.env.VITE_OIDC_AUTHORITY || 'https://your-identity-server-url',
   redirect_uri: `${window.location.origin}/authentication/callback`,
   post_logout_redirect_uri: `${window.location.origin}/`,
   response_type: 'code',
