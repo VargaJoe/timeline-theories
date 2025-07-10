@@ -6,11 +6,16 @@ This guide provides step-by-step instructions for implementing authentication in
 ---
 
 ## 1. Prerequisites
-- **React** (v18+ recommended)
+- **React** (v17+ supported, v18+ recommended)
 - **TypeScript** (recommended)
-- **Material-UI** (for UI, optional)
+- **Material-UI** (for UI, optional) - Use v4 for React v17 compatibility
 - **SenseNet repository** (cloud or on-prem)
 - **OIDC provider** (SenseNet IdentityServer or compatible)
+
+**Important React Version Notes:**
+- If using Material-UI v4, you need React v17.0.2 for compatibility
+- @sensenet/authentication-oidc-react works with both React v17 and v18
+- Downgrade React if you encounter peer dependency conflicts with Material-UI
 
 ---
 
@@ -55,7 +60,7 @@ export const browserHistory = createBrowserHistory();
 
 ---
 
-## 5. Set Up Authentication Provider
+## 5. Set Up Authentication Provider and Router
 Wrap your app with the OIDC provider in `AppProviders.tsx`:
 ```tsx
 import { AuthenticationProvider } from '@sensenet/authentication-oidc-react';
@@ -67,9 +72,43 @@ export const AppProviders = ({ children }) => (
   </AuthenticationProvider>
 );
 ```
+
+**Router Setup - Two Approaches:**
+
+**Approach A: BrowserRouter + Custom Authentication (Recommended for React v17)**
+```tsx
+// App.tsx
+<AppProviders>
+  <BrowserRouter>
+    <Routes>
+      <Route path="/protected" element={
+        <AuthenticatedContent>
+          <ProtectedPage />
+        </AuthenticatedContent>
+      } />
+    </Routes>
+  </BrowserRouter>
+</AppProviders>
+```
+
+**Approach B: OIDC Provider Routing (Advanced)**
+```tsx
+// App.tsx - No BrowserRouter needed
+<AppProviders>
+  <Routes>
+    <Route path="/protected" element={
+      <OidcSecure history={browserHistory}>
+        <ProtectedPage />
+      </OidcSecure>
+    } />
+  </Routes>
+</AppProviders>
+```
+
 - **Traps:**
-  - Do not create a new history object on every render.
-  - Always use the same instance for both OIDC and React Router.
+  - Approach B can cause router context conflicts in some React Router v6 setups
+  - If you get "useContext is null" errors, use Approach A
+  - Always use the same browserHistory instance for consistency
 
 ---
 
@@ -80,22 +119,66 @@ import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 
 const { oidcUser, login, logout, isLoading, error } = useOidcAuthentication();
 ```
+
+**Loading State Handling:**
+```tsx
+// ❌ Avoid persistent loading states that block UI
+if (isLoading) {
+  return <button disabled>Loading...</button>; // Can get stuck!
+}
+
+// ✅ Better approach - show login button immediately
+if (error) {
+  return <div>Error: {error}</div>;
+}
+if (oidcUser) {
+  return <button onClick={logout}>Logout</button>;
+} else {
+  return <button onClick={login}>Login</button>; // Always accessible
+}
+```
+
 - Show a login button if not authenticated, logout if authenticated.
-- Show loading and error states for better UX.
+- Avoid showing loading states that can persist indefinitely.
+- Handle errors gracefully with user-friendly messages.
 
 ---
 
-## 7. Protect Routes
-Use the `OidcSecure` component to protect routes:
-```tsx
-import { OidcSecure } from '@sensenet/authentication-oidc-react';
+## 7. Protect Routes - Two Approaches
 
+**Approach A: Custom Authentication Component (Recommended)**
+```tsx
+// AuthenticatedContent.tsx
+const AuthenticatedContent = ({ children, fallback }) => {
+  const { oidcUser, isLoading } = useOidcAuthentication();
+  
+  if (isLoading) return <div>Loading...</div>;
+  if (!oidcUser) {
+    return fallback || <div>Please log in to access this page.</div>;
+  }
+  return <>{children}</>;
+};
+
+// Usage in routes
+<Route path="/create" element={
+  <AuthenticatedContent>
+    <CreatePage />
+  </AuthenticatedContent>
+} />
+```
+
+**Approach B: OidcSecure Component**
+```tsx
+// Usage
 <OidcSecure history={browserHistory}>
   <YourProtectedComponent />
 </OidcSecure>
 ```
+
 - **Traps:**
-  - If you see a spinner that never disappears, check your history object and OIDC config.
+  - Approach B requires careful router context management
+  - If you see router context errors, use Approach A
+  - Custom components give you more control over the authentication UX
 
 ---
 
@@ -119,15 +202,25 @@ export const setRepositoryAccessToken = (token: string) => {
 ---
 
 ## 9. Common Pitfalls & Troubleshooting
-- **Spinner never disappears:**
-  - Ensure you use a singleton history object for both OIDC and React Router.
-  - Check redirect URIs and OIDC config.
+- **Router context errors ("useContext is null"):**
+  - ❌ Mixing OIDC provider routing with BrowserRouter can cause conflicts
+  - ✅ Use BrowserRouter + custom AuthenticatedContent for better compatibility
+  - ✅ Or use OIDC provider routing without BrowserRouter (advanced)
+- **Login button stuck on "Loading...":**
+  - ❌ Persistent isLoading states can block the UI indefinitely
+  - ✅ Show login button immediately, handle loading in background
 - **Login button does not work:**
   - Make sure the login function is called from a user action (e.g., button click).
 - **Token not sent to API:**
   - Ensure you patch the repository fetch method with the access token after login.
 - **Multiple login attempts or silent renew issues:**
   - Only wrap your app once with the OIDC provider.
+- **React version conflicts:**
+  - Use React v17.0.2 if you need Material-UI v4 compatibility
+  - Install matching @types/react and @types/react-dom versions
+- **History object mismatches:**
+  - Always use the same browserHistory instance across your app
+  - Don't create new history objects on every render
 
 ---
 
