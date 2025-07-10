@@ -201,6 +201,67 @@ export const setRepositoryAccessToken = (token: string) => {
 
 ---
 
+## 8.1. Logout Implementation - Local vs External
+**Problem:** Default OIDC logout redirects users to external identity server logout page, creating poor UX.
+
+**Two Logout Approaches:**
+
+**❌ External Logout (Default - Not Recommended)**
+```tsx
+// This redirects to external logout page
+<button onClick={logout}>Logout</button>
+```
+**Issues:**
+- Redirects to identity server logout confirmation page
+- User must click "Yes" to confirm logout
+- May not redirect back to your app reliably
+- Creates confusing user experience
+
+**✅ Local Logout (Recommended)**
+```tsx
+const handleLocalLogout = async () => {
+  try {
+    // Step 1: Clear repository token immediately
+    setRepositoryAccessToken('');
+    
+    // Step 2: Clear OIDC storage manually
+    const authority = 'https://your-identity-server-url';
+    const clientId = 'your-client-id';
+    const storageKey = `oidc.user:${authority}:${clientId}`;
+    
+    localStorage.removeItem(storageKey);
+    sessionStorage.removeItem(storageKey);
+    
+    // Step 3: Try userManager.removeUser() if available
+    if (oidcResult.userManager) {
+      await oidcResult.userManager.removeUser();
+    }
+    
+    // Step 4: Force page refresh to update UI
+    window.location.reload();
+  } catch (err) {
+    // Fallback: nuclear option
+    localStorage.clear();
+    window.location.href = '/';
+  }
+};
+
+// Use local logout in component
+<button onClick={handleLocalLogout}>Logout</button>
+```
+
+**Configuration Options to Help with Logout:**
+```ts
+export const configuration = {
+  // ... other config
+  monitorSession: false,
+  revokeAccessTokenOnSignout: true,
+  // Don't rely on post_logout_redirect_uri for complex apps
+};
+```
+
+---
+
 ## 9. Common Pitfalls & Troubleshooting
 - **Router context errors ("useContext is null"):**
   - ❌ Mixing OIDC provider routing with BrowserRouter can cause conflicts
@@ -209,6 +270,39 @@ export const setRepositoryAccessToken = (token: string) => {
 - **Login button stuck on "Loading...":**
   - ❌ Persistent isLoading states can block the UI indefinitely
   - ✅ Show login button immediately, handle loading in background
+- **Logout redirects to external identity server:**
+  - ❌ Default OIDC logout() redirects to identity server logout page
+  - ❌ User gets stuck on external logout confirmation page
+  - ❌ post_logout_redirect_uri may not work reliably with all OIDC providers
+  - ✅ **Solution: Implement local logout instead of external redirect**
+  ```tsx
+  const handleLocalLogout = async () => {
+    try {
+      // Clear repository token first
+      setRepositoryAccessToken('');
+      
+      // Manual storage clearing approach
+      const authority = 'https://your-identity-server';
+      const clientId = 'your-client-id';
+      const storageKey = `oidc.user:${authority}:${clientId}`;
+      
+      localStorage.removeItem(storageKey);
+      sessionStorage.removeItem(storageKey);
+      
+      // Try userManager.removeUser() if available
+      if (userManager) {
+        await userManager.removeUser();
+      }
+      
+      // Force page refresh to update authentication state
+      window.location.reload();
+    } catch (err) {
+      // Fallback: clear all storage and redirect
+      localStorage.clear();
+      window.location.href = '/';
+    }
+  };
+  ```
 - **Login button does not work:**
   - Make sure the login function is called from a user action (e.g., button click).
 - **Token not sent to API:**
@@ -221,6 +315,53 @@ export const setRepositoryAccessToken = (token: string) => {
 - **History object mismatches:**
   - Always use the same browserHistory instance across your app
   - Don't create new history objects on every render
+
+---
+
+## 9.1. Debugging Logout Issues
+
+**Check Browser Console:**
+```tsx
+// Add debug logging to understand logout behavior
+const { oidcUser, logout, userManager } = useOidcAuthentication();
+
+console.log('Available OIDC methods:', Object.keys(oidcResult));
+console.log('UserManager available:', !!userManager);
+if (userManager) {
+  console.log('UserManager methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(userManager)));
+}
+```
+
+**Check Browser Storage:**
+- Open DevTools → Application → Local Storage
+- Look for keys like `oidc.user:authority:client_id`
+- Verify storage is cleared after logout
+
+**Common Logout Problems:**
+1. **External redirect happens anyway:** 
+   - OIDC provider forces external logout
+   - Solution: Use manual storage clearing approach
+
+2. **UI doesn't update after logout:**
+   - Authentication state not refreshed
+   - Solution: Force page reload or state refresh
+
+3. **Token still sent to API after logout:**
+   - Repository token not cleared
+   - Solution: Call `setRepositoryAccessToken('')` immediately
+
+4. **User appears logged in after refresh:**
+   - Storage not fully cleared
+   - Solution: Clear both localStorage and sessionStorage
+
+**Testing Logout Flow:**
+1. Log in and verify authentication state
+2. Check browser storage contains OIDC user data
+3. Click logout button
+4. Verify no external redirect occurs
+5. Check storage is cleared
+6. Verify UI shows logged-out state
+7. Verify API calls no longer include auth token
 
 ---
 
@@ -259,9 +400,14 @@ src/
 - [ ] OIDC config matches your provider
 - [ ] Singleton history object used everywhere
 - [ ] Login/logout UI implemented
-- [ ] OidcSecure wraps protected routes
+- [ ] **Local logout implemented (not external redirect)**
+- [ ] OidcSecure or AuthenticatedContent wraps protected routes
 - [ ] Access token injected into SenseNet client
+- [ ] **Repository token cleared on logout**
+- [ ] **OIDC storage cleared manually on logout**
 - [ ] No deprecated local login code remains
+- [ ] **Logout doesn't redirect to external identity server**
+- [ ] **Page refresh forces authentication state update after logout**
 
 ---
 
