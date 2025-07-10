@@ -26,6 +26,8 @@ _No stories completed yet_
     - [x] Add top-level console.log to LoginButton.tsx to confirm component rendering for OIDC debug (2025-07-09)
     - [x] Inject OIDC access token into repository client on login/logout (2025-07-09)
     - [x] Move OIDC token injection to OidcTokenInjector inside provider context (fixes useOidcAuthentication error) (2025-07-09)
+    - [x] **Successfully started client app** - Resolved dependency conflicts by downgrading React to v17.0.2 and installing @material-ui/core@4.12.4. App running on http://localhost:5173/ (2025-07-10T22:21)
+    - [x] **Fixed OIDC login button loading issue** - Removed persistent loading state that prevented login button from showing. Login button now appears immediately and is clickable (2025-07-10T22:35)
 
 ---
 

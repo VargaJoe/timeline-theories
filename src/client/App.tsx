@@ -1,8 +1,8 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
 import { LoginButton } from './components/LoginButton';
-import { OidcProtected } from './components/OidcProtected';
+import { AuthenticatedContent } from './components/AuthenticatedContent';
 import { TimelineCreatePage } from './pages/TimelineCreatePage';
 import { TimelineViewPage } from './pages/TimelineViewPage';
 import { TimelineListPage } from './pages/TimelineListPage.tsx';
@@ -15,7 +15,17 @@ function App() {
       <BrowserRouter>
         <div className="app-container">
           <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <h1>TimelineVerse</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+              <h1>TimelineVerse</h1>
+              <nav style={{ display: 'flex', gap: 16 }}>
+                <Link to="/timelines" style={{ textDecoration: 'none', color: '#2a4d8f', fontWeight: 500 }}>
+                  Browse Timelines
+                </Link>
+                <Link to="/create" style={{ textDecoration: 'none', color: '#2a4d8f', fontWeight: 500 }}>
+                  Create Timeline
+                </Link>
+              </nav>
+            </div>
             <LoginButton />
           </header>
           <Routes>
@@ -24,9 +34,9 @@ function App() {
             <Route
               path="/create"
               element={
-                <OidcProtected>
+                <AuthenticatedContent>
                   <TimelineCreatePage />
-                </OidcProtected>
+                </AuthenticatedContent>
               }
             />
             <Route path="*" element={<Navigate to="/timelines" />} />
