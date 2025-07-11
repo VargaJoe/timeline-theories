@@ -34,6 +34,78 @@ const GENRES = [
   'Other'
 ];
 
+// Inline styles for consistency
+const containerStyle = {
+  background: '#fff',
+  border: '1px solid #e9ecef',
+  borderRadius: 12,
+  padding: 24,
+  boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+};
+
+const labelStyle = {
+  display: 'block',
+  fontSize: 14,
+  fontWeight: 500,
+  color: '#495057',
+  marginBottom: 8
+};
+
+const inputStyle = {
+  width: '100%',
+  padding: '8px 12px',
+  border: '1px solid #ced4da',
+  borderRadius: 6,
+  fontSize: 14,
+  outline: 'none'
+};
+
+const errorInputStyle = {
+  ...inputStyle,
+  border: '1px solid #dc3545'
+};
+
+const textareaStyle = {
+  ...inputStyle,
+  minHeight: 80,
+  resize: 'vertical' as const
+};
+
+const errorStyle = {
+  color: '#dc3545',
+  fontSize: 12,
+  marginTop: 4
+};
+
+const buttonPrimaryStyle = {
+  background: '#2a4d8f',
+  color: 'white',
+  border: 'none',
+  borderRadius: 6,
+  padding: '10px 20px',
+  cursor: 'pointer',
+  fontSize: 14,
+  fontWeight: 500,
+  marginRight: 12
+};
+
+const buttonSecondaryStyle = {
+  background: '#f8f9fa',
+  color: '#495057',
+  border: '1px solid #e9ecef',
+  borderRadius: 6,
+  padding: '10px 20px',
+  cursor: 'pointer',
+  fontSize: 14,
+  fontWeight: 500
+};
+
+const buttonDisabledStyle = {
+  ...buttonPrimaryStyle,
+  background: '#94a3b8',
+  cursor: 'not-allowed'
+};
+
 export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({ 
   onSuccess, 
   onCancel 
@@ -98,11 +170,7 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
     
     // Clear validation error when user starts typing
     if (validationErrors[field]) {
-      setValidationErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors[field];
-        return newErrors;
-      });
+      setValidationErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
 
@@ -117,35 +185,13 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
     setError(null);
 
     try {
-      // Prepare external links as JSON if provided
-      let externalLinksJson = '';
-      if (formData.ExternalLinks?.trim()) {
-        try {
-          // Try to parse as JSON first
-          JSON.parse(formData.ExternalLinks);
-          externalLinksJson = formData.ExternalLinks;
-        } catch {
-          // If not JSON, treat as simple URL and create JSON structure
-          externalLinksJson = JSON.stringify({ url: formData.ExternalLinks.trim() });
-        }
-      }
-
-      const mediaItemData: CreateMediaItemRequest = {
-        ...formData,
-        ExternalLinks: externalLinksJson,
-        Duration: formData.Duration ? Number(formData.Duration) : undefined,
-        Rating: formData.Rating ? Number(formData.Rating) : undefined
-      };
-
-      const newMediaItem = await MediaLibraryService.createMediaItem(mediaItemData);
-      
+      const mediaItem = await MediaLibraryService.createMediaItem(formData);
       setSuccess(true);
-      setTimeout(() => {
-        if (onSuccess) {
-          onSuccess(newMediaItem);
-        }
-      }, 1500);
       
+      // Call success callback after a short delay to show success message
+      setTimeout(() => {
+        onSuccess?.(mediaItem);
+      }, 1500);
     } catch (err) {
       console.error('Error creating media item:', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
@@ -156,272 +202,224 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
 
   if (success) {
     return (
-      <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
-        <div className="text-center">
-          <div className="mb-4">
-            <svg className="mx-auto h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div style={containerStyle}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ marginBottom: 16 }}>
+            <svg 
+              style={{ 
+                width: 48, 
+                height: 48, 
+                color: '#28a745', 
+                margin: '0 auto',
+                display: 'block'
+              }} 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Media Item Created!</h2>
-          <p className="text-gray-600">Your media item has been added to the global library successfully.</p>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#495057', marginBottom: 8 }}>Media Item Created!</h2>
+          <p style={{ color: '#6c757d' }}>Your media item has been added to the global library successfully.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Add Media Item to Library</h2>
+    <div style={containerStyle}>
+      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#495057', marginBottom: 24 }}>Add Media Item to Library</h2>
       
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
-          <div className="flex">
-            <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-            <p className="ml-3 text-sm text-red-700">{error}</p>
-          </div>
+        <div style={{
+          background: '#fef2f2',
+          border: '1px solid #fecaca',
+          borderRadius: 6,
+          padding: 16,
+          marginBottom: 24,
+          color: '#dc2626'
+        }}>
+          {error}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Title */}
-        <div>
-          <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
-            Title *
-          </label>
-          <input
-            type="text"
-            id="title"
-            value={formData.DisplayName}
-            onChange={(e) => handleInputChange('DisplayName', e.target.value)}
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-              validationErrors.DisplayName ? 'border-red-300' : 'border-gray-300'
-            }`}
-            placeholder="e.g., The Empire Strikes Back"
-          />
-          {validationErrors.DisplayName && (
-            <p className="mt-1 text-sm text-red-600">{validationErrors.DisplayName}</p>
-          )}
-        </div>
-
-        {/* Media Type and Genre */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <form onSubmit={handleSubmit}>
+        <div style={{ display: 'grid', gap: 20 }}>
+          {/* Title */}
           <div>
-            <label htmlFor="mediaType" className="block text-sm font-medium text-gray-700 mb-2">
-              Media Type *
-            </label>
-            <select
-              id="mediaType"
-              value={formData.MediaType}
-              onChange={(e) => handleInputChange('MediaType', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {MEDIA_TYPES.map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label htmlFor="genre" className="block text-sm font-medium text-gray-700 mb-2">
-              Genre
-            </label>
-            <select
-              id="genre"
-              value={formData.Genre || ''}
-              onChange={(e) => handleInputChange('Genre', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">Select genre...</option>
-              {GENRES.map(genre => (
-                <option key={genre} value={genre}>{genre}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Description */}
-        <div>
-          <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
-            Description *
-          </label>
-          <textarea
-            id="description"
-            rows={4}
-            value={formData.Description}
-            onChange={(e) => handleInputChange('Description', e.target.value)}
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-              validationErrors.Description ? 'border-red-300' : 'border-gray-300'
-            }`}
-            placeholder="Brief description or synopsis..."
-          />
-          {validationErrors.Description && (
-            <p className="mt-1 text-sm text-red-600">{validationErrors.Description}</p>
-          )}
-        </div>
-
-        {/* Dates */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="releaseDate" className="block text-sm font-medium text-gray-700 mb-2">
-              Release Date
-            </label>
-            <input
-              type="date"
-              id="releaseDate"
-              value={formData.ReleaseDate || ''}
-              onChange={(e) => handleInputChange('ReleaseDate', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="chronologicalDate" className="block text-sm font-medium text-gray-700 mb-2">
-              In-Universe Date
-            </label>
+            <label style={labelStyle}>Title *</label>
             <input
               type="text"
-              id="chronologicalDate"
-              value={formData.ChronologicalDate || ''}
-              onChange={(e) => handleInputChange('ChronologicalDate', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="e.g., 3 ABY, 2012, Season 3"
+              value={formData.DisplayName}
+              onChange={(e) => handleInputChange('DisplayName', e.target.value)}
+              style={validationErrors.DisplayName ? errorInputStyle : inputStyle}
+              placeholder="Enter the title of your media item"
             />
-          </div>
-        </div>
-
-        {/* Duration and Rating */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="duration" className="block text-sm font-medium text-gray-700 mb-2">
-              Duration (minutes)
-            </label>
-            <input
-              type="number"
-              id="duration"
-              value={formData.Duration || ''}
-              onChange={(e) => handleInputChange('Duration', e.target.value ? Number(e.target.value) : undefined)}
-              className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                validationErrors.Duration ? 'border-red-300' : 'border-gray-300'
-              }`}
-              min="1"
-              placeholder="e.g., 124"
-            />
-            {validationErrors.Duration && (
-              <p className="mt-1 text-sm text-red-600">{validationErrors.Duration}</p>
+            {validationErrors.DisplayName && (
+              <div style={errorStyle}>{validationErrors.DisplayName}</div>
             )}
           </div>
 
+          {/* Description */}
           <div>
-            <label htmlFor="rating" className="block text-sm font-medium text-gray-700 mb-2">
-              Rating (1-10)
-            </label>
-            <input
-              type="number"
-              id="rating"
-              value={formData.Rating || ''}
-              onChange={(e) => handleInputChange('Rating', e.target.value ? Number(e.target.value) : undefined)}
-              className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                validationErrors.Rating ? 'border-red-300' : 'border-gray-300'
-              }`}
-              min="1"
-              max="10"
-              step="0.1"
-              placeholder="e.g., 8.5"
+            <label style={labelStyle}>Description *</label>
+            <textarea
+              value={formData.Description}
+              onChange={(e) => handleInputChange('Description', e.target.value)}
+              style={validationErrors.Description ? { ...textareaStyle, border: '1px solid #dc3545' } : textareaStyle}
+              placeholder="Describe your media item..."
             />
-            {validationErrors.Rating && (
-              <p className="mt-1 text-sm text-red-600">{validationErrors.Rating}</p>
+            {validationErrors.Description && (
+              <div style={errorStyle}>{validationErrors.Description}</div>
             )}
           </div>
-        </div>
 
-        {/* Cover Image URL */}
-        <div>
-          <label htmlFor="coverImage" className="block text-sm font-medium text-gray-700 mb-2">
-            Cover Image URL
-          </label>
-          <input
-            type="url"
-            id="coverImage"
-            value={formData.CoverImageUrl || ''}
-            onChange={(e) => handleInputChange('CoverImageUrl', e.target.value)}
-            className={`w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-              validationErrors.CoverImageUrl ? 'border-red-300' : 'border-gray-300'
-            }`}
-            placeholder="https://example.com/poster.jpg"
-          />
-          {validationErrors.CoverImageUrl && (
-            <p className="mt-1 text-sm text-red-600">{validationErrors.CoverImageUrl}</p>
-          )}
-        </div>
+          {/* Media Type and Genre */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <label style={labelStyle}>Media Type *</label>
+              <select
+                value={formData.MediaType}
+                onChange={(e) => handleInputChange('MediaType', e.target.value)}
+                style={inputStyle}
+              >
+                {MEDIA_TYPES.map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
 
-        {/* External Links */}
-        <div>
-          <label htmlFor="externalLinks" className="block text-sm font-medium text-gray-700 mb-2">
-            External Links
-          </label>
-          <textarea
-            id="externalLinks"
-            rows={3}
-            value={formData.ExternalLinks || ''}
-            onChange={(e) => handleInputChange('ExternalLinks', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder='JSON format: {"imdb": "https://...", "wiki": "https://..."} or simple URL'
-          />
-          <p className="mt-1 text-sm text-gray-500">
-            Enter a single URL or JSON object with multiple links
-          </p>
-        </div>
+            <div>
+              <label style={labelStyle}>Genre</label>
+              <select
+                value={formData.Genre}
+                onChange={(e) => handleInputChange('Genre', e.target.value)}
+                style={inputStyle}
+              >
+                {GENRES.map(genre => (
+                  <option key={genre} value={genre}>{genre}</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-        {/* Tags */}
-        <div>
-          <label htmlFor="tags" className="block text-sm font-medium text-gray-700 mb-2">
-            Tags
-          </label>
-          <input
-            type="text"
-            id="tags"
-            value={formData.Tags || ''}
-            onChange={(e) => handleInputChange('Tags', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="star-wars, original-trilogy, luke-skywalker"
-          />
-          <p className="mt-1 text-sm text-gray-500">
-            Comma-separated tags for better organization
-          </p>
-        </div>
+          {/* Dates */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <label style={labelStyle}>Release Date</label>
+              <input
+                type="date"
+                value={formData.ReleaseDate}
+                onChange={(e) => handleInputChange('ReleaseDate', e.target.value)}
+                style={inputStyle}
+              />
+            </div>
 
-        {/* Buttons */}
-        <div className="flex justify-end space-x-4 pt-6">
-          {onCancel && (
+            <div>
+              <label style={labelStyle}>Chronological Date</label>
+              <input
+                type="date"
+                value={formData.ChronologicalDate}
+                onChange={(e) => handleInputChange('ChronologicalDate', e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          {/* Cover Image */}
+          <div>
+            <label style={labelStyle}>Cover Image URL</label>
+            <input
+              type="url"
+              value={formData.CoverImageUrl}
+              onChange={(e) => handleInputChange('CoverImageUrl', e.target.value)}
+              style={validationErrors.CoverImageUrl ? errorInputStyle : inputStyle}
+              placeholder="https://example.com/image.jpg"
+            />
+            {validationErrors.CoverImageUrl && (
+              <div style={errorStyle}>{validationErrors.CoverImageUrl}</div>
+            )}
+          </div>
+
+          {/* Duration and Rating */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <label style={labelStyle}>Duration (minutes)</label>
+              <input
+                type="number"
+                value={formData.Duration || ''}
+                onChange={(e) => handleInputChange('Duration', e.target.value ? Number(e.target.value) : undefined)}
+                style={validationErrors.Duration ? errorInputStyle : inputStyle}
+                placeholder="120"
+                min="1"
+              />
+              {validationErrors.Duration && (
+                <div style={errorStyle}>{validationErrors.Duration}</div>
+              )}
+            </div>
+
+            <div>
+              <label style={labelStyle}>Rating (1-10)</label>
+              <input
+                type="number"
+                value={formData.Rating || ''}
+                onChange={(e) => handleInputChange('Rating', e.target.value ? Number(e.target.value) : undefined)}
+                style={validationErrors.Rating ? errorInputStyle : inputStyle}
+                placeholder="8"
+                min="1"
+                max="10"
+                step="0.1"
+              />
+              {validationErrors.Rating && (
+                <div style={errorStyle}>{validationErrors.Rating}</div>
+              )}
+            </div>
+          </div>
+
+          {/* External Links */}
+          <div>
+            <label style={labelStyle}>External Links (JSON format)</label>
+            <textarea
+              value={formData.ExternalLinks}
+              onChange={(e) => handleInputChange('ExternalLinks', e.target.value)}
+              style={textareaStyle}
+              placeholder='{"imdb": "https://imdb.com/title/...", "wiki": "https://wikipedia.org/..."}'
+            />
+          </div>
+
+          {/* Tags */}
+          <div>
+            <label style={labelStyle}>Tags (comma-separated)</label>
+            <input
+              type="text"
+              value={formData.Tags}
+              onChange={(e) => handleInputChange('Tags', e.target.value)}
+              style={inputStyle}
+              placeholder="adventure, space, comedy"
+            />
+          </div>
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                style={buttonSecondaryStyle}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </button>
+            )}
             <button
-              type="button"
-              onClick={onCancel}
-              className="px-6 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+              type="submit"
               disabled={isSubmitting}
+              style={isSubmitting ? buttonDisabledStyle : buttonPrimaryStyle}
             >
-              Cancel
+              {isSubmitting ? 'Creating...' : 'Create Media Item'}
             </button>
-          )}
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors"
-          >
-            {isSubmitting ? (
-              <span className="flex items-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Creating...
-              </span>
-            ) : (
-              'Add to Library'
-            )}
-          </button>
+          </div>
         </div>
       </form>
     </div>

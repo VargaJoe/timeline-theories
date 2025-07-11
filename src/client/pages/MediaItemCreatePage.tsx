@@ -1,6 +1,6 @@
 // src/client/pages/MediaItemCreatePage.tsx
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import MediaItemCreateForm from '../components/MediaItemCreateForm';
 import type { MediaItem } from '../services/mediaLibraryService';
 
@@ -17,21 +17,32 @@ const MediaItemCreatePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Add Media Item</h1>
-          <p className="mt-2 text-gray-600">
-            Add a new movie, TV show, book, or other media item to the global library.
-            Once added, you can use it in multiple timelines.
-          </p>
-        </div>
-
-        <MediaItemCreateForm 
-          onSuccess={handleSuccess}
-          onCancel={handleCancel}
-        />
+    <div style={{ maxWidth: 800, margin: '0 auto', padding: 20 }}>
+      <div style={{ marginBottom: 32 }}>
+        <Link 
+          to="/media-library" 
+          style={{ 
+            color: '#2a4d8f', 
+            textDecoration: 'none',
+            fontSize: 14,
+            fontWeight: 500,
+            marginBottom: 16,
+            display: 'inline-block'
+          }}
+        >
+          ← Back to Media Library
+        </Link>
+        <h1 style={{ marginBottom: 8, color: '#2a4d8f', fontSize: 28, fontWeight: 700 }}>Add Media Item</h1>
+        <p style={{ color: '#666', margin: 0 }}>
+          Add a new movie, TV show, book, or other media item to the global library.
+          Once added, you can use it in multiple timelines.
+        </p>
       </div>
+
+      <MediaItemCreateForm 
+        onSuccess={handleSuccess}
+        onCancel={handleCancel}
+      />
     </div>
   );
 };
