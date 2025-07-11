@@ -11,12 +11,15 @@ export interface Timeline {
 
 export async function createTimeline(data: { name: string; description?: string; sortOrder?: string }): Promise<Timeline> {
   try {
-    // Create a Memo content under /Root/Content/SampleTimelines
-    const result = await repository.create({
+    // Create a Memo content under /Root/Content/SampleTimelines using the correct repository.post method
+    const result = await repository.post({
       parentPath: '/Root/Content/SampleTimelines',
-      contentTypeName: 'Memo',
-      name: data.name.replace(/\s+/g, '-').toLowerCase(),
-      fields: {
+      contentType: 'Memo',
+      oDataOptions: {
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
+      },
+      content: {
+        Name: data.name.replace(/\s+/g, '-').toLowerCase(),
         DisplayName: data.name,
         Description: data.description || '',
         SortOrder: data.sortOrder || 'chronological',
