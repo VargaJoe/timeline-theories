@@ -2,37 +2,38 @@
 import { repository } from '../services/sensenet';
 
 /**
- * Creates the MediaLibrary folder in SenseNet if it doesn't exist
+ * Creates the MediaLibrary MemoList in SenseNet if it doesn't exist
+ * Note: Must use MemoList content type to store Memo items (SenseNet requirement)
  */
 export async function setupMediaLibrary(): Promise<void> {
   try {
-    console.log('Checking if MediaLibrary folder exists...');
+    console.log('Checking if MediaLibrary MemoList exists...');
     
     // Check if MediaLibrary folder exists
     try {
       await repository.load({
         idOrPath: '/Root/Content/MediaLibrary'
       });
-      console.log('MediaLibrary folder already exists');
+      console.log('MediaLibrary MemoList already exists');
       return;
     } catch {
-      console.log('MediaLibrary folder not found, creating it...');
+      console.log('MediaLibrary MemoList not found, creating it...');
     }
 
-    // Create MediaLibrary folder
+    // Create MediaLibrary as MemoList (required for storing Memo items)
     const response = await repository.post({
       parentPath: '/Root/Content',
-      contentType: 'Folder',
+      contentType: 'MemoList',
       content: {
         DisplayName: 'MediaLibrary',
         Description: 'Global library for storing media items like movies, TV shows, books, comics, etc.'
       }
     });
 
-    console.log('MediaLibrary folder created successfully:', response);
+    console.log('MediaLibrary MemoList created successfully:', response);
   } catch (error) {
     console.error('Error setting up MediaLibrary folder:', error);
-    throw new Error('Failed to setup MediaLibrary folder');
+    throw new Error('Failed to setup MediaLibrary MemoList');
   }
 }
 
