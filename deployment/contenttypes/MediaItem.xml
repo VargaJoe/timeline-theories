@@ -1,0 +1,132 @@
+<ContentType name="MediaItem" parentType="GenericContent" handler="SenseNet.ContentRepository.GenericContent" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
+  <DisplayName>Media Item</DisplayName>
+  <Description>Global library entry for a media item (movie, book, etc.).</Description>
+  <Icon>Content</Icon>
+  <AllowIncrementalNaming>true</AllowIncrementalNaming>
+  <AllowedChildTypes></AllowedChildTypes>
+  <Fields>
+    <Field name="DisplayName" type="ShortText">
+      <DisplayName>Title</DisplayName>
+      <Description>Media title (e.g., The Empire Strikes Back)</Description>
+      <Configuration>
+        <ControlHint>sn:DisplayName</ControlHint>
+      </Configuration>
+    </Field>
+    <Field name="Description" type="LongText">
+      <DisplayName>Description</DisplayName>
+      <Description>Detailed description or synopsis</Description>
+      <Configuration>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+        <ControlHint>sn:RichText</ControlHint>
+      </Configuration>
+    </Field>
+    <Field name="MediaType" type="Choice">
+      <DisplayName>Media Type</DisplayName>
+      <Description>Type of media</Description>
+      <Configuration>
+        <Options>
+          <Option value="movie">Movie</Option>
+          <Option value="tvepisode">TVEpisode</Option>
+          <Option value="tvseries">TVSeries</Option>
+          <Option value="book">Book</Option>
+          <Option value="comic">Comic</Option>
+          <Option value="videogame">VideoGame</Option>
+          <Option value="podcast">Podcast</Option>
+          <Option value="documentary">Documentary</Option>
+          <Option value="other">Other</Option>
+        </Options>
+      </Configuration>
+    </Field>
+    <Field name="ReleaseDate" type="DateTime">
+      <DisplayName>Release Date</DisplayName>
+      <Description>Official release date</Description>
+      <Configuration>
+        <DateTimeMode>DateAndTime</DateTimeMode>
+        <Precision>Second</Precision>
+      </Configuration>
+    </Field>
+    <Field name="ChronologicalDate" type="DateTime">
+      <DisplayName>Chronological Date</DisplayName>
+      <Description>In-universe date (optional)</Description>
+      <Configuration>
+        <DateTimeMode>DateAndTime</DateTimeMode>
+        <Precision>Second</Precision>
+      </Configuration>
+    </Field>
+    <Field name="CoverImageUrl" type="ShortText">
+      <DisplayName>Cover Image URL</DisplayName>
+      <Description>Cover or poster image URL</Description>
+    </Field>
+    <Field name="CoverImageBin" type="Binary">
+      <DisplayName>Cover Image (Binary)</DisplayName>
+      <Description>Binary cover image (optional)</Description>
+      <Configuration>
+        <IsText>false</IsText>
+      </Configuration>
+    </Field>
+    <Field name="Duration" type="Integer">
+      <DisplayName>Duration</DisplayName>
+      <Description>Duration in minutes (optional)</Description>
+      <Configuration>
+        <MinValue>0</MinValue>
+      </Configuration>
+    </Field>
+    <Field name="Genre" type="Choice">
+      <DisplayName>Genre</DisplayName>
+      <Description>Genre of the media</Description>
+      <Configuration>
+        <Options>
+          <Option value="action">Action</Option>
+          <Option value="adventure">Adventure</Option>
+          <Option value="comedy">Comedy</Option>
+          <Option value="drama">Drama</Option>
+          <Option value="fantasy">Fantasy</Option>
+          <Option value="horror">Horror</Option>
+          <Option value="mystery">Mystery</Option>
+          <Option value="romance">Romance</Option>
+          <Option value="scifi">SciFi</Option>
+          <Option value="thriller">Thriller</Option>
+          <Option value="documentary">Documentary</Option>
+          <Option value="other">Other</Option>
+        </Options>
+      </Configuration>
+    </Field>
+    <Field name="Rating" type="Integer">
+      <DisplayName>Rating</DisplayName>
+      <Description>User rating 1-10 (optional)</Description>
+      <Configuration>
+        <MinValue>1</MinValue>
+        <MaxValue>10</MaxValue>
+      </Configuration>
+    </Field>
+    <Field name="ExternalLinks" type="LongText">
+      <DisplayName>External Links</DisplayName>
+      <Description>JSON: {"imdb": "url", "wikipedia": "url"}</Description>
+      <Configuration>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+      </Configuration>
+    </Field>
+    <Field name="Tags" type="LongText">
+      <DisplayName>Tags</DisplayName>
+      <Description>Comma-separated tags</Description>
+      <Configuration>
+        <ReadOnly>false</ReadOnly>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+        <ControlHint>sn:TagList</ControlHint>
+      </Configuration>
+    </Field>
+    <Field name="CreatedBy" type="Reference">
+      <DisplayName>Created By</DisplayName>
+      <Description>User who added it (auto-filled)</Description>
+      <Configuration>
+        <AllowMultiple>false</AllowMultiple>
+      </Configuration>
+    </Field>
+  </Fields>
+</ContentType>

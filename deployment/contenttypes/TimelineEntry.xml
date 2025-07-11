@@ -1,0 +1,93 @@
+<ContentType name="TimelineEntry" parentType="GenericContent" handler="SenseNet.ContentRepository.GenericContent" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
+  <DisplayName>Timeline Entry</DisplayName>
+  <Description>Junction between MediaItem and Timeline with position, notes, and metadata.</Description>
+  <Icon>Content</Icon>
+  <AllowIncrementalNaming>true</AllowIncrementalNaming>
+  <AllowedChildTypes></AllowedChildTypes>
+  <Fields>
+    <Field name="MediaItemId" type="Integer">
+      <DisplayName>Media Item ID</DisplayName>
+      <Description>Reference to MediaItem ID</Description>
+    </Field>
+    <Field name="TimelineId" type="Integer">
+      <DisplayName>Timeline ID</DisplayName>
+      <Description>Reference to Timeline ID</Description>
+    </Field>
+    <Field name="Position" type="Integer">
+      <DisplayName>Position</DisplayName>
+      <Description>Manual sort position</Description>
+      <Configuration>
+        <MinValue>0</MinValue>
+      </Configuration>
+    </Field>
+    <Field name="ChronologicalDate" type="DateTime">
+      <DisplayName>Chronological Date</DisplayName>
+      <Description>In-universe date for chronological sorting</Description>
+      <Configuration>
+        <DateTimeMode>DateAndTime</DateTimeMode>
+        <Precision>Second</Precision>
+      </Configuration>
+    </Field>
+    <Field name="ReleaseOrderPosition" type="Integer">
+      <DisplayName>Release Order Position</DisplayName>
+      <Description>Position in release order</Description>
+      <Configuration>
+        <MinValue>0</MinValue>
+      </Configuration>
+    </Field>
+    <Field name="Notes" type="LongText">
+      <DisplayName>Notes</DisplayName>
+      <Description>Timeline-specific notes</Description>
+      <Configuration>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+        <ControlHint>sn:RichText</ControlHint>
+      </Configuration>
+    </Field>
+    <Field name="EntryLabel" type="Choice">
+      <DisplayName>Entry Label</DisplayName>
+      <Description>Label for entry type</Description>
+      <Configuration>
+        <Options>
+          <Option value="firstappearance">First appearance</Option>
+          <Option value="mainstory">Main story</Option>
+          <Option value="flashback">Flashback</Option>
+          <Option value="cameo">Cameo</Option>
+          <Option value="reference">Reference</Option>
+          <Option value="other">Other</Option>
+        </Options>
+      </Configuration>
+    </Field>
+    <Field name="IsOptional" type="Boolean">
+      <DisplayName>Is Optional</DisplayName>
+      <Description>Mark as optional viewing/reading</Description>
+      <Configuration>
+        <DefaultValue>0</DefaultValue>
+      </Configuration>
+    </Field>
+    <Field name="ArcGroup" type="ShortText">
+      <DisplayName>Arc Group</DisplayName>
+      <Description>Story arc grouping (e.g., Clone Wars, Original Trilogy)</Description>
+    </Field>
+    <Field name="Importance" type="Choice">
+      <DisplayName>Importance</DisplayName>
+      <Description>Importance of entry</Description>
+      <Configuration>
+        <Options>
+          <Option value="essential">Essential</Option>
+          <Option value="important">Important</Option>
+          <Option value="optional">Optional</Option>
+          <Option value="skipok">SkipOk</Option>
+        </Options>
+      </Configuration>
+    </Field>
+    <Field name="CreatedBy" type="Reference">
+      <DisplayName>Created By</DisplayName>
+      <Description>User who added this entry (auto-filled)</Description>
+      <Configuration>
+        <AllowMultiple>false</AllowMultiple>
+      </Configuration>
+    </Field>
+  </Fields>
+</ContentType>
