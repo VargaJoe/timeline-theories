@@ -30,6 +30,8 @@ _No stories completed yet_
     - [x] **Fixed OIDC login button loading issue** - Removed persistent loading state that prevented login button from showing. Login button now appears immediately and is clickable (2025-07-10T22:35)
     - [x] **Fixed logout navigation issue** - Implemented complete local logout to avoid external identity server redirect. Uses manual storage clearing and page refresh instead of OIDC redirect logout (2025-07-10T23:05)
     - [x] **SECURITY CLEANUP COMPLETED** - Removed all sensitive SenseNet OIDC credentials from GitHub by replacing hardcoded values in configuration.ts with environment variables. Created .env.example template and local .env file. Authentication guide updated with secure examples for AI agents (2025-07-10T23:15)
+    - [ ] **LOGOUT TOKEN PERSISTENCE ISSUE** - After implementing logout token clearing fix, app still automatically logs in without re-authentication. Enhanced logout clears all OIDC storage keys and repository tokens, but cached authentication state persists somewhere. Root cause investigation needed for OIDC provider token caching or userManager state persistence (2025-07-10T23:31)
+    - [ ] **IMPLEMENT SNBOOKING LOGOUT SOLUTION** - Found proven IdentityServer logout pattern in SNBooking repository (commit 40c23a5f78). Their working pattern: localStorage.clear() -> logout().then(() => sessionStorage.clear()). This approach clears tokens first, uses official logout flow, then clears session storage. Need to test this proven solution (2025-07-11T10:30)
 
 ---
 

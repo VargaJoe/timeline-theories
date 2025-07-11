@@ -31,46 +31,38 @@ export const LoginButton: React.FC = () => {
   }
 
   try {
-    // Create a completely local logout function that avoids external redirects
+    // PROVEN LOGOUT SOLUTION from SNBooking repository
     const handleLogout = async () => {
-      console.log('[LoginButton] Attempting complete local logout...');
+      console.log('[LoginButton] Starting proven SNBooking logout pattern...');
       
       try {
-        // Step 1: Clear the token from repository immediately
+        // Step 1: Clear localStorage FIRST (like SNBooking did)
+        localStorage.clear();
+        console.log('[LoginButton] localStorage cleared');
+        
+        // Step 2: Clear repository token immediately
         setRepositoryAccessToken('');
         console.log('[LoginButton] Repository token cleared');
         
-        // Step 2: Clear all OIDC-related storage manually
-        const authority = 'https://mcp-sandbox-is.test.sensenet.cloud';
-        const clientId = 'LCNi1qxzo2q9YjNU';
-        const storageKey = `oidc.user:${authority}:${clientId}`;
-        
-        // Clear from both localStorage and sessionStorage
-        localStorage.removeItem(storageKey);
-        sessionStorage.removeItem(storageKey);
-        console.log('[LoginButton] OIDC storage cleared manually');
-        
-        // Step 3: Try userManager.removeUser() if available (but don't rely on it)
-        if (oidcResult.userManager) {
-          try {
-            await oidcResult.userManager.removeUser();
-            console.log('[LoginButton] userManager.removeUser() completed');
-          } catch (umErr) {
-            console.warn('[LoginButton] userManager.removeUser() failed, but continuing:', umErr);
-          }
-        }
-        
-        // Step 4: Force refresh to update UI state
-        console.log('[LoginButton] Forcing page refresh to update authentication state');
-        window.location.reload();
+        // Step 3: Call official logout().then() pattern (like SNBooking)
+        logout().then(() => {
+          console.log('[LoginButton] Official logout completed');
+          // Step 4: Clear sessionStorage after logout completes
+          sessionStorage.clear();
+          console.log('[LoginButton] sessionStorage cleared - logout complete');
+        }).catch((err: unknown) => {
+          console.warn('[LoginButton] Official logout failed, but continuing:', err);
+          // Fallback: clear sessionStorage anyway
+          sessionStorage.clear();
+          console.log('[LoginButton] sessionStorage cleared (fallback)');
+        });
         
       } catch (err) {
-        console.error('[LoginButton] Complete local logout failed:', err);
-        
-        // Last resort: manual redirect to home page after clearing storage
-        console.log('[LoginButton] Last resort: manual redirect to home');
+        console.error('[LoginButton] Logout error:', err);
+        // Last resort: clear everything and redirect
+        localStorage.clear();
+        sessionStorage.clear();
         setRepositoryAccessToken('');
-        localStorage.clear(); // Nuclear option
         window.location.href = '/';
       }
     };

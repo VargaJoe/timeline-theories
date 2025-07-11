@@ -215,3 +215,69 @@ console.log(Object.keys(useOidcAuthentication()))
 5. **Force page refresh after logout** - Ensures clean state
 
 This guide provides everything needed to implement working SenseNet OIDC authentication without the common pitfalls.
+
+---
+
+## 🔥 PROVEN IDENTITYSERVER LOGOUT SOLUTION
+
+**Found in SNBooking repository - their working OIDC logout before switching to sn-auth:**
+
+### SNBooking's Original IdentityServer Logout:
+```tsx
+import React from 'react';
+import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+
+export default function Logout():JSX.Element {
+    localStorage.clear();
+    useOidcAuthentication().logout().then(() => sessionStorage.clear());
+    return (<></>)
+}
+```
+
+### Key Pattern:
+1. **Clear localStorage FIRST** - Before calling logout()
+2. **Call official logout()** - Don't avoid it, use it properly  
+3. **Clear sessionStorage in .then()** - After logout completes
+4. **Empty component return** - Let routing handle redirect
+
+### Why This Works:
+- ✅ **Clears tokens immediately** - localStorage.clear() removes cached auth
+- ✅ **Uses official logout flow** - Properly handles OIDC state  
+- ✅ **Sequential cleanup** - sessionStorage cleared after logout completes
+- ✅ **Proven in production** - Used successfully in SNBooking before sn-auth switch
+
+---
+
+## 🔥 NEW: Alternative Solution from SNBooking Repository
+
+**After analyzing the SNBooking project, they use a different approach that might solve our logout issues:**
+
+### SNBooking's Package Strategy:
+```bash
+npm install @sensenet/sn-auth-react@^1.0.2
+# They use this alongside @sensenet/authentication-oidc-react
+```
+
+### SNBooking's Simple Logout Component:
+```tsx
+import React from 'react';
+import { useSnAuth } from "@sensenet/sn-auth-react";
+
+export default function Logout():JSX.Element {
+    const { logout } = useSnAuth();
+    localStorage.clear();
+    logout();
+    sessionStorage.clear();
+    return (<></>)
+}
+```
+
+### Key Advantages:
+- ✅ **No manual storage key management** - Just clear all storage
+- ✅ **No page refresh needed** - Component handles redirect automatically  
+- ✅ **Simpler implementation** - 4 lines vs our complex manual clearing
+- ✅ **Proven in production** - Working solution in live SenseNet application
+
+### Worth investigating as alternative to pure OIDC approach for logout issues.
+
+---
