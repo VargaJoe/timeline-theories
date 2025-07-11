@@ -8,6 +8,7 @@ import { TimelineViewPage } from './pages/TimelineViewPage';
 import { TimelineListPage } from './pages/TimelineListPage.tsx';
 import MediaLibraryPage from './pages/MediaLibraryPage';
 import MediaItemCreatePage from './pages/MediaItemCreatePage';
+import { MediaItemViewPage } from './pages/MediaItemViewPage';
 import { OidcTokenInjector } from './components/OidcTokenInjector';
 import { setupMediaLibrary } from './scripts/setupMediaLibrary';
 
@@ -43,6 +44,7 @@ function App() {
             <Route path="/timelines" element={<TimelineListPage />} />
             <Route path="/timelines/:id" element={<TimelineViewPage />} />
             <Route path="/media-library" element={<MediaLibraryPage />} />
+            <Route path="/media-library/:id" element={<MediaItemViewPage />} />
             <Route
               path="/media-library/create"
               element={
