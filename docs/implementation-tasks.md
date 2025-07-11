@@ -5,9 +5,21 @@ This document tracks the progress of implementing the TimelineVerse application 
 ## Completed Stories
 - **Story 01 - Create New Timeline** ✅ COMPLETED (2025-07-11)
 
----
-
 ## In Progress Stories
+- **Story 02 - Add Media Entry to Global Library** 🎬 IN PROGRESS (started 2025-07-11T16:00)
+  - [x] Created comprehensive content types specification document
+  - [x] Created feature/media-library branch from completed feature/create-new-timeline
+  - [x] Implemented MediaLibraryService.ts with full CRUD operations for media items
+  - [x] Created MediaItemCreateForm.tsx with professional form validation and UX
+  - [x] Created MediaItemCreatePage.tsx with proper navigation flow
+  - [x] Created MediaLibraryPage.tsx with search, filtering, and grid display
+  - [x] Added Media Library navigation routes to App.tsx
+  - [x] Setup MediaLibrary folder auto-creation script for SenseNet backend
+  - [x] App running on http://localhost:5174/ with new media library routes
+  - [ ] Test media item creation and verify SenseNet integration
+  - [ ] Test media library browsing and search functionality
+  - [ ] Add media item detail view page
+  - [ ] Complete Story 02 requirements validation
 - [x] Technical setup: Downgraded React and types to v17, installed @sensenet/authentication-oidc-react and @material-ui/core@4.12.4 for OIDC authentication (Story 08, Story 01)
 - [x] Attempted OIDC/RepositoryContext integration, but reverted to JWT-based authentication and custom AuthContext due to compatibility and type issues (Story 08, Story 01)
 - [x] Removed all sensenet/JWT logic. Switched to local mock authentication and local timeline creation. App is now backend-agnostic and ready for integration with PostgreSQL or any REST API (Story 08, Story 01)
@@ -75,19 +87,21 @@ This document tracks the progress of implementing the TimelineVerse application 
 - [x] Success feedback and proper navigation flow
 - [x] Complete timeline viewing and listing functionality
 
-### Story 02 - Add Media Entry to Global Library (Priority: High)
+### Story 02 - Add Media Entry to Global Library (Priority: High) 🎬 IN PROGRESS
 **Dependencies**: Story 08 (User authentication)
-- [ ] Design media_item database schema
-- [ ] Create media_item data model
-- [ ] Design media entry form UI
-- [ ] Implement media type selection
-- [ ] Add cover image upload/URL functionality
-- [ ] Create external links input system
-- [ ] Add description/notes field
-- [ ] Implement media item save functionality
-- [ ] Add media item validation
-- [ ] Create media library view
+- [x] Design media_item database schema
+- [x] Create media_item data model 
+- [x] Design media entry form UI
+- [x] Implement media type selection
+- [x] Add cover image upload/URL functionality
+- [x] Create external links input system
+- [x] Add description/notes field
+- [x] Implement media item save functionality
+- [x] Add media item validation
+- [x] Create media library view
 - [ ] Test media item creation
+- [ ] Add media item detail view page
+- [ ] Complete end-to-end testing
 
 ### Story 03 - Add Existing Media Entry to Timeline (Priority: High)
 **Dependencies**: Story 01, Story 02
