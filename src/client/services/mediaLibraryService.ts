@@ -118,14 +118,13 @@ export class MediaLibraryService {
     try {
       console.log('Fetching media items from:', this.MEDIA_LIBRARY_PATH);
 
-      const response = await repository.executeAction({
-        name: 'GetChildren',
-        idOrPath: this.MEDIA_LIBRARY_PATH,
+      const response = await repository.loadCollection({
+        path: this.MEDIA_LIBRARY_PATH,
         oDataOptions: {
+          query: 'TypeIs:Memo',
           select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy'],
-          filter: "TypeIs:'Memo'",
-          orderby: [['CreationDate', 'desc']]
+          orderby: ['CreationDate desc']
         }
       });
 
