@@ -63,7 +63,7 @@ export interface CreateMediaItemRequest {
  * Uses SenseNet Memo content type for storage under /Root/Content/MediaLibrary/
  */
 export class MediaLibraryService {
-  private static readonly MEDIA_LIBRARY_PATH = '/Root/Content/MediaLibrary';
+  private static readonly MEDIA_LIBRARY_PATH = '/Root/Content/timelines/MediaLibrary';
 
   /**
    * Creates a new media item in the global library

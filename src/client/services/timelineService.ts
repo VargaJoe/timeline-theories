@@ -11,9 +11,9 @@ export interface Timeline {
 
 export async function createTimeline(data: { name: string; description?: string; sortOrder?: string }): Promise<Timeline> {
   try {
-    // Create a Memo content under /Root/Content/SampleTimelines using the correct repository.post method
+    // Create a Memo content under /Root/Content/timelines/Timelines using the correct repository.post method
     const result = await repository.post({
-      parentPath: '/Root/Content/SampleTimelines',
+      parentPath: '/Root/Content/timelines/Timelines',
       contentType: 'Memo',
       oDataOptions: {
         select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
@@ -41,9 +41,9 @@ export async function createTimeline(data: { name: string; description?: string;
 
 export async function getTimelines(): Promise<Timeline[]> {
   try {
-    // List Memo contents under /Root/Content/SampleTimelines using sn-client loadCollection
+    // List Memo contents under /Root/Content/timelines/Timelines using sn-client loadCollection
     const result = await repository.loadCollection({
-      path: '/Root/Content/SampleTimelines',
+      path: '/Root/Content/timelines/Timelines',
       oDataOptions: {
         query: 'TypeIs:Memo',
         select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
