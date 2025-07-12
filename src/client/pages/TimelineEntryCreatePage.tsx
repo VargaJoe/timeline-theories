@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MediaLibrarySelector } from '../components/MediaLibrarySelector';
 import { TimelineEntryService } from '../services/timelineEntryService';
+import { timelinesPath } from '../projectPaths';
 
 export default function TimelineEntryCreatePage() {
   const { timelineId } = useParams<{ timelineId: string }>();
@@ -21,6 +22,8 @@ export default function TimelineEntryCreatePage() {
     setSaving(true);
     setError('');
     try {
+      // TimelineEntry should be created under the selected timeline's path
+      const parentPath = `${timelinesPath}/${timelineId}`;
       await TimelineEntryService.createTimelineEntry({
         mediaItemId: selectedMedia.Id,
         timelineId: Number(timelineId),
@@ -28,7 +31,7 @@ export default function TimelineEntryCreatePage() {
         notes,
         entryLabel,
         importance,
-      });
+      }, parentPath);
       navigate(`/timelines/${timelineId}`);
     } catch (e) {
       setError('Failed to create timeline entry.');
