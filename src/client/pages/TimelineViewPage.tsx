@@ -6,6 +6,7 @@ import { TimelineEntryService } from '../services/timelineEntryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
 import { MediaLibraryService } from '../services/mediaLibraryService';
 import type { MediaItem } from '../services/mediaLibraryService';
+import { timelinesPath } from '../projectPaths';
 
 export const TimelineViewPage: React.FC = () => {
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
@@ -39,7 +40,9 @@ export const TimelineViewPage: React.FC = () => {
         });
         // Load timeline entries and media items
         setEntriesLoading(true);
-        const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id));
+        const timelineId = result.d.Id;
+        const parentPath = result.d.Path;
+        const entries = await TimelineEntryService.listTimelineEntries(Number(timelineId), parentPath);
         setEntries(entries);
         // Load all referenced media items
         const mediaIds = Array.from(new Set(entries.map(e => e.mediaItemId)));
@@ -134,7 +137,18 @@ export const TimelineViewPage: React.FC = () => {
               {entries.map((entry) => (
                 <tr key={entry.id} style={{ borderBottom: '1px solid #e9ecef' }}>
                   <td style={{ padding: 8 }}>{entry.position}</td>
-                  <td style={{ padding: 8 }}>{mediaMap[entry.mediaItemId]?.DisplayName || entry.mediaItemId}</td>
+                  <td style={{ padding: 8 }}>
+                    {(() => {
+                      const media = mediaMap[entry.mediaItemId as number] || entry.mediaItemId;
+                      if (typeof media === 'object' && media && 'DisplayName' in media) {
+                        return media.DisplayName;
+                      }
+                      if (typeof media === 'object' && media && 'Id' in media) {
+                        return `Media #${media.Id}`;
+                      }
+                      return String(media);
+                    })()}
+                  </td>
                   <td style={{ padding: 8 }}>{entry.notes || ''}</td>
                   <td style={{ padding: 8 }}>{entry.entryLabel || ''}</td>
                   <td style={{ padding: 8 }}>{entry.importance || ''}</td>
