@@ -1,5 +1,7 @@
 // src/client/services/mediaLibraryService.ts
 import { repository } from './sensenet';
+import { mediaLibraryPath } from '../projectPaths';
+import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
 
 export interface MediaItem {
   Id: number;
@@ -42,6 +44,16 @@ interface SenseNetContent {
   CreatedBy?: {
     DisplayName: string;
   };
+  // MediaItem fields (optional for type safety)
+  MediaType?: string;
+  ReleaseDate?: string;
+  ChronologicalDate?: string;
+  CoverImageUrl?: string;
+  Duration?: number;
+  Genre?: string;
+  Rating?: number;
+  ExternalLinks?: string;
+  Tags?: string;
 }
 
 export interface CreateMediaItemRequest {
@@ -63,7 +75,7 @@ export interface CreateMediaItemRequest {
  * Uses SenseNet Memo content type for storage under /Root/Content/MediaLibrary/
  */
 export class MediaLibraryService {
-  private static readonly MEDIA_LIBRARY_PATH = '/Root/Content/timelines/MediaLibrary';
+  private static readonly MEDIA_LIBRARY_PATH = mediaLibraryPath;
 
   /**
    * Creates a new media item in the global library
@@ -77,9 +89,48 @@ export class MediaLibraryService {
         (typeof data.ExternalLinks === 'string' ? data.ExternalLinks : JSON.stringify(data.ExternalLinks)) 
         : undefined;
 
+
+      // Helper to ensure ISO 8601 format for date fields
+      function toIsoDateString(date?: string): string | undefined {
+        if (!date) return undefined;
+        if (date.includes('T')) return date;
+        return `${date}T00:00:00Z`;
+      }
+
+      // Allowed values for MediaType and Genre
+      const allowedMediaTypes = [
+        'movie', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
+      ];
+      const allowedGenres = [
+        'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
+      ];
+
+      // Map MediaType and Genre to allowed lowercase values
+      function mapToAllowedValue(value: string | undefined, allowed: string[]): string | undefined {
+        if (!value) return undefined;
+        const lower = value.toLowerCase();
+        // Accept both display and value forms (e.g. 'SciFi' or 'scifi')
+        if (allowed.includes(lower)) return lower;
+        // Try to match ignoring case and non-alphanumerics
+        const found = allowed.find(opt => opt.toLowerCase() === lower.replace(/[^a-z0-9]/gi, ''));
+        return found || undefined;
+      }
+
+      const mappedMediaType = mapToAllowedValue(data.MediaType, allowedMediaTypes);
+      const mappedGenre = mapToAllowedValue(data.Genre, allowedGenres);
+
+      // Validate rating
+      let safeRating: number | undefined = undefined;
+      if (typeof data.Rating === 'number' && data.Rating >= 1 && data.Rating <= 10) {
+        safeRating = Math.round(data.Rating);
+      }
+
+      const releaseDateIso = toIsoDateString(data.ReleaseDate);
+      const chronologicalDateIso = toIsoDateString(data.ChronologicalDate);
+
       const response = await repository.post({
         parentPath: this.MEDIA_LIBRARY_PATH,
-        contentType: 'Memo',
+        contentType: MEDIA_ITEM_CONTENT_TYPE,
         oDataOptions: {
           select: ['Id', 'DisplayName', 'Description', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
@@ -87,19 +138,15 @@ export class MediaLibraryService {
         content: {
           DisplayName: data.DisplayName,
           Description: data.Description,
-          // Store media-specific data in Description field as structured text
-          // Until we can create custom MediaItem content type
-          SortOrder: JSON.stringify({
-            MediaType: data.MediaType,
-            ReleaseDate: data.ReleaseDate,
-            ChronologicalDate: data.ChronologicalDate,
-            CoverImageUrl: data.CoverImageUrl,
-            Duration: data.Duration,
-            Genre: data.Genre,
-            Rating: data.Rating,
-            ExternalLinks: externalLinksJson,
-            Tags: data.Tags
-          })
+          MediaType: mappedMediaType,
+          ReleaseDate: releaseDateIso,
+          ChronologicalDate: chronologicalDateIso,
+          CoverImageUrl: data.CoverImageUrl,
+          Duration: data.Duration,
+          Genre: mappedGenre,
+          Rating: safeRating,
+          ExternalLinks: externalLinksJson,
+          Tags: data.Tags
         }
       });
 
@@ -121,8 +168,8 @@ export class MediaLibraryService {
       const response = await repository.loadCollection({
         path: this.MEDIA_LIBRARY_PATH,
         oDataOptions: {
-          query: 'TypeIs:Memo',
-          select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CreatedBy/DisplayName'],
+          query: `TypeIs:${MEDIA_ITEM_CONTENT_TYPE}`,
+          select: ['Id', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy'],
           orderby: ['CreationDate desc']
         }
@@ -146,7 +193,7 @@ export class MediaLibraryService {
       const response = await repository.load({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         }
       });
@@ -231,7 +278,7 @@ export class MediaLibraryService {
     try {
       console.log('Searching media items:', { query, mediaType, genre });
 
-      let filter = "TypeIs:'Memo'";
+      let filter = `TypeIs:'${MEDIA_ITEM_CONTENT_TYPE}'`;
       
       if (query) {
         filter += ` and (substringof('${query}', DisplayName) or substringof('${query}', Description))`;
@@ -272,21 +319,19 @@ export class MediaLibraryService {
    * Maps SenseNet Memo content to MediaItem interface
    */
   private static mapMemoToMediaItem(memo: SenseNetContent): MediaItem {
-    const metadata = this.parseMediaMetadata(memo.SortOrder || '{}');
-    
     return {
       Id: memo.Id,
       DisplayName: memo.DisplayName,
       Description: memo.Description,
-      MediaType: metadata.MediaType || 'Other',
-      ReleaseDate: metadata.ReleaseDate,
-      ChronologicalDate: metadata.ChronologicalDate,
-      CoverImageUrl: metadata.CoverImageUrl,
-      Duration: metadata.Duration,
-      Genre: metadata.Genre,
-      Rating: metadata.Rating,
-      ExternalLinks: metadata.ExternalLinks,
-      Tags: metadata.Tags,
+      MediaType: memo.MediaType || 'Other',
+      ReleaseDate: memo.ReleaseDate,
+      ChronologicalDate: memo.ChronologicalDate,
+      CoverImageUrl: memo.CoverImageUrl,
+      Duration: memo.Duration,
+      Genre: memo.Genre,
+      Rating: memo.Rating,
+      ExternalLinks: memo.ExternalLinks,
+      Tags: memo.Tags,
       CreationDate: memo.CreationDate,
       CreatedBy: memo.CreatedBy || { DisplayName: 'Unknown' },
       SortOrder: memo.SortOrder // Keep original for updates

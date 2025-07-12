@@ -1,4 +1,6 @@
 import { repository } from './sensenet';
+import { timelinesPath } from '../projectPaths';
+import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 
 // Timeline service for frontend API calls
 export interface Timeline {
@@ -11,10 +13,10 @@ export interface Timeline {
 
 export async function createTimeline(data: { name: string; description?: string; sortOrder?: string }): Promise<Timeline> {
   try {
-    // Create a Memo content under /Root/Content/timelines/Timelines using the correct repository.post method
+    // Create a Timeline content under the configured path
     const result = await repository.post({
-      parentPath: '/Root/Content/timelines/Timelines',
-      contentType: 'Memo',
+      parentPath: timelinesPath,
+      contentType: TIMELINE_CONTENT_TYPE,
       oDataOptions: {
         select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
       },
@@ -41,11 +43,11 @@ export async function createTimeline(data: { name: string; description?: string;
 
 export async function getTimelines(): Promise<Timeline[]> {
   try {
-    // List Memo contents under /Root/Content/timelines/Timelines using sn-client loadCollection
+    // List Timeline contents under the configured path
     const result = await repository.loadCollection({
-      path: '/Root/Content/timelines/Timelines',
+      path: timelinesPath,
       oDataOptions: {
-        query: 'TypeIs:Memo',
+        query: `TypeIs:${TIMELINE_CONTENT_TYPE}`,
         select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
         orderby: ['DisplayName'],
       },

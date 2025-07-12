@@ -20,6 +20,16 @@ This document tracks the progress of implementing the TimelineVerse application 
 - [x] Complete timeline viewing and listing functionality
 
 ### Story 02 - Add Media Entry to Global Library (Priority: High) ✅ COMPLETED (2025-01-22)
+### Story 03 - Add Existing Media Entry to Timeline (Priority: High) ✅ COMPLETED (2025-01-22)
+**Dependencies**: Story 01, Story 02
+- [x] Design TimelineEntry content type schema (SenseNet XML)
+- [x] Implement TimelineEntry data model and service (TypeScript)
+- [x] Create TimelineEntries folder in repository
+- [x] Implement TimelineEntry creation UI and integration
+- [x] Query and validate allowed values for Choice fields (EntryLabel, Importance)
+- [x] Create valid TimelineEntry sample contents in repository
+- [x] Confirm end-to-end flow from frontend to repository
+- [x] Document and update project memory with repository structure and allowed values
 **Dependencies**: Story 08 (User authentication)
 - [x] Design media_item database schema (SenseNet Memo content type)
 - [x] Create media_item data model (MediaItem interface)
@@ -50,7 +60,8 @@ This document tracks the progress of implementing the TimelineVerse application 
 - [ ] Implement position assignment logic
 - [ ] Add timeline-specific notes field
 - [ ] Create timeline entry save functionality
-- [ ] Update timeline view to show entries
+- [x] Update timeline view to show entries
+    - [x] Mark timeline entries with broken (missing) media item references in the app (shows 'Missing Media' indicator and warning styling)
 - [ ] Test media addition to timeline
 
 ---

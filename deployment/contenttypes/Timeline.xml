@@ -1,0 +1,97 @@
+<ContentType name="Timeline" parentType="Folder" handler="SenseNet.ContentRepository.Folder" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
+  <DisplayName>Timeline</DisplayName>
+  <Description>Container for timeline metadata and properties.</Description>
+  <Icon>Content</Icon>
+  <AllowIncrementalNaming>true</AllowIncrementalNaming>
+  <AllowedChildTypes>TimelineEntry</AllowedChildTypes>
+  <Fields>
+    <Field name="DisplayName" type="ShortText">
+      <DisplayName>Title</DisplayName>
+      <Description>Timeline title</Description>
+      <Configuration>
+        <ControlHint>sn:DisplayName</ControlHint>
+      </Configuration>
+    </Field>
+    <Field name="Description" type="LongText">
+      <DisplayName>Description</DisplayName>
+      <Description>Timeline description</Description>
+      <Indexing>
+        <Analyzer>Standard</Analyzer>
+      </Indexing>
+      <Configuration>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+        <ControlHint>sn:RichText</ControlHint>
+      </Configuration>
+    </Field>
+    <Field name="SortOrder" type="Choice">
+      <DisplayName>Sort Order</DisplayName>
+      <Description>Timeline sorting method</Description>
+      <Configuration>
+        <Options>
+          <Option selected="true" value="chronological">Chronological</Option>
+          <Option value="release">Release</Option>
+        </Options>
+      </Configuration>
+    </Field>
+    <Field name="IsPublic" type="Boolean">
+      <DisplayName>Is Public</DisplayName>
+      <Description>Public sharing (default: false)</Description>
+      <Configuration>
+        <DefaultValue>0</DefaultValue>
+      </Configuration>
+    </Field>
+    <Field name="Category" type="Choice">
+      <DisplayName>Category</DisplayName>
+      <Description>Timeline category</Description>
+      <Configuration>
+        <Options>
+          <Option value="scifi">SciFi</Option>
+          <Option value="fantasy">Fantasy</Option>
+          <Option value="historical">Historical</Option>
+          <Option value="horror">Horror</Option>
+          <Option value="action">Action</Option>
+          <Option value="drama">Drama</Option>
+          <Option value="comedy">Comedy</Option>
+          <Option value="documentary">Documentary</Option>
+          <Option value="other">Other</Option>
+        </Options>
+      </Configuration>
+    </Field>
+    <Field name="CoverImageUrl" type="ShortText">
+      <DisplayName>Cover Image URL</DisplayName>
+      <Description>Cover image URL</Description>
+    </Field>
+    <Field name="CoverImageBin" type="Binary">
+      <DisplayName>Cover Image (Binary)</DisplayName>
+      <Description>Binary cover image (optional)</Description>
+    </Field>
+    <Field name="Tags" type="LongText">
+      <DisplayName>Tags</DisplayName>
+      <Description>Comma-separated tags</Description>
+      <Indexing>
+        <IndexHandler>SenseNet.Search.Indexing.TagIndexHandler</IndexHandler>
+      </Indexing>
+      <Configuration>
+        <ReadOnly>false</ReadOnly>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+        <ControlHint>sn:TagList</ControlHint>
+      </Configuration>
+    </Field>
+    <Field name="ViewCount" type="Integer">
+      <DisplayName>View Count</DisplayName>
+      <Description>View statistics (default: 0)</Description>
+    </Field>
+    <Field name="LikeCount" type="Integer">
+      <DisplayName>Like Count</DisplayName>
+      <Description>Like count (default: 0)</Description>
+    </Field>
+    <Field name="CreatedBy" type="Reference">
+      <DisplayName>Created By</DisplayName>
+      <Description>User who created it (auto-filled)</Description>
+    </Field>
+  </Fields>
+</ContentType>
