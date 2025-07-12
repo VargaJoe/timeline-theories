@@ -60,7 +60,8 @@ This document tracks the progress of implementing the TimelineVerse application 
 - [ ] Implement position assignment logic
 - [ ] Add timeline-specific notes field
 - [ ] Create timeline entry save functionality
-- [ ] Update timeline view to show entries
+- [x] Update timeline view to show entries
+    - [x] Mark timeline entries with broken (missing) media item references in the app (shows 'Missing Media' indicator and warning styling)
 - [ ] Test media addition to timeline
 
 ---

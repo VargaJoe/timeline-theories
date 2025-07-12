@@ -129,13 +129,22 @@ export const TimelineViewPage: React.FC = () => {
             <tbody>
               {entries.map((entry) => {
                 const media = entry.mediaItem;
+                const isBroken = !media || !media.Id;
+                // const displayName = isBroken ? 'Missing Media' : (entry?.displayName || 'Unknown');
                 const displayName = entry?.displayName || 'Unknown';
-                const coverUrl = media?.CoverImageUrl || '';
+                const coverUrl = !isBroken ? (media?.CoverImageUrl || '') : '';
                 return (
-                  <tr key={entry.id} style={{ borderBottom: '1px solid #e9ecef' }}>
+                  <tr
+                    key={entry.id}
+                    style={{ borderBottom: '1px solid #e9ecef', background: isBroken ? '#fff3cd' : undefined }}
+                  >
                     <td style={{ padding: 8 }}>{entry.position}</td>
                     <td style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {coverUrl ? (
+                      {isBroken ? (
+                        <div style={{ width: 48, height: 72, background: '#f8d7da', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#721c24', fontWeight: 600, fontSize: 12, border: '1px solid #f5c6cb' }}>
+                          !
+                        </div>
+                      ) : coverUrl ? (
                         <img
                           src={coverUrl}
                           alt={displayName}
@@ -145,7 +154,11 @@ export const TimelineViewPage: React.FC = () => {
                         <div style={{ width: 48, height: 72, background: '#ddd', borderRadius: 4 }} />
                       )}
                     </td>
-                    <td style={{ padding: 8 }}><span style={{ fontWeight: 500 }}>{displayName}</span></td>
+                    <td style={{ padding: 8 }}>
+                      <span style={{ fontWeight: 500, color: isBroken ? '#b94a48' : undefined }}>
+                        {displayName}
+                      </span>
+                    </td>
                     <td style={{ padding: 8 }}>{entry.notes || ''}</td>
                   </tr>
                 );
