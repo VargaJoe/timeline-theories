@@ -89,6 +89,45 @@ export class MediaLibraryService {
         (typeof data.ExternalLinks === 'string' ? data.ExternalLinks : JSON.stringify(data.ExternalLinks)) 
         : undefined;
 
+
+      // Helper to ensure ISO 8601 format for date fields
+      function toIsoDateString(date?: string): string | undefined {
+        if (!date) return undefined;
+        if (date.includes('T')) return date;
+        return `${date}T00:00:00Z`;
+      }
+
+      // Allowed values for MediaType and Genre
+      const allowedMediaTypes = [
+        'movie', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
+      ];
+      const allowedGenres = [
+        'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
+      ];
+
+      // Map MediaType and Genre to allowed lowercase values
+      function mapToAllowedValue(value: string | undefined, allowed: string[]): string | undefined {
+        if (!value) return undefined;
+        const lower = value.toLowerCase();
+        // Accept both display and value forms (e.g. 'SciFi' or 'scifi')
+        if (allowed.includes(lower)) return lower;
+        // Try to match ignoring case and non-alphanumerics
+        const found = allowed.find(opt => opt.toLowerCase() === lower.replace(/[^a-z0-9]/gi, ''));
+        return found || undefined;
+      }
+
+      const mappedMediaType = mapToAllowedValue(data.MediaType, allowedMediaTypes);
+      const mappedGenre = mapToAllowedValue(data.Genre, allowedGenres);
+
+      // Validate rating
+      let safeRating: number | undefined = undefined;
+      if (typeof data.Rating === 'number' && data.Rating >= 1 && data.Rating <= 10) {
+        safeRating = Math.round(data.Rating);
+      }
+
+      const releaseDateIso = toIsoDateString(data.ReleaseDate);
+      const chronologicalDateIso = toIsoDateString(data.ChronologicalDate);
+
       const response = await repository.post({
         parentPath: this.MEDIA_LIBRARY_PATH,
         contentType: MEDIA_ITEM_CONTENT_TYPE,
@@ -99,13 +138,13 @@ export class MediaLibraryService {
         content: {
           DisplayName: data.DisplayName,
           Description: data.Description,
-          MediaType: data.MediaType,
-          ReleaseDate: data.ReleaseDate,
-          ChronologicalDate: data.ChronologicalDate,
+          MediaType: mappedMediaType,
+          ReleaseDate: releaseDateIso,
+          ChronologicalDate: chronologicalDateIso,
           CoverImageUrl: data.CoverImageUrl,
           Duration: data.Duration,
-          Genre: data.Genre,
-          Rating: data.Rating,
+          Genre: mappedGenre,
+          Rating: safeRating,
           ExternalLinks: externalLinksJson,
           Tags: data.Tags
         }
