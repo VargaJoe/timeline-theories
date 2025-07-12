@@ -2,9 +2,8 @@
   "name": "timeline-theories",
   "version": "1.0.0",
   "scripts": {
-    "dev:client": "cd src/client && npm run dev",
-    "build:client": "cd src/client && npm run build",
-    "start:backend": "cd backend && npm start"
+    "dev": "cd client && npm run dev",
+    "build": "cd client && npm run build"
   },
   "dependencies": {
     "@sensenet/authentication-oidc-react": "^2.3.1",

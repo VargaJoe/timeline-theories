@@ -1,1 +1,0 @@
-// Original Vite demo app, moved for cleanup
