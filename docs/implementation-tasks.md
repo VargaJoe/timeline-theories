@@ -1,4 +1,11 @@
+
 # Implementation Tasks
+### Story 06 - Organize Timeline Entries (Priority: High) ⏳ IN PROGRESS (2025-07-12)
+- [x] Add reorder mode toggle and drag-and-drop support to TimelineViewPage.tsx using react-beautiful-dnd
+- [x] Implement reorder mode UI and save logic (Save Order button, drag-and-drop rows)
+- [x] Add TimelineEntryService.updateEntryPositions for bulk position update
+- [x] Resolve all type and lint errors for new feature
+- [x] Track feature on branch: feature/timeline-entries-reorder
 
 This document tracks the progress of implementing the TimelineVerse application features. Tasks are organized by story and marked with checkboxes for completion tracking.
 
@@ -52,7 +59,7 @@ This document tracks the progress of implementing the TimelineVerse application 
 ## In Progress Stories
 ### Story 03 - Add Existing Media Entry to Timeline (Priority: High)
 **Dependencies**: Story 01, Story 02
-- [ ] Design timeline_entry database schema
+- [ ] Design timeline_entry database schema - sensenet cpntent type schemas
 - [ ] Create timeline_entry data model
 - [ ] Implement media search functionality
 - [ ] Create media library browser UI
@@ -85,7 +92,7 @@ This document tracks the progress of implementing the TimelineVerse application 
 
 ### Story 06 - Organize Timeline Entries (Priority: High)
 **Dependencies**: Story 03
-- [ ] Research and select drag-and-drop library
+- [x] Research and select drag-and-drop library (dnd-kit selected)
 - [ ] Implement drag-and-drop functionality
 - [ ] Add position field management
 - [ ] Create manual position numbering

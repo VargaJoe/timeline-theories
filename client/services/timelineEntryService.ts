@@ -96,5 +96,17 @@ export class TimelineEntryService {
     };
   }
 
-  // Add more methods as needed (get, update, delete, list)
+  // Bulk update entry positions
+  static async updateEntryPositions(entries: TimelineEntry[]): Promise<void> {
+    // For each entry, update its Position field
+    // (Could be optimized with batch API if available)
+    await Promise.all(
+      entries.map((entry, idx) =>
+        repository.patch({
+          idOrPath: Number(entry.id),
+          content: { Position: idx + 1 },
+        })
+      )
+    );
+  }
 }
