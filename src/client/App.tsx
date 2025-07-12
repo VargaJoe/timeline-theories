@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
 import { LoginButton } from './components/LoginButton';
 import { AuthenticatedContent } from './components/AuthenticatedContent';
+
 import { TimelineCreatePage } from './pages/TimelineCreatePage';
 import { TimelineViewPage } from './pages/TimelineViewPage';
 import { TimelineListPage } from './pages/TimelineListPage.tsx';
@@ -11,6 +12,7 @@ import MediaItemCreatePage from './pages/MediaItemCreatePage';
 import { MediaItemViewPage } from './pages/MediaItemViewPage';
 import { OidcTokenInjector } from './components/OidcTokenInjector';
 import { setupMediaLibrary } from './scripts/setupMediaLibrary';
+import TimelineEntryCreatePage from './pages/TimelineEntryCreatePage';
 
 function App() {
   useEffect(() => {
@@ -61,6 +63,7 @@ function App() {
                 </AuthenticatedContent>
               }
             />
+            <Route path="/timelines/:timelineId/add-entry" element={<TimelineEntryCreatePage />} />
             <Route path="*" element={<Navigate to="/timelines" />} />
           </Routes>
         </div>

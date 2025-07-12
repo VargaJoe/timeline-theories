@@ -1,9 +1,9 @@
-<ContentType name="Timeline" parentType="GenericContent" handler="SenseNet.ContentRepository.GenericContent" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
+<ContentType name="Timeline" parentType="Folder" handler="SenseNet.ContentRepository.Folder" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
   <DisplayName>Timeline</DisplayName>
   <Description>Container for timeline metadata and properties.</Description>
   <Icon>Content</Icon>
   <AllowIncrementalNaming>true</AllowIncrementalNaming>
-  <AllowedChildTypes></AllowedChildTypes>
+  <AllowedChildTypes>TimelineEntry</AllowedChildTypes>
   <Fields>
     <Field name="DisplayName" type="ShortText">
       <DisplayName>Title</DisplayName>

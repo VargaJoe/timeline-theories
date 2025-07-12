@@ -5,13 +5,15 @@
   <AllowIncrementalNaming>true</AllowIncrementalNaming>
   <AllowedChildTypes></AllowedChildTypes>
   <Fields>
-    <Field name="MediaItemId" type="Integer">
-      <DisplayName>Media Item ID</DisplayName>
-      <Description>Reference to MediaItem ID</Description>
-    </Field>
-    <Field name="TimelineId" type="Integer">
-      <DisplayName>Timeline ID</DisplayName>
-      <Description>Reference to Timeline ID</Description>
+    <Field name="MediaItem" type="Reference">
+      <DisplayName>Media Item</DisplayName>
+      <Description>Reference to a MediaItem node</Description>
+      <Configuration>
+        <AllowMultiple>false</AllowMultiple>
+        <AllowedTypes>
+          <AllowedType>MediaItem</AllowedType>
+        </AllowedTypes>
+      </Configuration>
     </Field>
     <Field name="Position" type="Integer">
       <DisplayName>Position</DisplayName>
