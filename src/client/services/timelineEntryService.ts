@@ -1,10 +1,17 @@
 import { repository } from './sensenet';
 import { TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 
-// TimelineEntry interface matching the SenseNet content type
+// Minimal MediaItem reference type for expanded reference
+export interface MediaItemRef {
+  Id: number;
+  DisplayName?: string;
+  CoverImageUrl?: string;
+}
+
 export interface TimelineEntry {
   id: string;
-  mediaItemId: number;
+  displayName: string;
+  mediaItem: MediaItemRef | null;
   timelineId: number;
   position: number;
   chronologicalDate?: string;
@@ -27,6 +34,7 @@ export class TimelineEntryService {
         query: `TypeIs:TimelineEntry`,
         select: [
           'Id',
+          'DisplayName',
           'MediaItem',
           'Position',
           'ChronologicalDate',
@@ -38,12 +46,14 @@ export class TimelineEntryService {
           'Importance',
           'CreatedBy',
         ],
+        expand: ['MediaItem'], // Expand the MediaItem reference
         orderby: ['Position'],
       },
     });
     return result.d.results.map((item: Record<string, unknown>) => ({
       id: String(item.Id),
-      mediaItemId: item.MediaItem, // Reference field
+      displayName: item.DisplayName as string,
+      mediaItem: item.MediaItem || null, // Expanded MediaItem object or null
       timelineId,
       position: item.Position,
       chronologicalDate: item.ChronologicalDate,
@@ -68,7 +78,7 @@ export class TimelineEntryService {
       parentPath,
       contentType: TIMELINE_ENTRY_CONTENT_TYPE,
       content: {
-        MediaItem: data.mediaItemId, // Reference field
+        MediaItem: data.mediaItem?.Id, // Reference field (id)
         Position: data.position,
         ChronologicalDate: data.chronologicalDate,
         ReleaseOrderPosition: data.releaseOrderPosition,

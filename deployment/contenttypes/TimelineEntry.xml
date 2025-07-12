@@ -11,8 +11,11 @@
       <Configuration>
         <AllowMultiple>false</AllowMultiple>
         <AllowedTypes>
-          <AllowedType>MediaItem</AllowedType>
+          <Type>MediaItem</Type>
         </AllowedTypes>
+        <SelectionRoot>
+          <Path>/Root/Content/timelines/MediaLibrary</Path>
+        </SelectionRoot>
       </Configuration>
     </Field>
     <Field name="Position" type="Integer">

@@ -4,13 +4,12 @@ import type { Timeline } from '../services/timelineService';
 import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
-import { MediaLibraryService } from '../services/mediaLibraryService';
-import type { MediaItem } from '../services/mediaLibraryService';
-import { timelinesPath } from '../projectPaths';
+// import { MediaLibraryService } from '../services/mediaLibraryService';
+// import type { MediaItem } from '../services/mediaLibraryService';
 
 export const TimelineViewPage: React.FC = () => {
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
-  const [mediaMap, setMediaMap] = useState<Record<number, MediaItem>>({});
+  // const [mediaMap, setMediaMap] = useState<Record<number, MediaItem>>({});
   const [entriesLoading, setEntriesLoading] = useState(true);
   const { id } = useParams();
   const [timeline, setTimeline] = useState<Timeline | null>(null);
@@ -44,12 +43,7 @@ export const TimelineViewPage: React.FC = () => {
         const parentPath = result.d.Path;
         const entries = await TimelineEntryService.listTimelineEntries(Number(timelineId), parentPath);
         setEntries(entries);
-        // Load all referenced media items
-        const mediaIds = Array.from(new Set(entries.map(e => e.mediaItemId)));
-        const allMedia = await MediaLibraryService.getMediaItems();
-        const mediaMap: Record<number, MediaItem> = {};
-        allMedia.forEach(m => { if (mediaIds.includes(m.Id)) mediaMap[m.Id] = m; });
-        setMediaMap(mediaMap);
+        // No need to load media items separately; entries have expanded mediaItem
         setEntriesLoading(false);
       } catch (err) {
         console.error('Failed to load timeline:', err);
@@ -128,32 +122,34 @@ export const TimelineViewPage: React.FC = () => {
               <tr style={{ background: '#e9ecef' }}>
                 <th style={{ padding: 8, textAlign: 'left' }}>#</th>
                 <th style={{ padding: 8, textAlign: 'left' }}>Media</th>
+                <th style={{ padding: 8, textAlign: 'left' }}>Title</th>
                 <th style={{ padding: 8, textAlign: 'left' }}>Notes</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Label</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Importance</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.id} style={{ borderBottom: '1px solid #e9ecef' }}>
-                  <td style={{ padding: 8 }}>{entry.position}</td>
-                  <td style={{ padding: 8 }}>
-                    {(() => {
-                      const media = mediaMap[entry.mediaItemId as number] || entry.mediaItemId;
-                      if (typeof media === 'object' && media && 'DisplayName' in media) {
-                        return media.DisplayName;
-                      }
-                      if (typeof media === 'object' && media && 'Id' in media) {
-                        return `Media #${media.Id}`;
-                      }
-                      return String(media);
-                    })()}
-                  </td>
-                  <td style={{ padding: 8 }}>{entry.notes || ''}</td>
-                  <td style={{ padding: 8 }}>{entry.entryLabel || ''}</td>
-                  <td style={{ padding: 8 }}>{entry.importance || ''}</td>
-                </tr>
-              ))}
+              {entries.map((entry) => {
+                const media = entry.mediaItem;
+                const displayName = entry?.displayName || 'Unknown';
+                const coverUrl = media?.CoverImageUrl || '';
+                return (
+                  <tr key={entry.id} style={{ borderBottom: '1px solid #e9ecef' }}>
+                    <td style={{ padding: 8 }}>{entry.position}</td>
+                    <td style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                      {coverUrl ? (
+                        <img
+                          src={coverUrl}
+                          alt={displayName}
+                          style={{ width: 48, height: 72, objectFit: 'cover', borderRadius: 4, boxShadow: '0 1px 4px #0002' }}
+                        />
+                      ) : (
+                        <div style={{ width: 48, height: 72, background: '#ddd', borderRadius: 4 }} />
+                      )}
+                    </td>
+                    <td style={{ padding: 8 }}><span style={{ fontWeight: 500 }}>{displayName}</span></td>
+                    <td style={{ padding: 8 }}>{entry.notes || ''}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
