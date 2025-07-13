@@ -5,6 +5,7 @@ import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import type { DropResult, DraggableProvided, DraggableStateSnapshot, DroppableProvided } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import type { Timeline } from '../services/timelineService';
+import { deleteTimeline } from '../services/timelineService';
 import { timelinesPath } from '../projectPaths';
 import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
@@ -278,6 +279,22 @@ export const TimelineViewPage: React.FC = () => {
               }}
             >
               {reorderMode ? 'Save Order' : 'Reorder Entries'}
+            </button>
+            <button
+              onClick={async () => {
+                if (!timelineName) return;
+                if (window.confirm('Are you sure you want to delete this timeline? This action cannot be undone.')) {
+                  try {
+                    await deleteTimeline(timelineName);
+                    window.location.href = '/timelines';
+                  } catch {
+                    alert('Failed to delete timeline. Please try again.');
+                  }
+                }
+              }}
+              style={{ background: '#dc3545', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: 'pointer' }}
+            >
+              Delete
             </button>
           </div>
         )}

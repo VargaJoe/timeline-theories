@@ -1,3 +1,24 @@
+/**
+ * Deletes a timeline by path segment (Name) or Id
+ * @param idOrPath Timeline Id (number) or path segment (string)
+ * @param permanent If true, permanently deletes; otherwise moves to Trash
+ */
+export async function deleteTimeline(idOrPath: string | number, permanent = false): Promise<void> {
+  try {
+    let resolvedIdOrPath = idOrPath;
+    if (typeof idOrPath === 'string' && !idOrPath.startsWith('/') && isNaN(Number(idOrPath))) {
+      // Assume it's a timeline name, resolve to full path
+      resolvedIdOrPath = `${timelinesPath}/${idOrPath}`;
+    }
+    await repository.delete({
+      idOrPath: resolvedIdOrPath,
+      permanent,
+    });
+  } catch (error) {
+    console.error('Failed to delete timeline:', error);
+    throw new Error('Failed to delete timeline. Please check your connection and try again.');
+  }
+}
 import { repository } from './sensenet';
 import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
