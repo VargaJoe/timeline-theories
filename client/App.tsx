@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
 import { LoginButton } from './components/LoginButton';
 import { AuthenticatedContent } from './components/AuthenticatedContent';
@@ -25,47 +25,52 @@ function App() {
       <OidcTokenInjector />
       <BrowserRouter>
         <div className="app-container">
-          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-              <h1>TimelineVerse</h1>
-              <nav style={{ display: 'flex', gap: 16 }}>
-                <Link to="/timelines" style={{ textDecoration: 'none', color: '#2a4d8f', fontWeight: 500 }}>
-                  Browse Timelines
-                </Link>
-                <Link to="/media-library" style={{ textDecoration: 'none', color: '#2a4d8f', fontWeight: 500 }}>
-                  Media Library
-                </Link>
-                <Link to="/create" style={{ textDecoration: 'none', color: '#2a4d8f', fontWeight: 500 }}>
-                  Create Timeline
-                </Link>
-              </nav>
-            </div>
-            <LoginButton />
-          </header>
-          <Routes>
-            <Route path="/timelines" element={<TimelineListPage />} />
-            <Route path="/timelines/:id" element={<TimelineViewPage />} />
-            <Route path="/media-library" element={<MediaLibraryPage />} />
-            <Route path="/media-library/:id" element={<MediaItemViewPage />} />
-            <Route
-              path="/media-library/create"
-              element={
-                <AuthenticatedContent>
-                  <MediaItemCreatePage />
-                </AuthenticatedContent>
-              }
-            />
-            <Route
-              path="/create"
-              element={
-                <AuthenticatedContent>
-                  <TimelineCreatePage />
-                </AuthenticatedContent>
-              }
-            />
-            <Route path="/timelines/:timelineId/add-entry" element={<TimelineEntryCreatePage />} />
-            <Route path="*" element={<Navigate to="/timelines" />} />
-          </Routes>
+          <div className="app-root">
+            {/* Top Navigation Bar */}
+            <nav className="top-nav">
+              <div className="nav-left">
+                <span className="site-logo">Timeline Theories</span>
+                <ul className="nav-menu">
+                  <li><a href="/timelines">Timelines</a></li>
+                  <li><a href="/media-library">Media Library</a></li>
+                  <li><a href="/create">Create Timeline</a></li>
+                </ul>
+              </div>
+              <div className="nav-right">
+                <LoginButton />
+              </div>
+            </nav>
+            {/* Banner/Header Row */}
+            <header className="site-banner">
+              {/* Banner image can be added via CSS background-image later */}
+              <h1 className="site-title">Timeline Theories</h1>
+              <p className="site-subtitle">Chronological timelines for every universe</p>
+            </header>
+            <Routes>
+              <Route path="/timelines" element={<TimelineListPage />} />
+              <Route path="/timelines/:id" element={<TimelineViewPage />} />
+              <Route path="/media-library" element={<MediaLibraryPage />} />
+              <Route path="/media-library/:id" element={<MediaItemViewPage />} />
+              <Route
+                path="/media-library/create"
+                element={
+                  <AuthenticatedContent>
+                    <MediaItemCreatePage />
+                  </AuthenticatedContent>
+                }
+              />
+              <Route
+                path="/create"
+                element={
+                  <AuthenticatedContent>
+                    <TimelineCreatePage />
+                  </AuthenticatedContent>
+                }
+              />
+              <Route path="/timelines/:timelineId/add-entry" element={<TimelineEntryCreatePage />} />
+              <Route path="*" element={<Navigate to="/timelines" />} />
+            </Routes>
+          </div>
         </div>
       </BrowserRouter>
     </AppProviders>
