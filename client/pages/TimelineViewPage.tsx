@@ -181,7 +181,7 @@ export const TimelineViewPage: React.FC = () => {
         {/* Trakt Import Button/Modal */}
         <TraktImportDialog
           timelineName={timeline.name}
-          onImportComplete={summary => {
+          onImportComplete={() => {
             // Optionally reload entries after import
             setEntriesLoading(true);
             TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
