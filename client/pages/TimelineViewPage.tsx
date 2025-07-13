@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import type { DropResult, DraggableProvided, DraggableStateSnapshot, DroppableProvided } from 'react-beautiful-dnd';
@@ -12,6 +13,12 @@ import type { TimelineEntry } from '../services/timelineEntryService';
 // import type { MediaItem } from '../services/mediaLibraryService';
 
 export const TimelineViewPage: React.FC = () => {
+  const [editMode, setEditMode] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editSortOrder, setEditSortOrder] = useState<'chronological' | 'release'>('chronological');
+  const [editError, setEditError] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
   const { oidcUser } = useOidcAuthentication();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [reorderMode, setReorderMode] = useState(false);
@@ -36,21 +43,46 @@ export const TimelineViewPage: React.FC = () => {
             select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
           },
         });
+        // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
+        let sortOrder: 'chronological' | 'release' = 'chronological';
+        let sortOrderRaw: string | undefined = undefined;
+        if (Array.isArray(result.d.SortOrder) && result.d.SortOrder.length > 0) {
+          sortOrderRaw = result.d.SortOrder[0];
+        } else if (typeof result.d.SortOrder === 'string') {
+          sortOrderRaw = result.d.SortOrder;
+        }
+        if (typeof sortOrderRaw === 'string') {
+          const val = sortOrderRaw.trim().toLowerCase();
+          if (val === 'release') sortOrder = 'release';
+          else if (val === 'chronological') sortOrder = 'chronological';
+        }
         setTimeline({
           id: String(result.d.Id),
-          name: result.d.DisplayName,
+          name: result.d.Name,
+          displayName: result.d.DisplayName,
           description: result.d.Description || '',
-          sort_order: result.d.SortOrder || 'chronological',
+          sort_order: sortOrder,
           created_at: result.d.CreationDate,
         });
+        setEditTitle(result.d.DisplayName);
+        setEditDescription(result.d.Description || '');
+        setEditSortOrder(sortOrder);
         // Load timeline entries and media items
         setEntriesLoading(true);
         const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id), parentPath);
         setEntries(entries);
         setEntriesLoading(false);
       } catch (err) {
+        let message = 'Failed to load timeline';
+        if (err && typeof err === 'object') {
+          if ('message' in err && typeof err.message === 'string') {
+            message += ': ' + err.message;
+          } else if ('toString' in err && typeof err.toString === 'function') {
+            message += ': ' + err.toString();
+          }
+        }
         console.error('Failed to load timeline:', err);
-        setError('Failed to load timeline');
+        setError(message);
         setEntriesLoading(false);
       } finally {
         setLoading(false);
@@ -140,9 +172,76 @@ export const TimelineViewPage: React.FC = () => {
         boxShadow: '0 2px 12px #0001',
         padding: 32
       }}>
-        <h1 style={{ marginBottom: 16, color: '#2a4d8f' }}>{timeline.name}</h1>
-        {timeline.description && (
-          <p style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}>{timeline.description}</p>
+        {editMode ? (
+          <form
+            onSubmit={async e => {
+              e.preventDefault();
+              setEditError('');
+              setEditLoading(true);
+              try {
+                await repository.patch({
+                  idOrPath: `${timelinesPath}/${timelineName}`,
+                  contentType: TIMELINE_CONTENT_TYPE,
+                  content: {
+                    DisplayName: editTitle,
+                    Description: editDescription,
+                    SortOrder: editSortOrder,
+                  },
+                });
+                setTimeline(t => t ? { ...t, displayName: editTitle, description: editDescription, sort_order: editSortOrder } : t);
+                setEditMode(false);
+              } catch (err) {
+                setEditError('Failed to update timeline.');
+              } finally {
+                setEditLoading(false);
+              }
+            }}
+            style={{ marginBottom: 24 }}
+          >
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontWeight: 500 }}>Title</label>
+              <input
+                value={editTitle}
+                onChange={e => setEditTitle(e.target.value)}
+                required
+                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontWeight: 500 }}>Description</label>
+              <textarea
+                value={editDescription}
+                onChange={e => setEditDescription(e.target.value)}
+                rows={3}
+                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontWeight: 500 }}>Sort Order</label>
+              <select
+                value={editSortOrder}
+                onChange={e => setEditSortOrder(e.target.value as 'chronological' | 'release')}
+                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+              >
+                <option value="chronological">Chronological Order</option>
+                <option value="release">Release Order</option>
+              </select>
+            </div>
+            {editError && <div style={{ color: '#dc3545', marginBottom: 8 }}>{editError}</div>}
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button type="submit" disabled={editLoading} style={{ background: '#2a4d8f', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 20px', fontWeight: 600, fontSize: 16, cursor: editLoading ? 'not-allowed' : 'pointer' }}>
+                {editLoading ? 'Saving...' : 'Save'}
+              </button>
+              <button type="button" onClick={() => setEditMode(false)} style={{ background: '#ccc', color: '#333', border: 'none', borderRadius: 6, padding: '8px 20px', fontWeight: 600, fontSize: 16, cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <h1 style={{ marginBottom: 16, color: '#2a4d8f' }}>{timeline.displayName}</h1>
+            {timeline.description && (
+              <p style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}>{timeline.description}</p>
+            )}
+          </>
         )}
         <div style={{ display: 'flex', gap: 24, marginBottom: 32, fontSize: 14, color: '#888' }}>
           <div>
@@ -155,8 +254,14 @@ export const TimelineViewPage: React.FC = () => {
           )}
         </div>
         {oidcUser && (
-          <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Link to={`/timelines/${timelineName}/add-entry`} style={{ background: '#2a4d8f', color: '#fff', padding: '8px 16px', borderRadius: 6, textDecoration: 'none', fontWeight: 500 }}>
+          <div style={{ marginBottom: 24, display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button
+              onClick={() => setEditMode(m => !m)}
+              style={{ background: '#007bff', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: 'pointer' }}
+            >
+              {editMode ? 'Cancel Edit' : 'Edit'}
+            </button>
+            <Link to={`/timelines/${timelineName}/add-entry`} style={{ background: '#2a4d8f', color: '#fff', padding: '8px 16px', borderRadius: 6, textDecoration: 'none', fontWeight: 500, fontSize: 16 }}>
               + Add Media Entry
             </Link>
             <button
@@ -168,8 +273,8 @@ export const TimelineViewPage: React.FC = () => {
                 borderRadius: 6,
                 border: 'none',
                 fontWeight: 500,
+                fontSize: 16,
                 cursor: 'pointer',
-                marginLeft: 16
               }}
             >
               {reorderMode ? 'Save Order' : 'Reorder Entries'}
