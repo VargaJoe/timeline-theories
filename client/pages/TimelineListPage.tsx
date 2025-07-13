@@ -9,6 +9,7 @@ export const TimelineListPage: React.FC = () => {
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sortOrder, setSortOrder] = useState<'alphabetical' | 'created_desc'>('alphabetical');
 
   useEffect(() => {
     console.log('TimelineListPage: Starting to load timelines...');
@@ -60,8 +61,20 @@ export const TimelineListPage: React.FC = () => {
         <p style={{ color: '#666', margin: 0 }}>
           Discover timelines created by the community.
         </p>
-        {oidcUser && (
-          <div style={{ marginTop: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginTop: 18 }}>
+          <div>
+            <label htmlFor="timeline-sort" style={{ fontWeight: 500, marginRight: 8 }}>Sort by:</label>
+            <select
+              id="timeline-sort"
+              value={sortOrder}
+              onChange={e => setSortOrder(e.target.value as 'alphabetical' | 'created_desc')}
+              style={{ padding: 6, borderRadius: 6, border: '1px solid #ccc', fontSize: 15 }}
+            >
+              <option value="alphabetical">Alphabetical</option>
+              <option value="created_desc">Creation Date (Newest on Top)</option>
+            </select>
+          </div>
+          {oidcUser && (
             <Link
               to="/create"
               style={{
@@ -82,10 +95,11 @@ export const TimelineListPage: React.FC = () => {
             >
               + Create Timeline
             </Link>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       
+      {/* Sort timelines according to selected order */}
       {timelines.length === 0 ? (
         <div style={{
           background: '#f8f9fa',
@@ -117,7 +131,18 @@ export const TimelineListPage: React.FC = () => {
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>
-          {timelines.map(timeline => {
+          {timelines
+            .slice()
+            .sort((a, b) => {
+              if (sortOrder === 'alphabetical') {
+                return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
+              } else if (sortOrder === 'created_desc') {
+                // Newest first
+                return (b.created_at ? new Date(b.created_at).getTime() : 0) - (a.created_at ? new Date(a.created_at).getTime() : 0);
+              }
+              return 0;
+            })
+            .map(timeline => {
             // Use the Name field for the URL path segment (friendly URL)
             // If you want to keep the original name formatting, you may need to store the path segment separately
             // For now, we will generate it from the DisplayName (same as in createTimeline)
