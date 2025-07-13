@@ -56,20 +56,35 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Add auto-save for position changes
 - [ ] Update timeline display logic
 - [ ] Test reordering functionality
+- [ ] Fix timeline entry rearrange to only send updates for changed items
+- [x] Add reorder mode toggle and drag-and-drop support to TimelineViewPage.tsx using react-beautiful-dnd
+- [x] Add TimelineEntryService.updateEntryPositions for bulk position update
+
+
 
 ### Story 12 - Timeline Management and Media Library Improvements
-- [ ] Clean up and reorder implementation-tasks.md, mark completed tasks, fix order
+- [x] Clean up and reorder implementation-tasks.md, mark completed tasks, fix order
 - [ ] Add edit feature for timelines on entries page
 - [ ] Add delete feature for timelines on entries page
 - [ ] Add grouping/folder view and flat view toggle to media library page
 - [ ] Fix search on media library page (currently not working)
-- [ ] Fix timeline entry rearrange to only send updates for changed items
 - [ ] Suggest and review more features for timeline pages (compare with other timeline apps)
-- [x] Add reorder mode toggle and drag-and-drop support to TimelineViewPage.tsx using react-beautiful-dnd
 - [x] Implement reorder mode UI and save logic (Save Order button, drag-and-drop rows)
-- [x] Add TimelineEntryService.updateEntryPositions for bulk position update
 - [x] Resolve all type and lint errors for new feature
 - [x] Track feature on branch: feature/timeline-entries-reorder
+- [x] Restrict admin features (Create Timeline, Add Media Entry, Reorder, Add Media Item) to logged-in users only (conditional rendering with useOidcAuthentication)
+
+  ### Story 14 - UI/Design improvements inspired by Trakt
+  - [ ] Design and implement a top navigation bar with menu and user login/profile
+  - [ ] Add a banner/header row with site name and optional banner image
+  - [ ] Redesign timelines page:
+      - [ ] Add controls row (Add Timeline/List, Reorder, etc.)
+      - [ ] Display timelines as cards with cover images, title, short description, and action buttons
+  - [ ] Redesign timeline entries page:
+      - [ ] Add timeline-specific banner (title, description, cover image)
+      - [ ] Add controls row (Edit, Reorder, Share, etc.)
+      - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
+  - [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
 
 ## Planned Stories
 
