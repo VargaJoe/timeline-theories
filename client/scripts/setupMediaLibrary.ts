@@ -1,7 +1,7 @@
 // src/client/scripts/setupMediaLibrary.ts
 import { repository } from '../services/sensenet';
 import { mediaLibraryPath, projectRoot } from '../projectPaths';
-import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
+// import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
 
 /**
  * Creates the MediaLibrary MemoList in SenseNet if it doesn't exist
