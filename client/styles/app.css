@@ -1,0 +1,105 @@
+/* Basic production-ready skin for Timeline Theories */
+
+/* Cyberpunk-inspired skin for Timeline Theories */
+
+/* Calm forest-inspired skin for Timeline Theories */
+.app-root {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: linear-gradient(135deg, #e6f2e6 0%, #b7d3b7 100%);
+  min-height: 100vh;
+  color: #234d32;
+}
+.top-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #234d32;
+  color: #fff;
+  padding: 0.5rem 2rem;
+  height: 60px;
+  box-shadow: 0 2px 8px rgba(35,77,50,0.08);
+  border-bottom: 2px solid #7bb274;
+}
+.site-logo {
+  font-weight: bold;
+  font-size: 1.4rem;
+  letter-spacing: 1px;
+  margin-right: 2rem;
+  color: #7bb274;
+}
+.nav-menu {
+  display: flex;
+  gap: 1.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nav-menu li a {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+}
+.nav-menu li a:hover {
+  color: #234d32;
+  background: #b7d3b7;
+}
+.nav-login-btn, .top-nav button {
+  background: #7bb274;
+  color: #234d32;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 0 8px #b7d3b7;
+  transition: background 0.2s, color 0.2s;
+}
+.nav-login-btn:hover, .top-nav button:hover {
+  background: #b7d3b7;
+  color: #234d32;
+}
+.site-banner {
+  background: linear-gradient(90deg, #7bb274 0%, #e6f2e6 100%);
+  color: #234d32;
+  text-align: center;
+  padding: 2.5rem 1rem 1.5rem 1rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 0 24px #b7d3b7;
+}
+.site-title {
+  font-size: 2.1rem;
+  margin: 0 0 0.5rem 0;
+  font-weight: 800;
+  color: #234d32;
+}
+.site-subtitle {
+  font-size: 1.1rem;
+  margin: 0;
+  opacity: 0.9;
+  color: #234d32;
+}
+.main-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem 2rem 1.5rem;
+}
+
+/* Card style for lists and entries */
+.timeline-card, .entry-card {
+  background: #e6f2e6;
+  border-radius: 14px;
+  box-shadow: 0 0 16px #b7d3b7, 0 2px 8px #234d3222;
+  padding: 1.2rem 1.5rem;
+  margin-bottom: 2rem;
+  color: #234d32;
+  border: 2px solid #7bb274;
+  transition: box-shadow 0.2s, border 0.2s;
+}
+.timeline-card:hover, .entry-card:hover {
+  box-shadow: 0 0 32px #7bb27499, 0 2px 16px #b7d3b7;
+  border-color: #234d32;
+}
