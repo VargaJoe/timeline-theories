@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import type { DropResult, DraggableProvided, DraggableStateSnapshot, DroppableProvided } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
@@ -10,6 +11,7 @@ import type { TimelineEntry } from '../services/timelineEntryService';
 // import type { MediaItem } from '../services/mediaLibraryService';
 
 export const TimelineViewPage: React.FC = () => {
+  const { oidcUser } = useOidcAuthentication();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [reorderMode, setReorderMode] = useState(false);
   const [pendingOrder, setPendingOrder] = useState<TimelineEntry[] | null>(null);
@@ -156,26 +158,28 @@ export const TimelineViewPage: React.FC = () => {
             </div>
           )}
         </div>
-        <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Link to={`/timelines/${timeline.id}/add-entry`} style={{ background: '#2a4d8f', color: '#fff', padding: '8px 16px', borderRadius: 6, textDecoration: 'none', fontWeight: 500 }}>
-            + Add Media Entry
-          </Link>
-          <button
-            onClick={toggleReorderMode}
-            style={{
-              background: reorderMode ? '#28a745' : '#ffc107',
-              color: reorderMode ? '#fff' : '#333',
-              padding: '8px 16px',
-              borderRadius: 6,
-              border: 'none',
-              fontWeight: 500,
-              cursor: 'pointer',
-              marginLeft: 16
-            }}
-          >
-            {reorderMode ? 'Save Order' : 'Reorder Entries'}
-          </button>
-        </div>
+        {oidcUser && (
+          <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Link to={`/timelines/${timeline.id}/add-entry`} style={{ background: '#2a4d8f', color: '#fff', padding: '8px 16px', borderRadius: 6, textDecoration: 'none', fontWeight: 500 }}>
+              + Add Media Entry
+            </Link>
+            <button
+              onClick={toggleReorderMode}
+              style={{
+                background: reorderMode ? '#28a745' : '#ffc107',
+                color: reorderMode ? '#fff' : '#333',
+                padding: '8px 16px',
+                borderRadius: 6,
+                border: 'none',
+                fontWeight: 500,
+                cursor: 'pointer',
+                marginLeft: 16
+              }}
+            >
+              {reorderMode ? 'Save Order' : 'Reorder Entries'}
+            </button>
+          </div>
+        )}
         <h3 style={{ marginBottom: 16 }}>Timeline Entries</h3>
         {entriesLoading ? (
           <div>Loading entries...</div>

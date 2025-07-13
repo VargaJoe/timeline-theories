@@ -78,7 +78,7 @@ export const LoginButton: React.FC = () => {
       return <button onClick={handleLogout} style={{ backgroundColor: 'red', color: 'white', padding: '8px 16px' }}>Logout</button>;
     } else {
       console.log('[LoginButton] Rendering: Login button');
-      return <button onClick={login} style={{ backgroundColor: 'blue', color: 'white', padding: '8px 16px' }}>Login with SenseNet</button>;
+      return <button onClick={login} style={{ backgroundColor: 'blue', color: 'white', padding: '8px 16px' }}>Login</button>;
     }
   } catch (err) {
     console.error('[LoginButton] Error in render:', err);

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { getTimelines } from '../services/timelineService';
 import type { Timeline } from '../services/timelineService';
 import { Link } from 'react-router-dom';
 
 export const TimelineListPage: React.FC = () => {
+  const { oidcUser } = useOidcAuthentication();
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -58,28 +60,30 @@ export const TimelineListPage: React.FC = () => {
         <p style={{ color: '#666', margin: 0 }}>
           Discover timelines created by the community.
         </p>
-        <div style={{ marginTop: 18 }}>
-          <Link
-            to="/create"
-            style={{
-              background: '#7bb274',
-              color: '#234d32',
-              textDecoration: 'none',
-              padding: '12px 28px',
-              borderRadius: 8,
-              fontWeight: 600,
-              fontSize: 16,
-              boxShadow: '0 2px 8px #b7d3b7',
-              display: 'inline-block',
-              border: 'none',
-              transition: 'background 0.2s, color 0.2s',
-            }}
-            onMouseOver={e => (e.currentTarget.style.background = '#b7d3b7')}
-            onMouseOut={e => (e.currentTarget.style.background = '#7bb274')}
-          >
-            + Create Timeline
-          </Link>
-        </div>
+        {oidcUser && (
+          <div style={{ marginTop: 18 }}>
+            <Link
+              to="/create"
+              style={{
+                background: '#7bb274',
+                color: '#234d32',
+                textDecoration: 'none',
+                padding: '12px 28px',
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: 16,
+                boxShadow: '0 2px 8px #b7d3b7',
+                display: 'inline-block',
+                border: 'none',
+                transition: 'background 0.2s, color 0.2s',
+              }}
+              onMouseOver={e => (e.currentTarget.style.background = '#b7d3b7')}
+              onMouseOut={e => (e.currentTarget.style.background = '#7bb274')}
+            >
+              + Create Timeline
+            </Link>
+          </div>
+        )}
       </div>
       
       {timelines.length === 0 ? (
@@ -94,20 +98,22 @@ export const TimelineListPage: React.FC = () => {
           <p style={{ color: '#6c757d', marginBottom: 24 }}>
             Be the first to create a timeline for the community!
           </p>
-          <Link 
-            to="/create" 
-            style={{
-              background: '#2a4d8f',
-              color: 'white',
-              textDecoration: 'none',
-              padding: '12px 24px',
-              borderRadius: 6,
-              fontWeight: 500,
-              display: 'inline-block'
-            }}
-          >
-            Create First Timeline
-          </Link>
+          {oidcUser && (
+            <Link 
+              to="/create" 
+              style={{
+                background: '#2a4d8f',
+                color: 'white',
+                textDecoration: 'none',
+                padding: '12px 24px',
+                borderRadius: 6,
+                fontWeight: 500,
+                display: 'inline-block'
+              }}
+            >
+              Create First Timeline
+            </Link>
+          )}
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>

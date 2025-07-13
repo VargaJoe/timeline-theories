@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 
@@ -6,6 +7,7 @@ const MEDIA_TYPES = ['Film', 'TV Series', 'TV Episode', 'Book', 'Comic', 'Video 
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
 
 export default function MediaLibraryPage() {
+  const { oidcUser } = useOidcAuthentication();
   const navigate = useNavigate();
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,24 +79,31 @@ export default function MediaLibraryPage() {
           <div>
             <h1 style={{ marginBottom: 8, color: '#2a4d8f', fontSize: 28, fontWeight: 700 }}>Media Library</h1>
             <p style={{ color: '#666', margin: 0 }}>
-              Browse and manage your global media collection, or{' '}
-              <Link to="/media-library/create" style={{ color: '#2a4d8f', fontWeight: 500 }}>add a new item</Link>.
+              Browse and manage your global media collection.
+              {oidcUser && (
+                <>
+                  {' '}or{' '}
+                  <Link to="/media-library/create" style={{ color: '#2a4d8f', fontWeight: 500 }}>add a new item</Link>.
+                </>
+              )}
             </p>
           </div>
-          <Link
-            to="/media-library/create"
-            style={{
-              background: '#2a4d8f',
-              color: 'white',
-              textDecoration: 'none',
-              padding: '12px 24px',
-              borderRadius: 6,
-              fontWeight: 500,
-              display: 'inline-block'
-            }}
-          >
-            Add Media Item
-          </Link>
+          {oidcUser && (
+            <Link
+              to="/media-library/create"
+              style={{
+                background: '#2a4d8f',
+                color: 'white',
+                textDecoration: 'none',
+                padding: '12px 24px',
+                borderRadius: 6,
+                fontWeight: 500,
+                display: 'inline-block'
+              }}
+            >
+              Add Media Item
+            </Link>
+          )}
         </div>
       </div>
 
@@ -232,20 +241,22 @@ export default function MediaLibraryPage() {
               ? 'Try adjusting your search criteria.' 
               : 'Get started by adding your first media item.'}
           </p>
-          <Link 
-            to="/media-library/create"
-            style={{
-              background: '#2a4d8f',
-              color: 'white',
-              textDecoration: 'none',
-              padding: '12px 24px',
-              borderRadius: 6,
-              fontWeight: 500,
-              display: 'inline-block'
-            }}
-          >
-            Add Media Item
-          </Link>
+          {oidcUser && (
+            <Link 
+              to="/media-library/create"
+              style={{
+                background: '#2a4d8f',
+                color: 'white',
+                textDecoration: 'none',
+                padding: '12px 24px',
+                borderRadius: 6,
+                fontWeight: 500,
+                display: 'inline-block'
+              }}
+            >
+              Add Media Item
+            </Link>
+          )}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
