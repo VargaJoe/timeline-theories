@@ -43,8 +43,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     }
     setImporting(true);
     try {
-      // Use Netlify proxy
-      const res = await fetch(`/api/trakt-proxy?username=${parsed.username}&list=${parsed.list}`);
+      // Use Netlify proxy (same as create page)
+      const res = await fetch(`/.netlify/functions/trakt-proxy?username=${encodeURIComponent(parsed.username)}&list=${encodeURIComponent(parsed.list)}`);
       if (!res.ok) throw new Error('Failed to fetch Trakt list');
       const data = await res.json();
       const items: TraktListItem[] = data.map((item: any) => ({
