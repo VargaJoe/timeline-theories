@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { TraktImportDialog } from './TraktImportDialog';
 // import { fetchTraktList } from '../services/traktService';
 import type { TraktListItem } from '../services/traktService';
 import MediaLibraryService from '../services/mediaLibraryService';
@@ -105,6 +106,29 @@ export const TimelineCreateForm: React.FC = () => {
 
   return (
     <div style={{ maxWidth: 400, margin: '0 auto' }}>
+      {/* Trakt Import Button/Modal for new timeline */}
+      <TraktImportDialog
+        createTimelineIfMissing={async (displayName, description) => {
+          // Use the entered name if available, else prompt
+          const timelineName = name.trim() || displayName.trim().replace(/\s+/g, '-').toLowerCase();
+          const timeline = await createTimeline({
+            name: timelineName,
+            displayName,
+            description,
+            sortOrder
+          });
+          setName(timeline.name);
+          setDisplayName(timeline.displayName);
+          setDescription(timeline.description || '');
+          return timeline.name;
+        }}
+        onTimelineCreated={timelineName => {
+          setName(timelineName);
+        }}
+        onImportComplete={summary => {
+          setImportSummary(summary);
+        }}
+      />
       {success ? (
         <div style={{
           background: '#d4edda',

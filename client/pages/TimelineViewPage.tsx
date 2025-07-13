@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
@@ -177,6 +178,17 @@ export const TimelineViewPage: React.FC = () => {
         boxShadow: '0 2px 12px #0001',
         padding: 32
       }}>
+        {/* Trakt Import Button/Modal */}
+        <TraktImportDialog
+          timelineName={timeline.name}
+          onImportComplete={summary => {
+            // Optionally reload entries after import
+            setEntriesLoading(true);
+            TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
+              .then(setEntries)
+              .finally(() => setEntriesLoading(false));
+          }}
+        />
         {editMode ? (
           <form
             onSubmit={async e => {
