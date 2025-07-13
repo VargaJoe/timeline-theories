@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MediaLibrarySelector } from '../components/MediaLibrarySelector';
 import { TimelineEntryService } from '../services/timelineEntryService';
+import type { MediaItem } from '../services/mediaLibraryService';
 import { timelinesPath } from '../projectPaths';
 
 export default function TimelineEntryCreatePage() {
   const { timelineId: timelineName } = useParams<{ timelineId: string }>();
   const navigate = useNavigate();
-  const [selectedMedia, setSelectedMedia] = useState<{ Id: number; DisplayName?: string } | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [position, setPosition] = useState<number>(1);
   const [notes, setNotes] = useState('');
   const [entryLabel, setEntryLabel] = useState('mainstory');
@@ -15,7 +16,7 @@ export default function TimelineEntryCreatePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSelect = (media: { Id: number; DisplayName?: string }) => setSelectedMedia(media);
+  const handleSelect = (media: MediaItem) => setSelectedMedia(media);
 
   const handleSave = async () => {
     if (!timelineName || !selectedMedia) return;
@@ -25,14 +26,21 @@ export default function TimelineEntryCreatePage() {
       // TimelineEntry should be created under the selected timeline's path
       const parentPath = `${timelinesPath}/${timelineName}`;
       await TimelineEntryService.createTimelineEntry({
-        mediaItem: selectedMedia,
+        displayName: selectedMedia.DisplayName,
+        mediaItem: {
+          Id: selectedMedia.Id,
+          Name: selectedMedia.DisplayName.replace(/\s+/g, '-').toLowerCase(),
+          DisplayName: selectedMedia.DisplayName,
+          CoverImageUrl: selectedMedia.CoverImageUrl,
+        },
+        timelineId: 0, // Not used in backend, but required by type
         position,
         notes,
         entryLabel,
         importance,
       }, parentPath);
       navigate(`/timelines/${timelineName}`);
-    } catch (e) {
+    } catch {
       setError('Failed to create timeline entry.');
     } finally {
       setSaving(false);

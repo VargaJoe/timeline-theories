@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
-import type { DropResult, DraggableProvided, DraggableStateSnapshot, DroppableProvided } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
-import type { Timeline } from '../services/timelineService';
 import { deleteTimeline } from '../services/timelineService';
 import { timelinesPath } from '../projectPaths';
 import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
+import type { Timeline } from '../services/timelineService';
 import type { TimelineEntry } from '../services/timelineEntryService';
+// DropResult and other types are not exported as types in some versions, so use 'any' as a workaround for build compatibility
+type DropResult = any;
+type DraggableProvided = any;
+type DraggableStateSnapshot = any;
+type DroppableProvided = any;
 // import { MediaLibraryService } from '../services/mediaLibraryService';
 // import type { MediaItem } from '../services/mediaLibraryService';
 
@@ -145,7 +149,7 @@ export const TimelineViewPage: React.FC = () => {
       setEntries(pendingOrder.map((entry, idx) => ({ ...entry, position: idx + 1 })));
       setReorderMode(false);
       setPendingOrder(null);
-    } catch (err) {
+    } catch {
       alert('Failed to save new order.');
     }
   };
@@ -191,7 +195,7 @@ export const TimelineViewPage: React.FC = () => {
                 });
                 setTimeline(t => t ? { ...t, displayName: editTitle, description: editDescription, sort_order: editSortOrder } : t);
                 setEditMode(false);
-              } catch (err) {
+              } catch {
                 setEditError('Failed to update timeline.');
               } finally {
                 setEditLoading(false);
