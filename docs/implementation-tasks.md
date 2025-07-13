@@ -70,8 +70,8 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Allow user to enter a Trakt list URL or select from their lists.
 - [ ] Fetch list items via Trakt API.
 - [ ] For each item:
-    - [ ] Check if media item exists; create if missing.
-    - [ ] Create timeline entry for each item.
+    - [x] Check if media item exists; create if missing. (Now uses 'title (year)' format for display name)
+    - [x] Create timeline entry for each item. (Now uses 'title (year)' format for display name)
 - [ ] Allow user to review and edit before finalizing the timeline.
 
 ---
