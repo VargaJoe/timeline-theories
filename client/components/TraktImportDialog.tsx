@@ -3,6 +3,7 @@ import type { TraktListItem } from '../services/traktService';
 import MediaLibraryService from '../services/mediaLibraryService';
 import type { MediaItem } from '../services/mediaLibraryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
+import { timelinesPath } from '../projectPaths';
 import { TimelineEntryService } from '../services/timelineEntryService';
 
 interface TraktImportDialogProps {
@@ -61,7 +62,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
       // Fetch existing entries for deduplication
       let existingEntries: TimelineEntry[] = [];
       try {
-        existingEntries = await TimelineEntryService.listTimelineEntries(0, `/Root/Content/Timelines/${timeline}`);
+        existingEntries = await TimelineEntryService.listTimelineEntries(0, `${timelinesPath}/${timeline}`);
       } catch {
         // Ignore errors, treat as no existing entries
       }
@@ -109,7 +110,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             },
             timelineId: 0, // Not used by backend, but required by type
             position: i + 1,
-          }, `/Root/Content/Timelines/${timeline}`);
+          }, `${timelinesPath}/${timeline}`);
         } catch (err) {
           errors.push(`${item.title} (${item.year || ''}): ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
