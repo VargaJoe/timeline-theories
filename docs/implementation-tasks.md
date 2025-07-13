@@ -65,22 +65,18 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 
 ## In Progress Stories
 
+### Story 17 - Create Timeline by Trakt List
+- [ ] Add "Import from Trakt List" option to Timeline Create Page.
+- [ ] Allow user to enter a Trakt list URL or select from their lists.
+- [ ] Fetch list items via Trakt API.
+- [ ] For each item:
+    - [ ] Check if media item exists; create if missing.
+    - [ ] Create timeline entry for each item.
+- [ ] Allow user to review and edit before finalizing the timeline.
+
 ---
 
 ## Planned Stories
-
-### Story 14 - UI/Design improvements inspired by Trakt
-- [ ] Design and implement a top navigation bar with menu and user login/profile
-- [ ] Add a banner/header row with site name and optional banner image
-- [ ] Redesign timelines page:
-    - [ ] Add controls row (Add Timeline/List, Reorder, etc.)
-    - [ ] Display timelines as cards with cover images, title, short description, and action buttons
-- [ ] Redesign timeline entries page:
-    - [ ] Add timeline-specific banner (title, description, cover image)
-    - [ ] Add controls row (Edit, Reorder, Share, etc.)
-    - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
-- [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
-
 
 ### Story 15 - Create Media Item by Trakt
 - [ ] Add a "Search Trakt" button or field to the Media Item Create Page.
@@ -98,15 +94,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Allow user to edit before saving.
 - [ ] Link the entry to the imported media item.
 
-### Story 17 - Create Timeline by Trakt List
-- [ ] Add "Import from Trakt List" option to Timeline Create Page.
-- [ ] Allow user to enter a Trakt list URL or select from their lists.
-- [ ] Fetch list items via Trakt API.
-- [ ] For each item:
-    - [ ] Check if media item exists; create if missing.
-    - [ ] Create timeline entry for each item.
-- [ ] Allow user to review and edit before finalizing the timeline.
-
 ### Story 18 - Import Ratings from Trakt
 - [ ] Add "Import Ratings from Trakt" option in user settings or media library.
 - [ ] Fetch user ratings via Trakt API.
@@ -119,17 +106,28 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Indicate if the media is already in any timeline or synced list.
 - [ ] Provide option to add missing media to a timeline or list.
 
-### Story 20 - Suggest Timelines by Trending/Popular Media
-- [ ] Fetch trending/popular movies and shows from Trakt API.
-- [ ] Match these with existing timelines in the app.
-- [ ] Display suggested timelines on the main page, highlighting those related to trending media.
-
 ### Story 21 - Manually Enrich Media Details from Trakt
 - [ ] Add "Update from Trakt" button to media item detail page.
 - [ ] Fetch latest details for the media item from Trakt using its ID.
 - [ ] Show a diff/preview of changes before applying.
 - [ ] Update media item with selected new data.
 
+### Story 20 - Suggest Timelines by Trending/Popular Media
+- [ ] Fetch trending/popular movies and shows from Trakt API.
+- [ ] Match these with existing timelines in the app.
+- [ ] Display suggested timelines on the main page, highlighting those related to trending media.
+
+### Story 14 - UI/Design improvements inspired by Trakt
+- [ ] Design and implement a top navigation bar with menu and user login/profile
+- [ ] Add a banner/header row with site name and optional banner image
+- [ ] Redesign timelines page:
+    - [ ] Add controls row (Add Timeline/List, Reorder, etc.)
+    - [ ] Display timelines as cards with cover images, title, short description, and action buttons
+- [ ] Redesign timeline entries page:
+    - [ ] Add timeline-specific banner (title, description, cover image)
+    - [ ] Add controls row (Edit, Reorder, Share, etc.)
+    - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
+- [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
 
 ### Story 07 - View and Share Timeline
 - [ ] Create timeline display component
