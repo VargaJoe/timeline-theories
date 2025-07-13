@@ -13,14 +13,12 @@ export interface TraktListItem {
   year?: number;
 }
 
-import { traktApiKey } from '../configuration';
 
 export async function fetchTraktList(username: string, listSlug: string, accessToken?: string): Promise<TraktListItem[]> {
-  const url = `https://api.trakt.tv/users/${username}/lists/${listSlug}/items`;
+  // Always use Netlify proxy to avoid CORS issues
+  const url = `/.netlify/functions/trakt-proxy?username=${encodeURIComponent(username)}&list=${encodeURIComponent(listSlug)}`;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'trakt-api-version': '2',
-    'trakt-api-key': traktApiKey
+    'Content-Type': 'application/json'
   };
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
   const res = await fetch(url, { headers });
