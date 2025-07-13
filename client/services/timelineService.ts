@@ -6,12 +6,13 @@ import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 export interface Timeline {
   id: string;
   name: string;
+  displayName: string;
   description?: string;
   sort_order?: string;
   created_at?: string;
 }
 
-export async function createTimeline(data: { name: string; description?: string; sortOrder?: string }): Promise<Timeline> {
+export async function createTimeline(data: { name: string; displayName?: string; description?: string; sortOrder?: string }): Promise<Timeline> {
   try {
     // Create a Timeline content under the configured path
     const result = await repository.post({
@@ -21,8 +22,8 @@ export async function createTimeline(data: { name: string; description?: string;
         select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
       },
       content: {
-        Name: data.name.replace(/\s+/g, '-').toLowerCase(),
-        DisplayName: data.name,
+        Name: data.name,
+        DisplayName: data.displayName || data.name,
         Description: data.description || '',
         SortOrder: data.sortOrder || 'chronological',
       },
@@ -30,7 +31,8 @@ export async function createTimeline(data: { name: string; description?: string;
     
     return {
       id: String(result.d.Id),
-      name: result.d.DisplayName || data.name,
+      name: result.d.Name || data.name, // Use the path segment, not DisplayName
+      displayName: result.d.DisplayName || data.displayName || data.name,
       description: result.d.Description || data.description,
       sort_order: result.d.SortOrder || data.sortOrder,
       created_at: result.d.CreationDate,
@@ -55,13 +57,15 @@ export async function getTimelines(): Promise<Timeline[]> {
     
     return result.d.results.map((item: { 
       Id: number; 
+      Name: string;
       DisplayName: string; 
       Description?: string; 
       SortOrder?: string; 
       CreationDate: string; 
     }) => ({
       id: String(item.Id),
-      name: item.DisplayName,
+      name: item.Name, 
+      displayName: item.DisplayName,
       description: item.Description || '',
       sort_order: item.SortOrder || 'chronological',
       created_at: item.CreationDate,

@@ -117,62 +117,66 @@ export const TimelineListPage: React.FC = () => {
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>
-          {timelines.map(timeline => (
-            <div key={timeline.id} style={{
-              background: '#fff',
-              border: '1px solid #e9ecef',
-              borderRadius: 12,
-              padding: 24,
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-              transition: 'transform 0.2s, box-shadow 0.2s'
-            }}>
-              <Link 
-                to={`/timelines/${timeline.id}`} 
-                style={{ 
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  display: 'block'
-                }}
-              >
-                <h3 style={{ 
-                  marginBottom: 8, 
-                  color: '#2a4d8f',
-                  fontSize: 20,
-                  fontWeight: 600
-                }}>
-                  {timeline.name}
-                </h3>
-                
-                {timeline.description && (
-                  <p style={{ 
-                    color: '#495057', 
-                    marginBottom: 16,
-                    lineHeight: 1.5,
-                    fontSize: 14
+          {timelines.map(timeline => {
+            // Use the Name field for the URL path segment (friendly URL)
+            // If you want to keep the original name formatting, you may need to store the path segment separately
+            // For now, we will generate it from the DisplayName (same as in createTimeline)
+            const pathSegment = timeline.name.toLowerCase();
+            return (
+              <div key={timeline.id} style={{
+                background: '#fff',
+                border: '1px solid #e9ecef',
+                borderRadius: 12,
+                padding: 24,
+                boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                transition: 'transform 0.2s, box-shadow 0.2s'
+              }}>
+                <Link 
+                  to={`/timelines/${pathSegment}`} 
+                  style={{ 
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    display: 'block'
+                  }}
+                >
+                  <h3 style={{ 
+                    marginBottom: 8, 
+                    color: '#2a4d8f',
+                    fontSize: 20,
+                    fontWeight: 600
                   }}>
-                    {timeline.description}
-                  </p>
-                )}
-                
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: 12,
-                  color: '#6c757d'
-                }}>
-                  <span>
-                    Sort: {timeline.sort_order === 'chronological' ? 'Chronological' : 'Release Order'}
-                  </span>
-                  {timeline.created_at && (
-                    <span>
-                      Created: {new Date(timeline.created_at).toLocaleDateString()}
-                    </span>
+                    {timeline.displayName}
+                  </h3>
+                  {timeline.description && (
+                    <p style={{ 
+                      color: '#495057', 
+                      marginBottom: 16,
+                      lineHeight: 1.5,
+                      fontSize: 14
+                    }}>
+                      {timeline.description}
+                    </p>
                   )}
-                </div>
-              </Link>
-            </div>
-          ))}
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    fontSize: 12,
+                    color: '#6c757d'
+                  }}>
+                    <span>
+                      Sort: {timeline.sort_order === 'chronological' ? 'Chronological' : 'Release Order'}
+                    </span>
+                    {timeline.created_at && (
+                      <span>
+                        Created: {new Date(timeline.created_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </Link>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

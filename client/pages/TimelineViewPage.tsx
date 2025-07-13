@@ -4,6 +4,7 @@ import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import type { DropResult, DraggableProvided, DraggableStateSnapshot, DroppableProvided } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import type { Timeline } from '../services/timelineService';
+import { timelinesPath } from '../projectPaths';
 import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
@@ -17,25 +18,24 @@ export const TimelineViewPage: React.FC = () => {
   const [pendingOrder, setPendingOrder] = useState<TimelineEntry[] | null>(null);
   // const [mediaMap, setMediaMap] = useState<Record<number, MediaItem>>({});
   const [entriesLoading, setEntriesLoading] = useState(true);
-  const { id } = useParams();
+  const { id: timelineName } = useParams();
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!id) return;
-    
+    if (!timelineName) return;
     const loadTimeline = async () => {
       try {
         setLoading(true);
-        // Load the specific timeline by ID
+        // Load the specific timeline by name (path segment)
+        const parentPath = `${timelinesPath}/${timelineName}`;
         const result = await repository.load({
-          idOrPath: Number(id),
+          idOrPath: parentPath,
           oDataOptions: {
             select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
           },
         });
-        
         setTimeline({
           id: String(result.d.Id),
           name: result.d.DisplayName,
@@ -45,11 +45,8 @@ export const TimelineViewPage: React.FC = () => {
         });
         // Load timeline entries and media items
         setEntriesLoading(true);
-        const timelineId = result.d.Id;
-        const parentPath = result.d.Path;
-        const entries = await TimelineEntryService.listTimelineEntries(Number(timelineId), parentPath);
+        const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id), parentPath);
         setEntries(entries);
-        // No need to load media items separately; entries have expanded mediaItem
         setEntriesLoading(false);
       } catch (err) {
         console.error('Failed to load timeline:', err);
@@ -59,9 +56,8 @@ export const TimelineViewPage: React.FC = () => {
         setLoading(false);
       }
     };
-
     loadTimeline();
-  }, [id]);
+  }, [timelineName]);
 
   if (loading) {
     return <div style={{ textAlign: 'center', padding: 40 }}>Loading timeline...</div>;
@@ -160,7 +156,7 @@ export const TimelineViewPage: React.FC = () => {
         </div>
         {oidcUser && (
           <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Link to={`/timelines/${timeline.id}/add-entry`} style={{ background: '#2a4d8f', color: '#fff', padding: '8px 16px', borderRadius: 6, textDecoration: 'none', fontWeight: 500 }}>
+            <Link to={`/timelines/${timelineName}/add-entry`} style={{ background: '#2a4d8f', color: '#fff', padding: '8px 16px', borderRadius: 6, textDecoration: 'none', fontWeight: 500 }}>
               + Add Media Entry
             </Link>
             <button

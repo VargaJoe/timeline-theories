@@ -5,9 +5,9 @@ import { TimelineEntryService } from '../services/timelineEntryService';
 import { timelinesPath } from '../projectPaths';
 
 export default function TimelineEntryCreatePage() {
-  const { timelineId } = useParams<{ timelineId: string }>();
+  const { timelineId: timelineName } = useParams<{ timelineId: string }>();
   const navigate = useNavigate();
-  const [selectedMedia, setSelectedMedia] = useState<any>(null);
+  const [selectedMedia, setSelectedMedia] = useState<{ Id: number; DisplayName?: string } | null>(null);
   const [position, setPosition] = useState<number>(1);
   const [notes, setNotes] = useState('');
   const [entryLabel, setEntryLabel] = useState('mainstory');
@@ -15,24 +15,23 @@ export default function TimelineEntryCreatePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSelect = (media: any) => setSelectedMedia(media);
+  const handleSelect = (media: { Id: number; DisplayName?: string }) => setSelectedMedia(media);
 
   const handleSave = async () => {
-    if (!timelineId || !selectedMedia) return;
+    if (!timelineName || !selectedMedia) return;
     setSaving(true);
     setError('');
     try {
       // TimelineEntry should be created under the selected timeline's path
-      const parentPath = `${timelinesPath}/${timelineId}`;
+      const parentPath = `${timelinesPath}/${timelineName}`;
       await TimelineEntryService.createTimelineEntry({
-        mediaItemId: selectedMedia.Id,
-        timelineId: Number(timelineId),
+        mediaItem: selectedMedia,
         position,
         notes,
         entryLabel,
         importance,
       }, parentPath);
-      navigate(`/timelines/${timelineId}`);
+      navigate(`/timelines/${timelineName}`);
     } catch (e) {
       setError('Failed to create timeline entry.');
     } finally {

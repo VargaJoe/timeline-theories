@@ -4,6 +4,7 @@ import { createTimeline } from '../services/timelineService';
 
 export const TimelineCreateForm: React.FC = () => {
   const [name, setName] = useState('');
+  const [displayName, setDisplayName] = useState('');  
   const [description, setDescription] = useState('');
   const [sortOrder, setSortOrder] = useState<'chronological' | 'release'>('chronological');
   const [error, setError] = useState('');
@@ -28,9 +29,10 @@ export const TimelineCreateForm: React.FC = () => {
     
     setLoading(true);
     try {
-      console.log('Creating timeline with data:', { name: name.trim(), description: description.trim(), sortOrder });
+      console.log('Creating timeline with data:', { name: name.trim(), displayName: displayName.trim(), description: description.trim(), sortOrder });
       const timeline = await createTimeline({ 
         name: name.trim(), 
+        displayName: displayName.trim(),
         description: description.trim() || undefined, 
         sortOrder 
       });
@@ -40,7 +42,7 @@ export const TimelineCreateForm: React.FC = () => {
       
       // Show success message briefly, then redirect
       setTimeout(() => {
-        navigate(`/timelines/${timeline.id}`);
+        navigate(`/timelines/${timeline.name}`);
       }, 1500);
     } catch (err) {
       console.error('Timeline creation error:', err);
@@ -85,9 +87,27 @@ export const TimelineCreateForm: React.FC = () => {
       <div>
         <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Title *</label>
         <input
+          value={displayName}
+          onChange={e => setDisplayName(e.target.value)}
+          placeholder="Enter timeline title..."
+          required
+          style={{
+            width: '100%',
+            padding: '12px 14px',
+            borderRadius: 6,
+            border: '1px solid #ccc',
+            fontSize: 16,
+            boxSizing: 'border-box'
+          }}
+        />
+      </div>
+
+      <div>
+        <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Url *</label>
+        <input
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder="Enter timeline title..."
+          placeholder="Enter timeline url slug..."
           required
           style={{
             width: '100%',
