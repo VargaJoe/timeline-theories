@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { TraktListItem } from '../services/traktService';
 import MediaLibraryService from '../services/mediaLibraryService';
 import type { MediaItem } from '../services/mediaLibraryService';
+import type { TimelineEntry } from '../services/timelineEntryService';
 import { TimelineEntryService } from '../services/timelineEntryService';
 
 interface TraktImportDialogProps {
@@ -47,12 +48,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
       const res = await fetch(`/.netlify/functions/trakt-proxy?username=${encodeURIComponent(parsed.username)}&list=${encodeURIComponent(parsed.list)}`);
       if (!res.ok) throw new Error('Failed to fetch Trakt list');
       const data = await res.json();
-      const items: TraktListItem[] = data.map((item: any) => ({
-        type: item.type,
-        ids: item[item.type]?.ids,
-        title: item[item.type]?.title,
-        year: item[item.type]?.year
-      }));
+      const items: TraktListItem[] = (data as TraktListItem[]);
       let timeline = timelineName;
       if (!timeline && createTimelineIfMissing) {
         // Prompt for timeline name/desc if needed
@@ -62,7 +58,15 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         if (onTimelineCreated) onTimelineCreated(timeline);
       }
       if (!timeline) throw new Error('Timeline not specified or created');
-      let created = 0, reused = 0, errors: string[] = [];
+      // Fetch existing entries for deduplication
+      let existingEntries: TimelineEntry[] = [];
+      try {
+        existingEntries = await TimelineEntryService.listTimelineEntries(0, `/Root/Content/Timelines/${timeline}`);
+      } catch {
+        // Ignore errors, treat as no existing entries
+      }
+      let created = 0, reused = 0, skipped = 0;
+      const errors: string[] = [];
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         let found: MediaItem | undefined = undefined;
@@ -86,6 +90,15 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             mediaItem = await MediaLibraryService.createMediaItem(req);
             created++;
           }
+          // Check if entry already exists for this media item
+          const alreadyExists = existingEntries.some(e => e.mediaItem && mediaItem && (
+            (e.mediaItem.Id === mediaItem.Id) ||
+            (e.mediaItem.DisplayName?.toLowerCase() === mediaItem.DisplayName.toLowerCase())
+          ));
+          if (alreadyExists) {
+            skipped++;
+            continue;
+          }
           await TimelineEntryService.createTimelineEntry({
             displayName: mediaItem.DisplayName,
             mediaItem: {
@@ -101,7 +114,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           errors.push(`${item.title} (${item.year || ''}): ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
       }
-      const sum = `Imported ${items.length} items: ${created} created, ${reused} reused.${errors.length ? ' Errors: ' + errors.join('; ') : ''}`;
+      const sum = `Imported ${items.length} items: ${created} created, ${reused} reused, ${skipped} skipped.${errors.length ? ' Errors: ' + errors.join('; ') : ''}`;
       setSummary(sum);
       if (onImportComplete) onImportComplete(sum);
     } catch (err) {
