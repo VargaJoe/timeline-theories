@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { TraktListItem } from '../services/traktService';
+import { fetchTraktList } from '../services/traktService';
 import MediaLibraryService from '../services/mediaLibraryService';
 import type { MediaItem } from '../services/mediaLibraryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
@@ -45,11 +46,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     }
     setImporting(true);
     try {
-      // Use Netlify proxy (same as create page)
-      const res = await fetch(`/.netlify/functions/trakt-proxy?username=${encodeURIComponent(parsed.username)}&list=${encodeURIComponent(parsed.list)}`);
-      if (!res.ok) throw new Error('Failed to fetch Trakt list');
-      const data = await res.json();
-      const items: TraktListItem[] = (data as TraktListItem[]);
+      // Always use fetchTraktList for consistent mapping
+      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list);
       let timeline = timelineName;
       if (!timeline && createTimelineIfMissing) {
         // Prompt for timeline name/desc if needed
