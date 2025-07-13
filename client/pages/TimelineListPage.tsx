@@ -56,9 +56,30 @@ export const TimelineListPage: React.FC = () => {
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ marginBottom: 8, color: '#2a4d8f' }}>Public Timelines</h1>
         <p style={{ color: '#666', margin: 0 }}>
-          Discover timelines created by the community, or{' '}
-          <Link to="/create" style={{ color: '#2a4d8f', fontWeight: 500 }}>create your own</Link>.
+          Discover timelines created by the community.
         </p>
+        <div style={{ marginTop: 18 }}>
+          <Link
+            to="/create"
+            style={{
+              background: '#7bb274',
+              color: '#234d32',
+              textDecoration: 'none',
+              padding: '12px 28px',
+              borderRadius: 8,
+              fontWeight: 600,
+              fontSize: 16,
+              boxShadow: '0 2px 8px #b7d3b7',
+              display: 'inline-block',
+              border: 'none',
+              transition: 'background 0.2s, color 0.2s',
+            }}
+            onMouseOver={e => (e.currentTarget.style.background = '#b7d3b7')}
+            onMouseOut={e => (e.currentTarget.style.background = '#7bb274')}
+          >
+            + Create Timeline
+          </Link>
+        </div>
       </div>
       
       {timelines.length === 0 ? (

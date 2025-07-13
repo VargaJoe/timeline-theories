@@ -33,7 +33,6 @@ function App() {
                 <ul className="nav-menu">
                   <li><a href="/timelines">Timelines</a></li>
                   <li><a href="/media-library">Media Library</a></li>
-                  <li><a href="/create">Create Timeline</a></li>
                 </ul>
               </div>
               <div className="nav-right">
