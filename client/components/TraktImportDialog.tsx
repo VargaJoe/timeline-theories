@@ -71,16 +71,21 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         let found: MediaItem | undefined = undefined;
         try {
           const allMedia = await MediaLibraryService.getMediaItems();
-          found = allMedia.find(m => m.DisplayName.toLowerCase() === item.title.toLowerCase() && (!item.year || m.ReleaseDate?.startsWith(String(item.year))));
-        } catch {}
+          // Use 'title (year)' format for matching if year is present
+          const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+          found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
+        } catch {
+          // Ignore errors, treat as not found
+        }
         let mediaItem: MediaItem;
         try {
           if (found) {
             mediaItem = found;
             reused++;
           } else {
+            const displayName = item.year ? `${item.title} (${item.year})` : item.title;
             const req = {
-              DisplayName: item.title,
+              DisplayName: displayName,
               Description: '',
               MediaType: item.type,
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
