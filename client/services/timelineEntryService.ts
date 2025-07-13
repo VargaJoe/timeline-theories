@@ -3,6 +3,7 @@ import { TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 
 // Minimal MediaItem reference type for expanded reference
 export interface MediaItemRef {
+  Name: string;
   Id: number;
   DisplayName?: string;
   CoverImageUrl?: string;
@@ -78,6 +79,8 @@ export class TimelineEntryService {
       parentPath,
       contentType: TIMELINE_ENTRY_CONTENT_TYPE,
       content: {
+        Name: data.mediaItem?.Name,
+        DisplayName:  data.mediaItem?.DisplayName,
         MediaItem: data.mediaItem?.Id, // Reference field (id)
         Position: data.position,
         ChronologicalDate: data.chronologicalDate,
