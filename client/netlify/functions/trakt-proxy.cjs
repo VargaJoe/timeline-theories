@@ -13,18 +13,41 @@ exports.handler = async function(event, context) {
         body: JSON.stringify({ error: 'Missing username or list parameter' })
       };
     }
+
+    // Debug: Check if API key exists
+    const apiKey = process.env.TRAKT_API_KEY;
+    if (!apiKey) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: 'TRAKT_API_KEY environment variable not set' })
+      };
+    }
+
     const url = `https://api.trakt.tv/users/${username}/lists/${list}/items`;
+    console.log('Fetching Trakt URL:', url);
+    console.log('API Key present:', !!apiKey, 'Length:', apiKey.length);
+    
     const res = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
         'trakt-api-version': '2',
-        'trakt-api-key': process.env.TRAKT_API_KEY
+        'trakt-api-key': apiKey
       }
     });
+    
+    console.log('Trakt API response status:', res.status);
+    
     if (!res.ok) {
+      const errorText = await res.text();
+      console.log('Trakt API error response:', errorText);
       return {
         statusCode: res.status,
-        body: JSON.stringify({ error: 'Failed to fetch from Trakt', status: res.status })
+        body: JSON.stringify({ 
+          error: 'Failed to fetch from Trakt', 
+          status: res.status,
+          details: errorText,
+          url: url
+        })
       };
     }
     const data = await res.json();
