@@ -144,8 +144,27 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <button onClick={() => setShow(s => !s)} disabled={disabled} style={{ background: '#2a4d8f', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: 'pointer' }}>
-        {show ? 'Cancel Trakt Import' : fetchOnly ? 'Fetch from Trakt for Review' : 'Import from Trakt'}
+      <button 
+        onClick={() => setShow(s => !s)} 
+        disabled={disabled} 
+        style={{ 
+          background: '#6f42c1', 
+          color: '#fff', 
+          border: 'none', 
+          borderRadius: 6, 
+          padding: '8px 16px', 
+          fontWeight: 500, 
+          fontSize: 16, 
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8
+        }}
+      >
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+        </svg>
+        {show ? 'Cancel' : fetchOnly ? 'Import Trakt' : 'Import Trakt'}
       </button>
       {show && (
         <div style={{ marginTop: 16, background: '#f8f9fa', borderRadius: 8, padding: 16, boxShadow: '0 1px 4px #0001' }}>

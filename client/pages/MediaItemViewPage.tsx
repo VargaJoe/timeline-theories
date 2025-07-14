@@ -47,13 +47,13 @@ export const MediaItemViewPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <svg className="animate-spin h-12 w-12 text-blue-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      <div style={{ minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <svg style={{ animation: 'spin 1s linear infinite', height: 48, width: 48, color: '#2a4d8f', margin: '0 auto 16px' }} fill="none" viewBox="0 0 24 24">
+            <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
-          <p className="text-gray-600">Loading media item...</p>
+          <p style={{ color: '#666' }}>Loading media item...</p>
         </div>
       </div>
     );
@@ -61,18 +61,32 @@ export const MediaItemViewPage: React.FC = () => {
 
   if (error || !mediaItem) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <svg className="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div style={{ minHeight: '100vh', background: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <svg style={{ width: 64, height: 64, color: '#dc3545', margin: '0 auto 16px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Media Item Not Found</h1>
-          <p className="text-gray-600 mb-4">{error || 'The media item you are looking for does not exist.'}</p>
+          <h1 style={{ fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>Media Item Not Found</h1>
+          <p style={{ color: '#666', marginBottom: 16 }}>{error || 'The media item you are looking for does not exist.'}</p>
           <Link 
             to="/media-library" 
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '8px 16px',
+              background: '#2a4d8f',
+              color: '#fff',
+              textDecoration: 'none',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontSize: 14,
+              gap: 8
+            }}
           >
-            ← Back to Media Library
+            <svg style={{ width: 16, height: 16 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to Media Library
           </Link>
         </div>
       </div>
@@ -82,52 +96,112 @@ export const MediaItemViewPage: React.FC = () => {
   const externalLinks = getExternalLinks(mediaItem.ExternalLinks);
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div style={{ minHeight: '100vh', background: '#f8f9fa', padding: 32 }}>
+      <div style={{ maxWidth: 800, margin: '0 auto' }}>
         {/* Header */}
-        <div className="mb-8">
+        <div style={{ marginBottom: 32 }}>
           <Link 
             to="/media-library" 
-            className="inline-flex items-center text-blue-600 hover:text-blue-800 mb-4"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              color: '#2a4d8f',
+              textDecoration: 'none',
+              marginBottom: 16,
+              fontSize: 14,
+              gap: 8
+            }}
           >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg style={{ width: 20, height: 20 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
             Back to Media Library
           </Link>
           
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">{mediaItem.DisplayName}</h1>
+          <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 2px 12px #0001', padding: 32 }}>
+            <h1 style={{ fontSize: 32, fontWeight: 'bold', color: '#2a4d8f', marginBottom: 16 }}>
+              {mediaItem.DisplayName}
+            </h1>
             
             {/* Media Type Badge */}
-            <div className="mb-4">
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+            <div style={{ marginBottom: 24 }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '6px 12px',
+                borderRadius: 20,
+                fontSize: 14,
+                fontWeight: 500,
+                background: '#e3f2fd',
+                color: '#1976d2'
+              }}>
                 {mediaItem.MediaType}
               </span>
               {mediaItem.Genre && (
-                <span className="ml-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '6px 12px',
+                  borderRadius: 20,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  background: '#f5f5f5',
+                  color: '#666',
+                  marginLeft: 8
+                }}>
                   {mediaItem.Genre}
                 </span>
               )}
             </div>
 
+            {/* Release Date */}
+            {mediaItem.ReleaseDate && (
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: '#333', marginBottom: 8 }}>Release Date</h2>
+                <p style={{ color: '#666', fontSize: 16 }}>{formatDate(mediaItem.ReleaseDate)}</p>
+              </div>
+            )}
+
             {/* Description */}
             {mediaItem.Description && (
-              <div className="mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-2">Description</h2>
-                <p className="text-gray-700 leading-relaxed">{mediaItem.Description}</p>
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: '#333', marginBottom: 8 }}>Description</h2>
+                <p style={{ color: '#666', lineHeight: 1.6, fontSize: 16 }}>{mediaItem.Description}</p>
+              </div>
+            )}
+
+            {/* Cover Image */}
+            {mediaItem.CoverImageUrl && (
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: '#333', marginBottom: 8 }}>Cover Image</h2>
+                <img 
+                  src={mediaItem.CoverImageUrl} 
+                  alt={mediaItem.DisplayName}
+                  style={{ maxWidth: 200, height: 'auto', borderRadius: 8, boxShadow: '0 2px 8px #0001' }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
               </div>
             )}
 
             {/* Tags */}
             {mediaItem.Tags && (
-              <div className="mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-2">Tags</h2>
-                <div className="flex flex-wrap gap-2">
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: '#333', marginBottom: 8 }}>Tags</h2>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {mediaItem.Tags.split(',').map((tag: string, index: number) => (
                     <span 
                       key={index}
-                      className="inline-flex items-center px-2 py-1 rounded text-sm bg-gray-200 text-gray-800"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '4px 8px',
+                        borderRadius: 4,
+                        fontSize: 14,
+                        background: '#e9ecef',
+                        color: '#495057'
+                      }}
                     >
                       #{tag.trim()}
                     </span>
@@ -138,18 +212,25 @@ export const MediaItemViewPage: React.FC = () => {
 
             {/* External Links */}
             {Object.keys(externalLinks).length > 0 && (
-              <div className="mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-2">External Links</h2>
-                <div className="space-y-2">
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: '#333', marginBottom: 8 }}>External Links</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {Object.entries(externalLinks).map(([key, url]) => (
                     <a
                       key={key}
                       href={url as string}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center text-blue-600 hover:text-blue-800"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        color: '#2a4d8f',
+                        textDecoration: 'none',
+                        fontSize: 16,
+                        gap: 8
+                      }}
                     >
-                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg style={{ width: 16, height: 16 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                       </svg>
                       {key === 'url' ? 'External Link' : key.charAt(0).toUpperCase() + key.slice(1)}
@@ -160,8 +241,8 @@ export const MediaItemViewPage: React.FC = () => {
             )}
 
             {/* Metadata */}
-            <div className="border-t pt-6 text-sm text-gray-500">
-              <p>Created: {formatDate(mediaItem.CreationDate)}</p>
+            <div style={{ borderTop: '1px solid #e9ecef', paddingTop: 24, fontSize: 14, color: '#6c757d' }}>
+              <p style={{ marginBottom: 4 }}>Created: {formatDate(mediaItem.CreationDate)}</p>
               <p>ID: {mediaItem.Id}</p>
             </div>
           </div>

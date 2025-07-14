@@ -193,8 +193,21 @@ Common error scenarios:
 
 ## Rate Limiting
 
-- **Trakt API**: Respects Trakt.tv rate limits (1000 requests/5 minutes)
-- **SenseNet**: No specific limits, but good practice to batch operations
+**External APIs:**
+- **Trakt API**: 1000 requests per 5 minutes (200 requests/minute)
+- **OMDb API**: 1000 requests per day (free tier) / 100,000 per day (paid)
+- **TMDb API**: 40 requests per 10 seconds (4 requests/second)
+- **IMDb**: No official API - web scraping rate limits apply
+
+**Internal APIs:**
+- **SenseNet ECM**: No specific rate limits, but good practice to batch operations
+- **Netlify Functions**: 125,000 function invocations per month (free tier)
+
+**Bulk Update Considerations:**
+- Sequential processing to respect API rate limits
+- Built-in retry logic with exponential backoff
+- Progress tracking to handle large datasets
+- Source rotation to distribute API usage
 
 ## Development Notes
 
