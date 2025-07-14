@@ -31,9 +31,24 @@ exports.handler = async function(event, context) {
       'trakt-api-version': '2',
       'trakt-api-key': apiKey
     };
-    console.log('Request headers:', JSON.stringify(headers, null, 2));
     
-    const res = await fetch(url, { headers });
+    // Also try with Client-ID header (alternative format)
+    const alternativeHeaders = {
+      'Content-Type': 'application/json',
+      'trakt-api-version': '2',
+      'trakt-client-id': apiKey
+    };
+    
+    console.log('Request headers (trakt-api-key):', JSON.stringify(headers, null, 2));
+    console.log('Alternative headers (trakt-client-id):', JSON.stringify(alternativeHeaders, null, 2));
+    
+    // Try both header formats
+    let res = await fetch(url, { headers });
+    
+    if (res.status === 401) {
+      console.log('First attempt failed with 401, trying alternative header...');
+      res = await fetch(url, { headers: alternativeHeaders });
+    }
     
     console.log('Trakt API response status:', res.status);
     console.log('Response headers:', JSON.stringify([...res.headers.entries()], null, 2));
