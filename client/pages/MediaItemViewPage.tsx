@@ -39,9 +39,45 @@ export const MediaItemViewPage: React.FC = () => {
   const getExternalLinks = (externalLinksJson?: string) => {
     if (!externalLinksJson) return {};
     try {
-      return JSON.parse(externalLinksJson);
+      const links = JSON.parse(externalLinksJson);
+      const processedLinks: Record<string, string> = {};
+      
+      for (const [key, value] of Object.entries(links)) {
+        if (typeof value === 'string' || typeof value === 'number') {
+          // Convert IDs to proper URLs
+          switch (key.toLowerCase()) {
+            case 'imdb':
+              processedLinks['IMDb'] = `https://www.imdb.com/title/${value}/`;
+              break;
+            case 'tmdb':
+              processedLinks['TMDb'] = `https://www.themoviedb.org/movie/${value}`;
+              break;
+            case 'trakt':
+              processedLinks['Trakt'] = `https://trakt.tv/movies/${value}`;
+              break;
+            case 'tvdb':
+              processedLinks['TVDB'] = `https://www.thetvdb.com/?tab=series&id=${value}`;
+              break;
+            default:
+              // If it's already a URL, use it as is
+              if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
+                processedLinks[key] = value;
+              } else {
+                // Otherwise, treat as an ID and create a generic link
+                processedLinks[key] = `https://example.com/${key}/${value}`;
+              }
+              break;
+          }
+        }
+      }
+      
+      return processedLinks;
     } catch {
-      return { url: externalLinksJson };
+      // If it's a single URL string, return it
+      if (typeof externalLinksJson === 'string' && (externalLinksJson.startsWith('http://') || externalLinksJson.startsWith('https://'))) {
+        return { 'External Link': externalLinksJson };
+      }
+      return {};
     }
   };
 
