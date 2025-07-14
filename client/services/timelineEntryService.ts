@@ -75,24 +75,36 @@ export class TimelineEntryService {
    * @param parentPath Path of the parent timeline (required)
    */
   static async createTimelineEntry(data: Omit<TimelineEntry, 'id'>, parentPath: string): Promise<TimelineEntry> {
+    console.log('TimelineEntryService.createTimelineEntry called with:');
+    console.log('- Data:', JSON.stringify(data, null, 2));
+    console.log('- Parent path:', parentPath);
+    
+    const content = {
+      Name: data.mediaItem?.Name,
+      DisplayName: data.mediaItem?.DisplayName,
+      MediaItem: data.mediaItem?.Id, // Reference field (id)
+      Position: data.position,
+      ChronologicalDate: data.chronologicalDate,
+      ReleaseOrderPosition: data.releaseOrderPosition,
+      Notes: data.notes,
+      EntryLabel: data.entryLabel,
+      IsOptional: data.isOptional ?? false,
+      ArcGroup: data.arcGroup,
+      Importance: data.importance,
+      CreatedBy: data.createdBy,
+    };
+    
+    console.log('- Content to be posted:', JSON.stringify(content, null, 2));
+    console.log('- Content type:', TIMELINE_ENTRY_CONTENT_TYPE);
+    
     const result = await repository.post({
       parentPath,
       contentType: TIMELINE_ENTRY_CONTENT_TYPE,
-      content: {
-        Name: data.mediaItem?.Name,
-        DisplayName:  data.mediaItem?.DisplayName,
-        MediaItem: data.mediaItem?.Id, // Reference field (id)
-        Position: data.position,
-        ChronologicalDate: data.chronologicalDate,
-        ReleaseOrderPosition: data.releaseOrderPosition,
-        Notes: data.notes,
-        EntryLabel: data.entryLabel,
-        IsOptional: data.isOptional ?? false,
-        ArcGroup: data.arcGroup,
-        Importance: data.importance,
-        CreatedBy: data.createdBy,
-      },
+      content,
     });
+    
+    console.log('- Repository response:', JSON.stringify(result, null, 2));
+    
     return {
       id: String(result.d.Id),
       ...data,

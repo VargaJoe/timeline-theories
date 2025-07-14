@@ -68,13 +68,16 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
       const errors: string[] = [];
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
+        console.log(`Processing item ${i + 1}/${items.length}:`, item.title, item.year);
         let found: MediaItem | undefined = undefined;
         try {
           const allMedia = await MediaLibraryService.getMediaItems();
           // Use 'title (year)' format for matching if year is present
           const displayName = item.year ? `${item.title} (${item.year})` : item.title;
           found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
-        } catch {
+          console.log(`Media item search for "${displayName}":`, found ? 'found existing' : 'not found');
+        } catch (err) {
+          console.error('Error searching media items:', err);
           // Ignore errors, treat as not found
         }
         let mediaItem: MediaItem;
@@ -82,6 +85,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           if (found) {
             mediaItem = found;
             reused++;
+            console.log('Reusing existing media item:', mediaItem.DisplayName);
           } else {
             const displayName = item.year ? `${item.title} (${item.year})` : item.title;
             const req = {
@@ -91,7 +95,9 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
               ExternalLinks: JSON.stringify(item.ids),
             };
+            console.log('Creating new media item:', req);
             mediaItem = await MediaLibraryService.createMediaItem(req);
+            console.log('Created media item:', mediaItem.DisplayName, 'ID:', mediaItem.Id);
             created++;
           }
           // Check if entry already exists for this media item
@@ -100,10 +106,11 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             (e.mediaItem.DisplayName?.toLowerCase() === mediaItem.DisplayName.toLowerCase())
           ));
           if (alreadyExists) {
+            console.log('Timeline entry already exists for:', mediaItem.DisplayName);
             skipped++;
             continue;
           }
-          await TimelineEntryService.createTimelineEntry({
+          const entryData = {
             displayName: mediaItem.DisplayName,
             mediaItem: {
               Name: mediaItem.DisplayName,
@@ -113,8 +120,13 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             },
             timelineId: 0, // Not used by backend, but required by type
             position: i + 1,
-          }, `${timelinesPath}/${timeline}`);
+          };
+          const timelinePath = `${timelinesPath}/${timeline}`;
+          console.log('Creating timeline entry:', entryData, 'in timeline path:', timelinePath);
+          await TimelineEntryService.createTimelineEntry(entryData, timelinePath);
+          console.log('Successfully created timeline entry for:', mediaItem.DisplayName);
         } catch (err) {
+          console.error(`Error processing item ${item.title}:`, err);
           errors.push(`${item.title} (${item.year || ''}): ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
       }
