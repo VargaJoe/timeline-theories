@@ -14,14 +14,17 @@
     "@sensenet/authentication-oidc-react": "^2.3.1",
     "@sensenet/client-core": "^4.2.0",
     "@types/react-router-dom": "^5.3.3",
+    "dompurify": "^3.2.6",
     "history": "^5.3.0",
     "react": "^17.0.2",
     "react-beautiful-dnd": "^13.1.1",
     "react-dom": "^17.0.2",
+    "react-quill": "^2.0.0",
     "react-router-dom": "^6.30.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.29.0",
+    "@types/dompurify": "^3.0.5",
     "@types/node": "^24.0.13",
     "@types/react": "^17.0.87",
     "@types/react-beautiful-dnd": "^13.1.8",
