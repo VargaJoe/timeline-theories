@@ -15,6 +15,10 @@ import { setupMediaLibrary } from './scripts/setupMediaLibrary';
 import TimelineEntryCreatePage from './pages/TimelineEntryCreatePage';
 
 function App() {
+  // Ensure browser doesn't interfere with polyfill
+  if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
+    window.history.scrollRestoration = 'manual';
+  }
   useEffect(() => {
     // Setup MediaLibrary folder structure on app load
     setupMediaLibrary();
