@@ -26,29 +26,29 @@ exports.handler = async function(event, context) {
     console.log('API Key first 10 chars:', apiKey.substring(0, 10));
     console.log('API Key last 10 chars:', apiKey.substring(apiKey.length - 10));
     
+    // Test with a known public list first if we're getting 403s
+    const isTestingPublicList = username === 'trakt' && list === 'trending-movies';
+    const testUrl = isTestingPublicList ? url : 'https://api.trakt.tv/movies/trending?limit=1';
+    
     const headers = {
       'Content-Type': 'application/json',
       'trakt-api-version': '2',
       'trakt-api-key': apiKey
     };
     
-    // Also try with Client-ID header (alternative format)
-    const alternativeHeaders = {
-      'Content-Type': 'application/json',
-      'trakt-api-version': '2',
-      'trakt-client-id': apiKey
-    };
-    
     console.log('Request headers (trakt-api-key):', JSON.stringify(headers, null, 2));
-    console.log('Alternative headers (trakt-client-id):', JSON.stringify(alternativeHeaders, null, 2));
+    console.log('Testing URL:', testUrl);
     
-    // Try both header formats
-    let res = await fetch(url, { headers });
+    // First test API key works with a simple endpoint
+    let testRes = await fetch(testUrl, { headers });
+    console.log('Test endpoint response status:', testRes.status);
     
-    if (res.status === 401) {
-      console.log('First attempt failed with 401, trying alternative header...');
-      res = await fetch(url, { headers: alternativeHeaders });
+    if (testRes.ok && !isTestingPublicList) {
+      console.log('API key works! Now trying original URL...');
     }
+    
+    // Try the original request
+    let res = await fetch(url, { headers });
     
     console.log('Trakt API response status:', res.status);
     console.log('Response headers:', JSON.stringify([...res.headers.entries()], null, 2));
