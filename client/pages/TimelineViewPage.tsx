@@ -38,6 +38,7 @@ export const TimelineViewPage: React.FC = () => {
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showFullDescription, setShowFullDescription] = useState(false);
 
   useEffect(() => {
     if (!timelineName) return;
@@ -267,10 +268,34 @@ export const TimelineViewPage: React.FC = () => {
           <>
             <h1 style={{ marginBottom: 16, color: '#2a4d8f' }}>{timeline.displayName}</h1>
             {timeline.description && (
-              <div
-                style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(timeline.description) }}
-              />
+              <div style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}>
+                <div
+                  dangerouslySetInnerHTML={{
+                    __html: DOMPurify.sanitize(
+                      showFullDescription || timeline.description.length <= 600
+                        ? timeline.description
+                        : timeline.description.slice(0, 600) + '...'
+                    )
+                  }}
+                />
+                {timeline.description.length > 300 && (
+                  <button
+                    onClick={() => setShowFullDescription(v => !v)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#2a4d8f',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                      marginTop: 4,
+                      padding: 0,
+                      fontSize: 15
+                    }}
+                  >
+                    {showFullDescription ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+              </div>
             )}
           </>
         )}
