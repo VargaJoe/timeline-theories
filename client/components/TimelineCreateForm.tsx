@@ -19,12 +19,7 @@ export const TimelineCreateForm: React.FC = () => {
   const [importSummary, setImportSummary] = useState<string|null>(null);
   const navigate = useNavigate();
 
-  // Trakt import modal state
-  const [showTraktImport, setShowTraktImport] = useState(false);
-  const [traktUrl, setTraktUrl] = useState('');
-  const [traktImportError, setTraktImportError] = useState('');
-  const [traktImportLoading, setTraktImportLoading] = useState(false);
-  const [traktItems, setTraktItems] = useState<TraktListItem[]|null>(null);
+  // Only keep the review items state - TraktImportDialog handles the import process
   const [traktReviewItems, setTraktReviewItems] = useState<TraktListItem[]|null>(null);
   const [traktProcessing, setTraktProcessing] = useState(false);
 
@@ -49,7 +44,8 @@ export const TimelineCreateForm: React.FC = () => {
         description: description.trim() || undefined, 
         sortOrder 
       });
-      let created = 0, reused = 0, errors: string[] = [];
+      let created = 0, reused = 0;
+      const errors: string[] = [];
       if (traktReviewItems && traktReviewItems.length > 0) {
         setTraktProcessing(true);
         for (let i = 0; i < traktReviewItems.length; i++) {
@@ -58,7 +54,9 @@ export const TimelineCreateForm: React.FC = () => {
           try {
             const allMedia = await MediaLibraryService.getMediaItems();
             found = allMedia.find(m => m.DisplayName.toLowerCase() === item.title.toLowerCase() && (!item.year || m.ReleaseDate?.startsWith(String(item.year))));
-          } catch (e) {}
+          } catch {
+            // Ignore errors in creating media items
+          }
           let mediaItem: MediaItem;
           try {
             if (found) {
@@ -153,99 +151,6 @@ export const TimelineCreateForm: React.FC = () => {
           gap: 16
         }}>
           <h2 style={{ textAlign: 'center', marginBottom: 24, color: '#2a4d8f' }}>Create New Timeline</h2>
-
-          <button
-            type="button"
-            style={{
-              background: '#ed1c24', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 0', fontSize: 15, fontWeight: 600, cursor: 'pointer', marginBottom: 8
-            }}
-            onClick={() => setShowTraktImport(true)}
-          >
-            Import from Trakt List
-          </button>
-
-          {showTraktImport && (
-            <div style={{ background: '#f7f7f7', border: '1px solid #ccc', borderRadius: 8, padding: 16, marginBottom: 12 }}>
-              <label style={{ fontWeight: 500 }}>Trakt List URL</label>
-              <div style={{ color: '#b71c1c', fontSize: 13, marginBottom: 6 }}>
-                Note: The Trakt API does not support CORS. For development, use a CORS proxy or server-side function.
-              </div>
-              <input
-                value={traktUrl}
-                onChange={e => setTraktUrl(e.target.value)}
-                placeholder="https://trakt.tv/users/USERNAME/lists/LISTNAME"
-                style={{ width: '100%', padding: '10px', borderRadius: 6, border: '1px solid #ccc', marginTop: 6, marginBottom: 8 }}
-              />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  style={{ background: '#2a4d8f', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }}
-                  onClick={async () => {
-                    setTraktImportError('');
-                    setTraktImportLoading(true);
-                    setTraktItems(null);
-                    // Parse username and list slug from URL, strip query params from slug
-                    const match = traktUrl.match(/trakt.tv\/users\/(.+?)\/lists\/(.+?)(\/|\?|$)/);
-                    if (!match) {
-                      setTraktImportError('Invalid Trakt list URL');
-                      setTraktImportLoading(false);
-                      return;
-                    }
-                    const username = match[1];
-                    let listSlug = match[2];
-                    // Remove query parameters from listSlug if present
-                    listSlug = listSlug.split('?')[0];
-                    try {
-                      // Call Netlify Function proxy
-                      const resp = await fetch(`/.netlify/functions/trakt-proxy?username=${encodeURIComponent(username)}&list=${encodeURIComponent(listSlug)}`);
-                      if (!resp.ok) throw new Error('Failed to fetch Trakt list from proxy');
-                      const data = await resp.json();
-                      // Map to TraktListItem[]
-                      const items = data.map((item: any) => ({
-                        type: item.type,
-                        ids: item[item.type]?.ids,
-                        title: item[item.type]?.title,
-                        year: item[item.type]?.year
-                      }));
-                      setTraktItems(items);
-                    } catch (err) {
-                      setTraktImportError(err instanceof Error ? err.message : 'Failed to fetch Trakt list.\n\nCheck your Netlify Function and environment variable.');
-                    }
-                    setTraktImportLoading(false);
-                  }}
-                  disabled={traktImportLoading}
-                >
-                  {traktImportLoading ? 'Importing...' : 'Import'}
-                </button>
-                <button type="button" style={{ background: '#aaa', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }} onClick={() => setShowTraktImport(false)}>
-                  Cancel
-                </button>
-              </div>
-              {traktImportError && <div style={{ color: '#b71c1c', marginTop: 8 }}>{traktImportError}</div>}
-              {traktItems && (
-                <div style={{ marginTop: 12 }}>
-                  <strong>Items found: {traktItems.length}</strong>
-                  <ul style={{ maxHeight: 200, overflowY: 'auto', margin: 0, padding: 0, listStyle: 'none' }}>
-                    {traktItems.map((item, idx) => (
-                      <li key={idx} style={{ padding: 4, borderBottom: '1px solid #eee', fontSize: 15 }}>
-                        {item.type.toUpperCase()}: {item.title} {item.year ? `(${item.year})` : ''}
-                      </li>
-                    ))}
-                  </ul>
-                  <button
-                    type="button"
-                    style={{ marginTop: 10, background: '#2a4d8f', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }}
-                    onClick={() => {
-                      setTraktReviewItems(traktItems);
-                      setShowTraktImport(false);
-                    }}
-                  >
-                    Use These Items
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Review/edit imported Trakt items before timeline creation */}
           {traktReviewItems && (
