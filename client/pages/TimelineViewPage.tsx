@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { TraktImportDialog } from '../components/TraktImportDialog';
+import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
@@ -39,6 +40,7 @@ export const TimelineViewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showFullDescription, setShowFullDescription] = useState(false);
+  const [showBulkUpdateDialog, setShowBulkUpdateDialog] = useState(false);
 
   useEffect(() => {
     if (!timelineName) return;
@@ -336,6 +338,21 @@ export const TimelineViewPage: React.FC = () => {
               {reorderMode ? 'Save Order' : 'Reorder Entries'}
             </button>
             <button
+              onClick={() => setShowBulkUpdateDialog(true)}
+              style={{
+                background: '#17a2b8',
+                color: '#fff',
+                padding: '8px 16px',
+                borderRadius: 6,
+                border: 'none',
+                fontWeight: 500,
+                fontSize: 16,
+                cursor: 'pointer',
+              }}
+            >
+              Update Media Data
+            </button>
+            <button
               onClick={async () => {
                 if (!timelineName) return;
                 if (window.confirm('Are you sure you want to delete this timeline? This action cannot be undone.')) {
@@ -477,6 +494,33 @@ export const TimelineViewPage: React.FC = () => {
           </table>
         )}
       </div>
+
+      {/* Bulk Update Dialog */}
+      <BulkUpdateDialog
+        mediaItems={entries
+          .map(entry => entry.mediaItem)
+          .filter((item): item is NonNullable<typeof item> => item !== null)
+          .map(ref => ({
+            Id: ref.Id,
+            DisplayName: ref.DisplayName || ref.Name,
+            Description: '',
+            MediaType: '',
+            CoverImageUrl: ref.CoverImageUrl,
+            CreationDate: '',
+            CreatedBy: { DisplayName: '' }
+          }))}
+        isOpen={showBulkUpdateDialog}
+        onClose={() => setShowBulkUpdateDialog(false)}
+        onUpdateComplete={(updatedCount) => {
+          // Reload entries after update
+          if (updatedCount > 0) {
+            setEntriesLoading(true);
+            TimelineEntryService.listTimelineEntries(Number(timeline?.id), `${timelinesPath}/${timeline?.name}`)
+              .then(setEntries)
+              .finally(() => setEntriesLoading(false));
+          }
+        }}
+      />
     </div>
   );
 };

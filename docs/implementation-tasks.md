@@ -101,6 +101,17 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 
 ## In Progress Stories
 
+### Story 22 - Bulk Update Media Details for Timeline Entries
+- [ ] Create BulkUpdateDialog component for update options and preview
+- [ ] Add "Update Media Data" button to TimelineViewPage next to Import button
+- [ ] Implement MediaUpdateService for fetching updated data from Trakt
+- [ ] Add preview/diff functionality to show changes before applying
+- [ ] Implement bulk update with progress tracking
+- [ ] Add error handling and success/failure reporting
+- [ ] Support both URL-based and binary cover image storage
+- [ ] Add user preference for missing-only vs overwrite-all strategy
+- [ ] Test bulk update functionality with real timeline data
+
 ---
 
 ## Planned Stories
