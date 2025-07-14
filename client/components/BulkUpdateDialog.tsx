@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { MediaUpdateService, DataSource } from '../services/mediaUpdateService';
-import type { UpdateOptions, MediaUpdateResult, DataSourceType } from '../services/mediaUpdateService';
+import type { UpdateOptions, MediaUpdateResult } from '../services/mediaUpdateService';
 import type { MediaItem } from '../services/mediaLibraryService';
 
 interface BulkUpdateDialogProps {
