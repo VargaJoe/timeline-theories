@@ -23,16 +23,20 @@ exports.handler = async function(event, context) {
     const url = `https://api.trakt.tv/users/${username}/lists/${list}/items`;
     console.log('Fetching Trakt URL:', url);
     console.log('API Key present:', !!apiKey, 'Length:', apiKey.length);
+    console.log('API Key first 10 chars:', apiKey.substring(0, 10));
+    console.log('API Key last 10 chars:', apiKey.substring(apiKey.length - 10));
     
-    const res = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        'trakt-api-version': '2',
-        'trakt-api-key': apiKey
-      }
-    });
+    const headers = {
+      'Content-Type': 'application/json',
+      'trakt-api-version': '2',
+      'trakt-api-key': apiKey
+    };
+    console.log('Request headers:', JSON.stringify(headers, null, 2));
+    
+    const res = await fetch(url, { headers });
     
     console.log('Trakt API response status:', res.status);
+    console.log('Response headers:', JSON.stringify([...res.headers.entries()], null, 2));
     
     if (!res.ok) {
       const errorText = await res.text();
