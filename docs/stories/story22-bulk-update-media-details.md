@@ -40,11 +40,28 @@ Currently, some media items in timelines have missing titles, descriptions, or c
 - [ ] Add user preference for missing-only vs overwrite-all strategy
 - [ ] Test bulk update functionality with real timeline data
 
-## Dependencies
-- Existing Trakt API integration and services
-- MediaLibraryService for updating media items
-- TimelineEntryService for listing timeline entries
-- SenseNet repository for content updates
+## Technical Implementation
+
+### Multi-Source Data Fetching
+The service now supports multiple data sources in order of preference:
+
+1. **OMDb API** - Free IMDb data (1,000 requests/day)
+2. **TMDB API** - Free movie database (1,000 requests/day)  
+3. **IMDb URLs** - Via OMDb API when external links exist
+4. **Trakt API** - Production only (via Netlify proxy)
+5. **TVDB** - Placeholder for future implementation
+
+### Smart Source Selection
+- **External Links First**: Uses existing IMDb, TMDB, Trakt URLs from media items
+- **Search Fallback**: Searches by title and year when no external links exist
+- **Multi-source**: Tries multiple sources until data is found
+- **Graceful Degradation**: Shows helpful error messages when all sources fail
+
+### API Key Configuration
+- **OMDb**: `VITE_OMDB_API_KEY` (get free key from omdbapi.com)
+- **TMDB**: `VITE_TMDB_API_KEY` (get free key from themoviedb.org)
+- **Development Ready**: Works immediately with free API keys
+- **Production Ready**: Includes Trakt integration via existing Netlify proxy
 
 ## Design Notes
 - Place button in the action bar next to other timeline management buttons
