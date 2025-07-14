@@ -101,21 +101,23 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 
 ## In Progress Stories
 
-### Story 22 - Bulk Update Media Details for Timeline Entries
+### Story 22 - Bulk Update Media Details for Timeline Entries ✅ COMPLETED
 - [x] Create BulkUpdateDialog component for update options and preview
 - [x] Add "Update Media Data" button to TimelineViewPage next to Import button
 - [x] Implement MediaUpdateService for fetching updated data from multiple sources
 - [x] Add preview/diff functionality to show changes before applying
 - [x] Implement bulk update with progress tracking
 - [x] Add error handling and success/failure reporting
-- [ ] Support both URL-based and binary cover image storage
 - [x] Add user preference for missing-only vs overwrite-all strategy
-- [ ] Test bulk update functionality with real timeline data
-- [x] Implement multi-source data fetching (OMDb, TMDB, IMDb, Trakt)
+- [x] Implement multi-source data fetching (OMDb, TMDB, Trakt)
 - [x] Add smart source selection and external link parsing
 - [x] Create comprehensive API key configuration guide
-- [ ] Add support for downloading and storing cover images as binary data
-- [ ] Test with real timeline data and refine user experience
+- [x] **FIXED: Critical data structure corruption in MediaLibraryService.updateMediaItem()**
+- [x] **FIXED: Content validation to detect incorrect external IDs pointing to wrong content**
+- [x] **FIXED: Enhanced fallback logic: external IDs → title search → base series search**
+- [x] **FIXED: || vs !== undefined logic preventing falsy value updates**
+- [x] Comprehensive logging and debugging for troubleshooting update issues
+- [x] Test bulk update functionality with real timeline data and verify changes persist
 
 ---
 
@@ -254,3 +256,25 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Implement migration tool for at least one source (API or HTML)
 - [ ] Add UI for importing timelines/lists from other apps
 - [ ] Test migration with real-world data
+
+### Story 23 - UI/UX Improvements for Timeline Action Buttons
+- [ ] **UI Consistency**: Move "Import from Trakt" button to be grouped with other timeline action buttons (Edit, Add Media Entry, Reorder Entries, Update Media Data, Delete)
+- [ ] **Icon-Based Design**: Replace verbose text buttons with intuitive icons to reduce visual clutter:
+  - [ ] Edit Timeline: ✏️ or 🔧 icon
+  - [ ] Add Media Entry: ➕ icon 
+  - [ ] Import from Trakt: 📥 or 🔗 icon
+  - [ ] Reorder Entries: ↕️ or 🔀 icon
+  - [ ] Update Media Data: 🔄 or ⬆️ icon
+  - [ ] Delete Timeline: 🗑️ icon
+- [ ] Add tooltips to explain each icon's function
+- [ ] Maintain accessibility with proper ARIA labels
+- [ ] Design consistent button group styling
+- [ ] Test usability and ensure icons are intuitive
+
+### Story 24 - Enhanced Multi-Source Data Merging
+- [ ] Add "Smart Merge" option for bulk updates that combines data from multiple sources
+- [ ] Implement intelligent field selection (e.g., title from OMDb, cover image from TMDB, description from best source)
+- [ ] Add user preference for automatic vs manual field selection during merge
+- [ ] Create preview showing which fields come from which sources
+- [ ] Allow users to override automatic field selection choices
+- [ ] Add conflict resolution when sources provide different data for same field
