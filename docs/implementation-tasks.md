@@ -63,10 +63,12 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add edit feature for timelines on entries page
 - [x] Add delete feature for timelines on entries page (with robust path handling in deleteTimeline)
 
+
 ### Technical Task - Robust Scroll Restoration for SPA
 - [x] Integrate delayed-scroll-restoration-polyfill via CDN in index.html
 - [x] Set window.history.scrollRestoration = 'manual' in App.tsx
 - [x] Confirm robust scroll restoration on browser navigation (back/forward)
+- [x] Ensure scroll position resets to top on new page navigation (except for back/forward)
 - [x] Commit working solution and update project memory
 
 
