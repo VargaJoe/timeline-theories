@@ -7,6 +7,7 @@ import type { MediaItem } from '../services/mediaLibraryService';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { useNavigate } from 'react-router-dom';
 import { createTimeline } from '../services/timelineService';
+import { timelinesPath } from '../projectPaths';
 
 export const TimelineCreateForm: React.FC = () => {
   const [name, setName] = useState('');
@@ -53,9 +54,11 @@ export const TimelineCreateForm: React.FC = () => {
           let found: MediaItem | undefined = undefined;
           try {
             const allMedia = await MediaLibraryService.getMediaItems();
-            found = allMedia.find(m => m.DisplayName.toLowerCase() === item.title.toLowerCase() && (!item.year || m.ReleaseDate?.startsWith(String(item.year))));
+            // Use 'title (year)' format for matching if year is present, like TraktImportDialog
+            const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+            found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
           } catch {
-            // Ignore errors in creating media items
+            // Ignore errors in searching media items
           }
           let mediaItem: MediaItem;
           try {
@@ -63,8 +66,10 @@ export const TimelineCreateForm: React.FC = () => {
               mediaItem = found;
               reused++;
             } else {
+              // Use consistent 'title (year)' format for display name
+              const displayName = item.year ? `${item.title} (${item.year})` : item.title;
               const req = {
-                DisplayName: item.title,
+                DisplayName: displayName,
                 Description: '',
                 MediaType: item.type,
                 ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
@@ -83,7 +88,7 @@ export const TimelineCreateForm: React.FC = () => {
               },
               timelineId: Number(timeline.id),
               position: i + 1,
-            }, `/Root/Content/Timelines/${timeline.name}`);
+            }, `${timelinesPath}/${timeline.name}`);
           } catch (err) {
             errors.push(`${item.title} (${item.year || ''}): ${err instanceof Error ? err.message : 'Unknown error'}`);
           }
@@ -104,27 +109,15 @@ export const TimelineCreateForm: React.FC = () => {
 
   return (
     <div style={{ maxWidth: 400, margin: '0 auto' }}>
-      {/* Trakt Import Button/Modal for new timeline */}
+      {/* Trakt Import Button - just for fetching items to review */}
       <TraktImportDialog
-        createTimelineIfMissing={async (displayName, description) => {
-          // Use the entered name if available, else prompt
-          const timelineName = name.trim() || displayName.trim().replace(/\s+/g, '-').toLowerCase();
-          const timeline = await createTimeline({
-            name: timelineName,
-            displayName,
-            description,
-            sortOrder
-          });
-          setName(timeline.name);
-          setDisplayName(timeline.displayName);
-          setDescription(timeline.description || '');
-          return timeline.name;
-        }}
-        onTimelineCreated={timelineName => {
-          setName(timelineName);
-        }}
-        onImportComplete={summary => {
-          setImportSummary(summary);
+        disabled={loading || traktProcessing}
+        fetchOnly={true}
+        onImportComplete={(items) => {
+          // Don't create timeline here, just set items for review
+          if (Array.isArray(items)) {
+            setTraktReviewItems(items);
+          }
         }}
       />
       {success ? (

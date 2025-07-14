@@ -10,9 +10,10 @@ import { TimelineEntryService } from '../services/timelineEntryService';
 interface TraktImportDialogProps {
   timelineName?: string;
   onTimelineCreated?: (timelineName: string) => void;
-  onImportComplete?: (summary: string) => void;
+  onImportComplete?: (summary: string | TraktListItem[]) => void;
   createTimelineIfMissing?: (displayName: string, description: string) => Promise<string>;
   disabled?: boolean;
+  fetchOnly?: boolean; // New prop: if true, only fetch items and return them without importing
 }
 
 export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
@@ -20,7 +21,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   onTimelineCreated,
   onImportComplete,
   createTimelineIfMissing,
-  disabled
+  disabled,
+  fetchOnly = false
 }) => {
   const [show, setShow] = useState(false);
   const [traktUrl, setTraktUrl] = useState('');
@@ -48,6 +50,14 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     try {
       // Always use fetchTraktList for consistent mapping
       const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list);
+      
+      // If fetchOnly mode, just return the items for review
+      if (fetchOnly) {
+        setSummary(`Fetched ${items.length} items for review`);
+        if (onImportComplete) onImportComplete(items);
+        return;
+      }
+      
       let timeline = timelineName;
       if (!timeline && createTimelineIfMissing) {
         // Prompt for timeline name/desc if needed
@@ -68,14 +78,12 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
       const errors: string[] = [];
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        console.log(`Processing item ${i + 1}/${items.length}:`, item.title, item.year);
         let found: MediaItem | undefined = undefined;
         try {
           const allMedia = await MediaLibraryService.getMediaItems();
           // Use 'title (year)' format for matching if year is present
           const displayName = item.year ? `${item.title} (${item.year})` : item.title;
           found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
-          console.log(`Media item search for "${displayName}":`, found ? 'found existing' : 'not found');
         } catch (err) {
           console.error('Error searching media items:', err);
           // Ignore errors, treat as not found
@@ -85,7 +93,6 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           if (found) {
             mediaItem = found;
             reused++;
-            console.log('Reusing existing media item:', mediaItem.DisplayName);
           } else {
             const displayName = item.year ? `${item.title} (${item.year})` : item.title;
             const req = {
@@ -95,9 +102,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
               ExternalLinks: JSON.stringify(item.ids),
             };
-            console.log('Creating new media item:', req);
             mediaItem = await MediaLibraryService.createMediaItem(req);
-            console.log('Created media item:', mediaItem.DisplayName, 'ID:', mediaItem.Id);
             created++;
           }
           // Check if entry already exists for this media item
@@ -106,7 +111,6 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             (e.mediaItem.DisplayName?.toLowerCase() === mediaItem.DisplayName.toLowerCase())
           ));
           if (alreadyExists) {
-            console.log('Timeline entry already exists for:', mediaItem.DisplayName);
             skipped++;
             continue;
           }
@@ -122,9 +126,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             position: i + 1,
           };
           const timelinePath = `${timelinesPath}/${timeline}`;
-          console.log('Creating timeline entry:', entryData, 'in timeline path:', timelinePath);
           await TimelineEntryService.createTimelineEntry(entryData, timelinePath);
-          console.log('Successfully created timeline entry for:', mediaItem.DisplayName);
         } catch (err) {
           console.error(`Error processing item ${item.title}:`, err);
           errors.push(`${item.title} (${item.year || ''}): ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -143,7 +145,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   return (
     <div style={{ marginBottom: 16 }}>
       <button onClick={() => setShow(s => !s)} disabled={disabled} style={{ background: '#2a4d8f', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: 'pointer' }}>
-        {show ? 'Cancel Trakt Import' : 'Import from Trakt'}
+        {show ? 'Cancel Trakt Import' : fetchOnly ? 'Fetch from Trakt for Review' : 'Import from Trakt'}
       </button>
       {show && (
         <div style={{ marginTop: 16, background: '#f8f9fa', borderRadius: 8, padding: 16, boxShadow: '0 1px 4px #0001' }}>
@@ -158,7 +160,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             />
           </div>
           <button onClick={handleImport} disabled={importing || !traktUrl.trim()} style={{ background: '#007bff', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: importing ? 'not-allowed' : 'pointer' }}>
-            {importing ? 'Importing...' : 'Import'}
+            {importing ? (fetchOnly ? 'Fetching...' : 'Importing...') : (fetchOnly ? 'Fetch Items' : 'Import')}
           </button>
           {error && <div style={{ color: '#dc3545', marginTop: 8 }}>{error}</div>}
           {summary && <div style={{ color: '#155724', marginTop: 8 }}>{summary}</div>}
