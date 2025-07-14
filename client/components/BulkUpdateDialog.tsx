@@ -2,12 +2,19 @@ import React, { useState, useCallback } from 'react';
 import { MediaUpdateService, DataSource } from '../services/mediaUpdateService';
 import type { UpdateOptions, MediaUpdateResult } from '../services/mediaUpdateService';
 import type { MediaItem } from '../services/mediaLibraryService';
+import { MediaLibraryService } from '../services/mediaLibraryService';
 
 interface BulkUpdateDialogProps {
   mediaItems: MediaItem[];
   isOpen: boolean;
   onClose: () => void;
   onUpdateComplete: (updatedCount: number) => void;
+}
+
+interface ValidatedUpdateResult extends MediaUpdateResult {
+  approved?: boolean;
+  similarityScore?: number;
+  warningReason?: string;
 }
 
 export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
@@ -24,7 +31,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     onlyMissing: true,
     preferredSources: [DataSource.OMDB, DataSource.TMDB, DataSource.TRAKT]
   });
-  const [previewResults, setPreviewResults] = useState<MediaUpdateResult[]>([]);
+  const [previewResults, setPreviewResults] = useState<ValidatedUpdateResult[]>([]);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, item: '' });
   const [finalResults, setFinalResults] = useState<{ success: number; failed: number; errors: string[] }>({
@@ -32,6 +39,59 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     failed: 0,
     errors: []
   });
+
+  // Calculate similarity between original and proposed titles
+  const calculateSimilarity = (original: string, proposed: string): number => {
+    const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const orig = normalize(original);
+    const prop = normalize(proposed);
+    
+    // Simple similarity check - you could use a more sophisticated algorithm
+    if (orig === prop) return 1.0;
+    if (orig.includes(prop) || prop.includes(orig)) return 0.8;
+    
+    // Check common words
+    const origWords = orig.split(' ').filter(w => w.length > 2);
+    const propWords = prop.split(' ').filter(w => w.length > 2);
+    const commonWords = origWords.filter(w => propWords.includes(w));
+    
+    if (origWords.length + propWords.length === 0) return 0;
+    return (commonWords.length * 2) / (origWords.length + propWords.length);
+  };
+
+  // Validate and enhance results with similarity scores
+  const validateResults = useCallback((results: MediaUpdateResult[]): ValidatedUpdateResult[] => {
+    return results.map(result => {
+      const validated: ValidatedUpdateResult = { 
+        ...result, 
+        approved: true, // Default to approved
+        similarityScore: 1.0 
+      };
+
+      // Check for potential mismatches if title is being updated
+      if (result.updateData?.title && result.mediaItem.DisplayName) {
+        const similarity = calculateSimilarity(result.mediaItem.DisplayName, result.updateData.title);
+        validated.similarityScore = similarity;
+        
+        // Flag potentially problematic matches
+        if (similarity < 0.6) {
+          validated.approved = false;
+          validated.warningReason = `Low similarity (${Math.round(similarity * 100)}%) - titles may not match`;
+        } else if (similarity < 0.8) {
+          validated.warningReason = `Medium similarity (${Math.round(similarity * 100)}%) - please verify`;
+        }
+      }
+
+      return validated;
+    });
+  }, []);
+
+  // Toggle approval for a specific item
+  const toggleApproval = (index: number) => {
+    setPreviewResults(prev => prev.map((item, i) => 
+      i === index ? { ...item, approved: !item.approved } : item
+    ));
+  };
 
   const handleOptionsSubmit = useCallback(async () => {
     setStep('preview');
@@ -45,7 +105,8 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
           setProgress({ current, total, item });
         }
       );
-      setPreviewResults(results);
+      const validatedResults = validateResults(results);
+      setPreviewResults(validatedResults);
     } catch (error) {
       console.error('Error during preview:', error);
       alert('Error generating preview. Please try again.');
@@ -53,24 +114,36 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     } finally {
       setProcessing(false);
     }
-  }, [mediaItems, options]);
+  }, [mediaItems, options, validateResults]);
 
   const handleConfirmUpdate = useCallback(async () => {
     setStep('processing');
     setProcessing(true);
     
     try {
-      // Apply updates directly since processBulkUpdate already handles the actual updating
+      // Only process approved items
+      const approvedItems = previewResults.filter(r => r.approved && r.hasChanges);
+      
       let success = 0;
       let failed = 0;
       const errors: string[] = [];
       
-      for (const result of previewResults) {
-        if (result.hasChanges && result.updateData) {
-          success++;
-        } else if (result.error) {
+      // Apply updates for approved items only
+      for (const result of approvedItems) {
+        try {
+          if (result.updateData) {
+            // Call the update service for this specific item
+            const updateFields: Record<string, string | number | undefined> = {};
+            if (result.updateData.title) updateFields.DisplayName = result.updateData.title;
+            if (result.updateData.description) updateFields.Description = result.updateData.description;
+            if (result.updateData.coverImageUrl) updateFields.CoverImageUrl = result.updateData.coverImageUrl;
+            
+            await MediaLibraryService.updateMediaItem(result.mediaItem.Id, updateFields);
+            success++;
+          }
+        } catch (error) {
           failed++;
-          errors.push(`${result.mediaItem.DisplayName}: ${result.error}`);
+          errors.push(`${result.mediaItem.DisplayName}: ${error instanceof Error ? error.message : 'Update failed'}`);
         }
       }
       
@@ -320,34 +393,95 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
               </>
             ) : (
               <>
-                <h2 style={{ marginBottom: 24, color: '#2a4d8f' }}>Preview Changes</h2>
+                <h2 style={{ marginBottom: 24, color: '#2a4d8f' }}>Validate Changes</h2>
+                <p style={{ marginBottom: 24, color: '#666' }}>
+                  Review each proposed change and approve/reject updates. Items flagged with warnings require your attention.
+                </p>
                 
                 <div style={{ marginBottom: 24 }}>
                   <div style={{ marginBottom: 8 }}>
-                    <strong>{itemsWithChanges.length}</strong> items will be updated
+                    <strong>{itemsWithChanges.filter(r => r.approved).length}</strong> of <strong>{itemsWithChanges.length}</strong> items approved
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     <strong>{itemsWithErrors.length}</strong> items had errors
                   </div>
                   <div>
-                    <strong>{previewResults.length - itemsWithChanges.length - itemsWithErrors.length}</strong> items have no changes
+                    <strong>{previewResults.filter(r => r.warningReason).length}</strong> items have warnings
                   </div>
                 </div>
 
                 {itemsWithChanges.length > 0 && (
                   <div style={{ marginBottom: 24 }}>
-                    <h3 style={{ marginBottom: 16, fontSize: 18 }}>Items to Update</h3>
-                    <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #ddd', borderRadius: 6 }}>
+                    <h3 style={{ marginBottom: 16, fontSize: 18 }}>Items for Review</h3>
+                    <div style={{ maxHeight: 400, overflow: 'auto', border: '1px solid #ddd', borderRadius: 6 }}>
                       {itemsWithChanges.map((result, index) => (
                         <div key={index} style={{ 
-                          padding: 12, 
-                          borderBottom: index < itemsWithChanges.length - 1 ? '1px solid #eee' : 'none'
+                          padding: 16, 
+                          borderBottom: index < itemsWithChanges.length - 1 ? '1px solid #eee' : 'none',
+                          backgroundColor: result.warningReason ? '#fff3cd' : result.approved ? '#d4edda' : '#f8d7da'
                         }}>
-                          <div style={{ fontWeight: 500, marginBottom: 4 }}>
-                            {result.mediaItem.DisplayName}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 16 }}>
+                                {result.mediaItem.DisplayName}
+                              </div>
+                              {result.warningReason && (
+                                <div style={{ color: '#856404', fontSize: 14, marginBottom: 8, fontStyle: 'italic' }}>
+                                  ⚠️ {result.warningReason}
+                                </div>
+                              )}
+                            </div>
+                            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', marginLeft: 16 }}>
+                              <input
+                                type="checkbox"
+                                checked={result.approved || false}
+                                onChange={() => toggleApproval(index)}
+                                style={{ marginRight: 8, transform: 'scale(1.2)' }}
+                              />
+                              <span style={{ fontWeight: 500, color: result.approved ? '#155724' : '#721c24' }}>
+                                {result.approved ? 'Approved' : 'Rejected'}
+                              </span>
+                            </label>
                           </div>
-                          <div style={{ fontSize: 14, color: '#666' }}>
-                            {Object.keys(result.updateData || {}).join(', ')} will be updated
+                          
+                          {/* Show detailed changes */}
+                          <div style={{ fontSize: 14 }}>
+                            {result.updateData?.title && (
+                              <div style={{ marginBottom: 8 }}>
+                                <strong>Title:</strong>
+                                <div style={{ marginLeft: 16, color: '#666' }}>
+                                  <div>From: "{result.mediaItem.DisplayName}"</div>
+                                  <div>To: "{result.updateData.title}"</div>
+                                  {result.similarityScore !== undefined && (
+                                    <div style={{ fontSize: 12, color: result.similarityScore < 0.6 ? '#dc3545' : result.similarityScore < 0.8 ? '#ffc107' : '#28a745' }}>
+                                      Similarity: {Math.round(result.similarityScore * 100)}%
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {result.updateData?.description && (
+                              <div style={{ marginBottom: 8 }}>
+                                <strong>Description:</strong>
+                                <div style={{ marginLeft: 16, color: '#666' }}>
+                                  <div>From: "{result.mediaItem.Description?.substring(0, 100)}..."</div>
+                                  <div>To: "{result.updateData.description.substring(0, 100)}..."</div>
+                                </div>
+                              </div>
+                            )}
+                            {result.updateData?.coverImageUrl && (
+                              <div style={{ marginBottom: 8 }}>
+                                <strong>Cover Image:</strong>
+                                <div style={{ marginLeft: 16, color: '#666' }}>
+                                  {result.mediaItem.CoverImageUrl ? 'Update existing image' : 'Add new image'}
+                                </div>
+                              </div>
+                            )}
+                            {result.updateData?.source && (
+                              <div style={{ fontSize: 12, color: '#6c757d', marginTop: 8 }}>
+                                Source: {result.updateData.source}
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -405,7 +539,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                   >
                     Cancel
                   </button>
-                  {itemsWithChanges.length > 0 && (
+                  {itemsWithChanges.filter(r => r.approved).length > 0 && (
                     <button
                       onClick={handleConfirmUpdate}
                       style={{
@@ -418,7 +552,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                         cursor: 'pointer'
                       }}
                     >
-                      Apply Updates ({itemsWithChanges.length} items)
+                      Apply Approved Updates ({itemsWithChanges.filter(r => r.approved).length} items)
                     </button>
                   )}
                 </div>
