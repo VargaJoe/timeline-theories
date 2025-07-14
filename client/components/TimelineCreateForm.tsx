@@ -114,9 +114,13 @@ export const TimelineCreateForm: React.FC = () => {
         disabled={loading || traktProcessing}
         fetchOnly={true}
         onImportComplete={(items) => {
+          console.log('TimelineCreateForm onImportComplete called with:', items);
           // Don't create timeline here, just set items for review
           if (Array.isArray(items)) {
+            console.log('Setting traktReviewItems with', items.length, 'items');
             setTraktReviewItems(items);
+          } else {
+            console.log('Items is not an array:', typeof items, items);
           }
         }}
       />
