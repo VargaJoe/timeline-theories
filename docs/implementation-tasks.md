@@ -64,6 +64,19 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add delete feature for timelines on entries page (with robust path handling in deleteTimeline)
 
 
+### Story 17 - Create Timeline by Trakt List
+- [x] Add "Import from Trakt List" option to Timeline Create Page.
+- [x] Allow user to enter a Trakt list URL or select from their lists.
+- [x] Fetch list items via Trakt API.
+- [x] For each item:
+    - [x] Check if media item exists; create if missing. (Now uses 'title (year)' format for display name)
+    - [x] Create timeline entry for each item. (Now uses 'title (year)' format for display name)
+- [x] Allow user to review and edit before finalizing the timeline.
+- [x] Implement Trakt API integration via Netlify function proxy (trakt-proxy.cjs)
+- [x] Add comprehensive error handling and import summary feedback
+- [x] Support both timeline creation with import and import to existing timelines
+- [x] Test end-to-end functionality with real Trakt lists
+
 ### Technical Task - Robust Scroll Restoration for SPA
 - [x] Integrate delayed-scroll-restoration-polyfill via CDN in index.html
 - [x] Set window.history.scrollRestoration = 'manual' in App.tsx
@@ -73,15 +86,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 
 
 ## In Progress Stories
-
-### Story 17 - Create Timeline by Trakt List
-- [ ] Add "Import from Trakt List" option to Timeline Create Page.
-- [ ] Allow user to enter a Trakt list URL or select from their lists.
-- [ ] Fetch list items via Trakt API.
-- [ ] For each item:
-    - [x] Check if media item exists; create if missing. (Now uses 'title (year)' format for display name)
-    - [x] Create timeline entry for each item. (Now uses 'title (year)' format for display name)
-- [ ] Allow user to review and edit before finalizing the timeline.
 
 ---
 
