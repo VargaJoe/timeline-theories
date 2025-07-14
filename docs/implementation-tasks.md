@@ -64,7 +64,7 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add delete feature for timelines on entries page (with robust path handling in deleteTimeline)
 
 
-### Story 17 - Create Timeline by Trakt List
+### Story 17 - Create Timeline by Trakt List ✅ COMPLETED
 - [x] Add "Import from Trakt List" option to Timeline Create Page.
 - [x] Allow user to enter a Trakt list URL or select from their lists.
 - [x] Fetch list items via Trakt API.
@@ -76,13 +76,27 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add comprehensive error handling and import summary feedback
 - [x] Support both timeline creation with import and import to existing timelines
 - [x] Test end-to-end functionality with real Trakt lists
+- [x] **FIX: Prevent duplicate timeline creation by adding fetchOnly mode to TraktImportDialog**
+- [x] **FIX: Restore user-preferred review functionality for examining items before import**
+- [x] **FIX: Consistent media item naming using 'title (year)' format for deduplication**
+- [x] **FIX: Correct timeline path usage for consistent content creation**
 
-### Technical Task - Robust Scroll Restoration for SPA
+### Technical Task - Robust Scroll Restoration for SPA ✅ COMPLETED
 - [x] Integrate delayed-scroll-restoration-polyfill via CDN in index.html
 - [x] Set window.history.scrollRestoration = 'manual' in App.tsx
 - [x] Confirm robust scroll restoration on browser navigation (back/forward)
 - [x] Ensure scroll position resets to top on new page navigation (except for back/forward)
 - [x] Commit working solution and update project memory
+
+### Technical Task - Fix Trakt Import Issues ✅ COMPLETED
+- [x] **FIX: Duplicate import buttons** - Removed duplicate import logic from TimelineCreateForm
+- [x] **FIX: Duplicate timeline creation** - TraktImportDialog + TimelineCreateForm both creating timelines
+- [x] **FIX: Missing review functionality** - Users couldn't examine/edit items before import
+- [x] **FIX: Inconsistent media naming** - Different 'title (year)' formats causing deduplication issues
+- [x] **FIX: Wrong timeline paths** - Hardcoded paths vs projectPaths constants
+- [x] **FIX: Navigation to wrong timeline** - Created 'Timeline' and 'Timeline (1)', navigated to empty one
+- [x] Add fetchOnly mode to TraktImportDialog for fetch-then-review workflow
+- [x] Consistent button text and UX for different import modes
 
 
 ## In Progress Stories
