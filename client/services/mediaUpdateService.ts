@@ -8,32 +8,6 @@ export interface MediaUpdateData {
   releaseDate?: string;
   runtime?: number;
   genres?: string[];
-}
-
-export interface MediaUpdateResult {
-  mediaItem: MediaItem;
-  updateData: MediaUpdateData | null;
-  error?: string;
-  hasChanges: boolean;
-}
-
-export interface UpdateOptions {
-  updateTitles: boolean;
-  updateDescriptions: boolean;
-  updateCoverImages: boolean;
-  onlyMissing: boolean; // true = only update empty fields, false = overwrite all
-}
-
-import { MediaLibraryService } from './mediaLibraryService';
-import type { MediaItem } from './mediaLibraryService';
-
-export interface MediaUpdateData {
-  title?: string;
-  description?: string;
-  coverImageUrl?: string;
-  releaseDate?: string;
-  runtime?: number;
-  genres?: string[];
   source?: string; // Which source was used for the data
 }
 
@@ -49,12 +23,13 @@ export interface UpdateOptions {
   updateDescriptions: boolean;
   updateCoverImages: boolean;
   onlyMissing: boolean; // true = only update empty fields, false = overwrite all
+  preferredSources: DataSourceType[]; // Order of preferred sources
 }
 
 // Supported data sources
 export const DataSource = {
   IMDB: 'imdb',
-  TVDB: 'tvdb',
+  TVDB: 'tvdb', 
   TMDB: 'tmdb',
   TRAKT: 'trakt',
   OMDB: 'omdb'
@@ -66,38 +41,76 @@ export class MediaUpdateService {
   /**
    * Fetch updated data for a single media item from multiple sources
    */
-  static async fetchUpdateData(mediaItem: MediaItem): Promise<MediaUpdateData | null> {
+  static async fetchUpdateData(mediaItem: MediaItem, options?: UpdateOptions): Promise<MediaUpdateData | null> {
     try {
       console.log('Fetching update data for:', mediaItem.DisplayName);
       
       // Parse external links if available
       const externalLinks = this.parseExternalLinks(mediaItem.ExternalLinks);
+      console.log('External links found:', externalLinks);
       
-      // Try different sources in order of preference
-      const sources = [
-        { source: DataSource.IMDB, url: externalLinks.imdb },
-        { source: DataSource.TVDB, url: externalLinks.tvdb },
-        { source: DataSource.TMDB, url: externalLinks.tmdb },
-        { source: DataSource.OMDB, url: externalLinks.omdb },
-        { source: DataSource.TRAKT, url: externalLinks.trakt }
-      ];
-
-      // Try each source that has a URL
-      for (const { source, url } of sources) {
-        if (url) {
-          console.log(`Trying ${source.toUpperCase()} for ${mediaItem.DisplayName}`);
-          const data = await this.fetchFromSource(source, url, mediaItem);
-          if (data) {
-            console.log(`Successfully fetched data from ${source.toUpperCase()}`);
-            return { ...data, source: source.toUpperCase() };
-          }
+      // Get preferred sources from options or use default order
+      const preferredSources = options?.preferredSources || [DataSource.OMDB, DataSource.TMDB, DataSource.TRAKT];
+      
+      // Build sources array based on available links and user preference
+      const availableSources = [];
+      
+      for (const source of preferredSources) {
+        let identifier = null;
+        
+        switch (source) {
+          case DataSource.OMDB:
+            identifier = externalLinks.imdb; // OMDb uses IMDb IDs
+            break;
+          case DataSource.TMDB:
+            identifier = externalLinks.tmdb;
+            break;
+          case DataSource.TRAKT:
+            identifier = externalLinks.trakt;
+            break;
+          case DataSource.IMDB:
+            identifier = externalLinks.imdb;
+            break;
+          case DataSource.TVDB:
+            identifier = externalLinks.tvdb;
+            break;
+        }
+        
+        if (identifier) {
+          availableSources.push({ source, identifier });
         }
       }
 
-      // If no external links, try searching by title
+      // Try each available source in user's preferred order
+      for (const { source, identifier } of availableSources) {
+        console.log(`Trying ${source.toUpperCase()} with ID: ${identifier} for ${mediaItem.DisplayName}`);
+        const data = await this.fetchFromSource(source, identifier, mediaItem);
+        if (data) {
+          console.log(`Successfully fetched data from ${source.toUpperCase()}`);
+          return { ...data, source: source.toUpperCase() };
+        } else {
+          console.log(`${source.toUpperCase()} returned no data for ID: ${identifier}`);
+        }
+      }
+
+      // If external IDs fail, try searching by title with preferred sources
       if (mediaItem.DisplayName) {
-        console.log(`No external links found, trying search for: ${mediaItem.DisplayName}`);
-        return await this.searchByTitle(mediaItem.DisplayName, mediaItem.MediaType);
+        console.log(`External IDs failed, trying title search for: ${mediaItem.DisplayName}`);
+        const titleResult = await this.searchByTitle(mediaItem.DisplayName, mediaItem.MediaType, preferredSources);
+        if (titleResult) {
+          return titleResult;
+        }
+      }
+
+      // If title search fails, try extracting the base series name for broader search
+      if (mediaItem.DisplayName && mediaItem.DisplayName.includes(':')) {
+        const baseName = mediaItem.DisplayName.split(':')[0].trim();
+        console.log(`Specific title failed, trying base series search for: ${baseName}`);
+        const baseResult = await this.searchByTitle(baseName, mediaItem.MediaType, preferredSources);
+        if (baseResult) {
+          // Mark that this is a fallback result
+          return { ...baseResult, title: mediaItem.DisplayName, source: `${baseResult.source} (Series Match)` };
+        }
       }
 
       return null;
@@ -109,134 +122,271 @@ export class MediaUpdateService {
   }
 
   /**
-   * Fetch data from a specific source using its URL or ID
+   * Parse external links from media item - handles both JSON and URL formats
    */
-  private static async fetchFromSource(
-    source: DataSourceType, 
-    url: string, 
-    mediaItem: MediaItem
-  ): Promise<MediaUpdateData | null> {
+  private static parseExternalLinks(externalLinks?: string): Record<string, string> {
+    const links: Record<string, string> = {};
+    
+    if (!externalLinks) return links;
+
     try {
+      // First try to parse as JSON (structured format)
+      const parsed = JSON.parse(externalLinks);
+      if (typeof parsed === 'object') {
+        // Extract IDs from structured data - handle both string and number values
+        if (parsed.imdb && parsed.imdb !== null) {
+          links.imdb = this.extractIMDbId(String(parsed.imdb)) || String(parsed.imdb);
+        }
+        if (parsed.tmdb && parsed.tmdb !== null) {
+          links.tmdb = String(parsed.tmdb);
+        }
+        if (parsed.trakt && parsed.trakt !== null) {
+          links.trakt = String(parsed.trakt);
+        }
+        if (parsed.tvdb && parsed.tvdb !== null) {
+          links.tvdb = String(parsed.tvdb);
+        }
+        console.log('Parsed JSON external links:', links);
+        return links;
+      }
+    } catch {
+      // Not JSON, try parsing as plain text with URLs
+      console.log('External links not JSON, trying URL parsing');
+    }
+
+    try {
+      const urlRegexes = {
+        imdb: /(?:imdb\.com\/title\/)([a-zA-Z0-9]+)/i,
+        tmdb: /(?:themoviedb\.org\/(?:movie|tv)\/(\d+))/i,
+        trakt: /(?:trakt\.tv\/(?:movies|shows)\/([a-zA-Z0-9-]+))/i,
+        tvdb: /(?:thetvdb\.com\/(?:series|movies)\/([a-zA-Z0-9-]+))/i
+      };
+
+      for (const [source, regex] of Object.entries(urlRegexes)) {
+        const match = externalLinks.match(regex);
+        if (match) {
+          links[source] = match[1];
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing external links:', error);
+    }
+
+    return links;
+  }
+
+  /**
+   * Extract IMDb ID from URL or return the ID if already clean
+   */
+  private static extractIMDbId(url: string): string | null {
+    if (!url) return null;
+    
+    // If it's already a clean IMDb ID
+    if (/^tt\d+$/.test(url)) return url;
+    
+    // Extract from URL
+    const match = url.match(/(?:imdb\.com\/title\/|^)(tt\d+)/);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Fetch data from specific source with content validation
+   */
+  private static async fetchFromSource(source: DataSourceType, identifier: string, mediaItem: MediaItem): Promise<MediaUpdateData | null> {
+    let data: MediaUpdateData | null = null;
+
+    console.log(`Fetching from ${source.toUpperCase()} with identifier: ${identifier}`);
+
+    switch (source) {
+      case DataSource.OMDB:
+        data = await this.fetchFromOMDb(identifier);
+        break;
+      case DataSource.TMDB:
+        data = await this.fetchFromTMDB(identifier, mediaItem.MediaType);
+        break;
+      case DataSource.TRAKT:
+        data = await this.fetchFromTrakt(identifier);
+        break;
+      default:
+        console.warn(`Unsupported source: ${source}`);
+        return null;
+    }
+
+    // Validate that the returned data actually matches what we're looking for
+    if (data && mediaItem.DisplayName) {
+      const isValidMatch = this.validateContentMatch(data, mediaItem.DisplayName);
+      if (!isValidMatch) {
+        console.log(`❌ Content validation failed for ${source.toUpperCase()} ID ${identifier}:`);
+        console.log(`   Expected: "${mediaItem.DisplayName}"`);
+        console.log(`   Got: "${data.title}"`);
+        console.log(`   This appears to be incorrect data, skipping...`);
+        return null; // Reject this data as it doesn't match
+      } else {
+        console.log(`✅ Content validation passed for ${source.toUpperCase()} ID ${identifier}`);
+      }
+    }
+
+    return data;
+  }
+
+  /**
+   * Search by title across multiple sources
+   */
+  private static async searchByTitle(title: string, mediaType?: string, preferredSources?: DataSourceType[]): Promise<MediaUpdateData | null> {
+    const sources = preferredSources || [DataSource.OMDB, DataSource.TMDB];
+    
+    for (const source of sources) {
+      console.log(`Searching ${source.toUpperCase()} by title:`, title);
+      
+      let result = null;
       switch (source) {
-        case DataSource.IMDB:
-          return await this.fetchFromIMDb(url);
-        case DataSource.TVDB:
-          return await this.fetchFromTVDB(url);
-        case DataSource.TMDB:
-          return await this.fetchFromTMDB(url, mediaItem);
         case DataSource.OMDB:
-          return await this.fetchFromOMDb(url);
-        case DataSource.TRAKT:
-          return await this.fetchFromTrakt(url);
-        default:
-          return null;
+          result = await this.searchOMDbByTitle(title, mediaType);
+          break;
+        case DataSource.TMDB:
+          result = await this.searchTMDBByTitle(title);
+          break;
       }
-    } catch (error) {
-      console.error(`Error fetching from ${source}:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Fetch data from IMDb using web scraping (since IMDb doesn't have public API)
-   */
-  private static async fetchFromIMDb(url: string): Promise<MediaUpdateData | null> {
-    try {
-      // Extract IMDb ID from URL
-      const imdbId = this.extractIMDbId(url);
-      if (!imdbId) return null;
-
-      console.log(`Fetching IMDb data for ID: ${imdbId}`);
       
-      // Use OMDb API with IMDb ID (free alternative to direct IMDb scraping)
-      return await this.fetchFromOMDbAPI(imdbId);
-
-    } catch (error) {
-      console.error('Error fetching from IMDb:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Fetch data from OMDb API (free IMDb data)
-   */
-  private static async fetchFromOMDb(url: string): Promise<MediaUpdateData | null> {
-    const imdbId = this.extractIMDbId(url) || url;
-    return await this.fetchFromOMDbAPI(imdbId);
-  }
-
-  /**
-   * Fetch data from OMDb API using IMDb ID
-   */
-  private static async fetchFromOMDbAPI(imdbId: string): Promise<MediaUpdateData | null> {
-    try {
-      // OMDb API is free but requires an API key
-      // For development, we can use the free tier with limited requests
-      // Users would need to get their own API key from http://www.omdbapi.com/
-      
-      const apiKey = import.meta.env.VITE_OMDB_API_KEY || 'demo'; // You'll need to set this
-      const response = await fetch(`https://www.omdbapi.com/?i=${imdbId}&apikey=${apiKey}&plot=full`);
-      
-      if (!response.ok) {
-        throw new Error(`OMDb API error: ${response.status}`);
+      if (result) {
+        return { ...result, source: source.toUpperCase() };
       }
+    }
 
-      const data = await response.json();
-      
-      if (data.Response === 'False') {
-        console.log('OMDb API returned error:', data.Error);
+    return null;
+  }
+
+  /**
+   * Fetch from OMDb API using IMDb ID
+   */
+  private static async fetchFromOMDb(imdbId: string): Promise<MediaUpdateData | null> {
+    try {
+      const apiKey = import.meta.env.VITE_OMDB_API_KEY;
+      if (!apiKey) {
+        console.warn('OMDb API key not configured');
         return null;
       }
 
-      return {
-        title: data.Title,
-        description: data.Plot !== 'N/A' ? data.Plot : undefined,
-        coverImageUrl: data.Poster !== 'N/A' ? data.Poster : undefined,
-        releaseDate: data.Released !== 'N/A' ? data.Released : undefined,
-        runtime: data.Runtime !== 'N/A' ? parseInt(data.Runtime) : undefined,
-        genres: data.Genre !== 'N/A' ? data.Genre.split(', ') : undefined
-      };
+      // Ensure IMDb ID has proper format
+      const formattedId = imdbId.startsWith('tt') ? imdbId : `tt${imdbId}`;
+      
+      const response = await fetch(`https://www.omdbapi.com/?i=${formattedId}&apikey=${apiKey}&plot=full`);
+      const data = await response.json();
 
+      if (data.Response === 'True') {
+        return {
+          title: data.Title,
+          description: data.Plot,
+          coverImageUrl: data.Poster !== 'N/A' ? data.Poster : undefined,
+          releaseDate: data.Released !== 'N/A' ? data.Released : undefined,
+          runtime: data.Runtime !== 'N/A' ? parseInt(data.Runtime) : undefined,
+          genres: data.Genre !== 'N/A' ? data.Genre.split(', ') : undefined
+        };
+      }
+
+      return null;
     } catch (error) {
-      console.error('Error fetching from OMDb API:', error);
+      console.error('Error fetching from OMDb:', error);
       return null;
     }
   }
 
   /**
-   * Fetch data from TMDB (The Movie Database) - free API
+   * Search OMDb by title
    */
-  private static async fetchFromTMDB(url: string, mediaItem: MediaItem): Promise<MediaUpdateData | null> {
+  private static async searchOMDbByTitle(title: string, mediaType?: string): Promise<MediaUpdateData | null> {
     try {
-      const tmdbId = this.extractTMDBId(url);
-      if (!tmdbId) return null;
+      const apiKey = import.meta.env.VITE_OMDB_API_KEY;
+      if (!apiKey) return null;
 
+      // Clean title (remove year if present)
+      const cleanTitle = title.replace(/\s*\(\d{4}\)$/, '');
+      
+      // Extract year if present
+      const yearMatch = title.match(/\((\d{4})\)$/);
+      const year = yearMatch ? yearMatch[1] : '';
+
+      // Map media type
+      let type = '';
+      if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
+        type = '&type=movie';
+      } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
+        type = '&type=series';
+      }
+
+      const url = `https://www.omdbapi.com/?t=${encodeURIComponent(cleanTitle)}${year ? `&y=${year}` : ''}${type}&apikey=${apiKey}&plot=full`;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.Response === 'True') {
+        return {
+          title: data.Title,
+          description: data.Plot,
+          coverImageUrl: data.Poster !== 'N/A' ? data.Poster : undefined,
+          releaseDate: data.Released !== 'N/A' ? data.Released : undefined,
+          runtime: data.Runtime !== 'N/A' ? parseInt(data.Runtime) : undefined,
+          genres: data.Genre !== 'N/A' ? data.Genre.split(', ') : undefined
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error searching OMDb by title:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch from TMDB API
+   */
+  private static async fetchFromTMDB(tmdbId: string, mediaType?: string): Promise<MediaUpdateData | null> {
+    try {
       const apiKey = import.meta.env.VITE_TMDB_API_KEY;
       if (!apiKey) {
-        console.log('TMDB API key not configured');
+        console.warn('TMDB API key not configured');
         return null;
       }
 
-      const mediaType = mediaItem.MediaType?.toLowerCase() === 'movie' ? 'movie' : 'tv';
-      const response = await fetch(
-        `https://api.themoviedb.org/3/${mediaType}/${tmdbId}?api_key=${apiKey}&language=en-US`
-      );
+      console.log(`Attempting to fetch TMDB ID: ${tmdbId} with mediaType: ${mediaType}`);
+
+      // Try different content types based on media type or try both
+      const typesToTry = [];
       
-      if (!response.ok) {
-        throw new Error(`TMDB API error: ${response.status}`);
+      if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
+        typesToTry.push('movie');
+      } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series') || mediaType?.toLowerCase().includes('episode')) {
+        typesToTry.push('tv');
+      } else {
+        // Unknown type, try both
+        typesToTry.push('movie', 'tv');
       }
 
-      const data = await response.json();
+      for (const type of typesToTry) {
+        console.log(`Trying TMDB ${type} endpoint for ID: ${tmdbId}`);
+        
+        const response = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${apiKey}`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          if (data.id) {
+            console.log(`Successfully fetched from TMDB ${type}:`, data.title || data.name);
+            return {
+              title: data.title || data.name,
+              description: data.overview,
+              coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+              releaseDate: data.release_date || data.first_air_date,
+              runtime: data.runtime || data.episode_run_time?.[0],
+              genres: data.genres?.map((g: { name: string }) => g.name)
+            };
+          }
+        } else {
+          console.log(`TMDB ${type} endpoint returned ${response.status} for ID: ${tmdbId}`);
+        }
+      }
 
-      return {
-        title: data.title || data.name,
-        description: data.overview,
-        coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
-        releaseDate: data.release_date || data.first_air_date,
-        runtime: data.runtime || data.episode_run_time?.[0],
-        genres: data.genres?.map((g: { name: string }) => g.name)
-      };
-
+      console.log(`No data found on TMDB for ID: ${tmdbId}`);
+      return null;
     } catch (error) {
       console.error('Error fetching from TMDB:', error);
       return null;
@@ -244,172 +394,80 @@ export class MediaUpdateService {
   }
 
   /**
-   * Fetch data from TVDB - requires API key
+   * Search TMDB by title
    */
-  private static async fetchFromTVDB(_url: string): Promise<MediaUpdateData | null> {
-    try {
-      // TVDB API requires authentication, which is more complex
-      // For now, we'll just log that it's not implemented
-      console.log('TVDB integration not yet implemented - requires complex authentication');
-      return null;
-
-    } catch (error) {
-      console.error('Error fetching from TVDB:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Fetch data from Trakt (production only)
-   */
-  private static async fetchFromTrakt(_url: string): Promise<MediaUpdateData | null> {
-    try {
-      // Use existing Trakt integration if available
-      console.log('Trakt integration available only in production environment');
-      return null;
-
-    } catch (error) {
-      console.error('Error fetching from Trakt:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Search for media by title when no external links are available
-   */
-  private static async searchByTitle(title: string, mediaType?: string): Promise<MediaUpdateData | null> {
-    try {
-      // Clean title for search
-      const cleanTitle = this.cleanTitleForSearch(title);
-      const year = this.extractYearFromTitle(title);
-
-      console.log(`Searching for: "${cleanTitle}" (${year || 'no year'})`);
-
-      // Try OMDb API search first (free)
-      const omdbResult = await this.searchOMDbAPI(cleanTitle, year || undefined, mediaType);
-      if (omdbResult) return omdbResult;
-
-      // Try TMDB search if API key is available
-      const tmdbResult = await this.searchTMDBAPI(cleanTitle, year || undefined, mediaType);
-      if (tmdbResult) return tmdbResult;
-
-      return null;
-
-    } catch (error) {
-      console.error('Error searching by title:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Search OMDb API by title
-   */
-  private static async searchOMDbAPI(title: string, year?: number, mediaType?: string): Promise<MediaUpdateData | null> {
-    try {
-      const apiKey = import.meta.env.VITE_OMDB_API_KEY || 'demo';
-      let searchUrl = `https://www.omdbapi.com/?s=${encodeURIComponent(title)}&apikey=${apiKey}`;
-      
-      if (year) searchUrl += `&y=${year}`;
-      if (mediaType?.toLowerCase() === 'movie') searchUrl += '&type=movie';
-      if (mediaType?.toLowerCase() === 'tv show') searchUrl += '&type=series';
-
-      const response = await fetch(searchUrl);
-      if (!response.ok) return null;
-
-      const searchData = await response.json();
-      if (searchData.Response === 'False' || !searchData.Search?.[0]) return null;
-
-      // Get details for the first result
-      const firstResult = searchData.Search[0];
-      return await this.fetchFromOMDbAPI(firstResult.imdbID);
-
-    } catch (error) {
-      console.error('Error searching OMDb:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Search TMDB API by title
-   */
-  private static async searchTMDBAPI(title: string, year?: number, mediaType?: string): Promise<MediaUpdateData | null> {
+  private static async searchTMDBByTitle(title: string): Promise<MediaUpdateData | null> {
     try {
       const apiKey = import.meta.env.VITE_TMDB_API_KEY;
       if (!apiKey) return null;
 
-      const searchType = mediaType?.toLowerCase() === 'movie' ? 'movie' : 'tv';
-      let searchUrl = `https://api.themoviedb.org/3/search/${searchType}?api_key=${apiKey}&query=${encodeURIComponent(title)}`;
+      // Clean title (remove year if present)
+      const cleanTitle = title.replace(/\s*\(\d{4}\)$/, '');
       
-      if (year) searchUrl += `&year=${year}`;
+      // Extract year if present
+      const yearMatch = title.match(/\((\d{4})\)$/);
+      const year = yearMatch ? yearMatch[1] : '';
 
-      const response = await fetch(searchUrl);
-      if (!response.ok) return null;
+      // Try movie search first, then TV if no results
+      const movieUrl = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(cleanTitle)}${year ? `&year=${year}` : ''}`;
+      const movieResponse = await fetch(movieUrl);
+      const movieData = await movieResponse.json();
 
-      const searchData = await response.json();
-      if (!searchData.results?.[0]) return null;
+      if (movieData.results && movieData.results.length > 0) {
+        const movie = movieData.results[0];
+        return {
+          title: movie.title,
+          description: movie.overview,
+          coverImageUrl: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : undefined,
+          releaseDate: movie.release_date,
+          genres: [] // Would need additional API call for full genre names
+        };
+      }
 
-      const firstResult = searchData.results[0];
-      
-      return {
-        title: firstResult.title || firstResult.name,
-        description: firstResult.overview,
-        coverImageUrl: firstResult.poster_path ? `https://image.tmdb.org/t/p/w500${firstResult.poster_path}` : undefined,
-        releaseDate: firstResult.release_date || firstResult.first_air_date,
-        source: 'TMDB'
-      };
+      // Try TV search if movie search failed
+      const tvUrl = `https://api.themoviedb.org/3/search/tv?api_key=${apiKey}&query=${encodeURIComponent(cleanTitle)}${year ? `&first_air_date_year=${year}` : ''}`;
+      const tvResponse = await fetch(tvUrl);
+      const tvData = await tvResponse.json();
 
+      if (tvData.results && tvData.results.length > 0) {
+        const show = tvData.results[0];
+        return {
+          title: show.name,
+          description: show.overview,
+          coverImageUrl: show.poster_path ? `https://image.tmdb.org/t/p/w500${show.poster_path}` : undefined,
+          releaseDate: show.first_air_date,
+          genres: [] // Would need additional API call for full genre names
+        };
+      }
+
+      return null;
     } catch (error) {
-      console.error('Error searching TMDB:', error);
+      console.error('Error searching TMDB by title:', error);
       return null;
     }
   }
 
-  // Helper methods for parsing external links and extracting IDs
-  private static parseExternalLinks(externalLinksJson?: string): Record<string, string> {
-    if (!externalLinksJson) return {};
-    try {
-      return JSON.parse(externalLinksJson);
-    } catch {
-      return {};
-    }
-  }
-
-  private static extractIMDbId(url: string): string | null {
-    const match = url.match(/imdb\.com\/title\/(tt\d+)/);
-    return match ? match[1] : null;
-  }
-
-  private static extractTMDBId(url: string): string | null {
-    const match = url.match(/themoviedb\.org\/(?:movie|tv)\/(\d+)/);
-    return match ? match[1] : null;
-  }
-
-  private static extractYearFromTitle(title: string): number | null {
-    const match = title.match(/\((\d{4})\)/);
-    return match ? parseInt(match[1]) : null;
-  }
-
-  private static cleanTitleForSearch(title: string): string {
-    // Remove year and other noise from title for better search
-    return title.replace(/\(\d{4}\)/, '').trim();
+  /**
+   * Fetch from Trakt API (placeholder - requires proper API integration)
+   */
+  private static async fetchFromTrakt(traktSlug: string): Promise<MediaUpdateData | null> {
+    // This would require proper Trakt API integration
+    console.log('Trakt integration not yet implemented for:', traktSlug);
+    return null;
   }
 
   /**
-   * Analyze what would change for a media item given update data and options
+   * Analyze what changes would be made to a media item
    */
-  static analyzeChanges(
-    mediaItem: MediaItem, 
-    updateData: MediaUpdateData, 
-    options: UpdateOptions
-  ): { hasChanges: boolean; changes: Partial<MediaUpdateData> } {
-    const changes: Partial<MediaUpdateData> = {};
+  static analyzeChanges(mediaItem: MediaItem, updateData: MediaUpdateData, options: UpdateOptions): MediaUpdateData | null {
+    const changes: MediaUpdateData = {};
     let hasChanges = false;
 
-    // Check title changes
+    // Check title
     if (options.updateTitles && updateData.title) {
-      const shouldUpdate = options.onlyMissing 
-        ? !mediaItem.DisplayName || mediaItem.DisplayName.trim() === ''
-        : true;
+      const shouldUpdate = options.onlyMissing ? 
+        (!mediaItem.DisplayName || mediaItem.DisplayName.trim() === '') : 
+        true;
       
       if (shouldUpdate && updateData.title !== mediaItem.DisplayName) {
         changes.title = updateData.title;
@@ -417,11 +475,11 @@ export class MediaUpdateService {
       }
     }
 
-    // Check description changes
+    // Check description
     if (options.updateDescriptions && updateData.description) {
-      const shouldUpdate = options.onlyMissing 
-        ? !mediaItem.Description || mediaItem.Description.trim() === ''
-        : true;
+      const shouldUpdate = options.onlyMissing ? 
+        (!mediaItem.Description || mediaItem.Description.trim() === '') : 
+        true;
       
       if (shouldUpdate && updateData.description !== mediaItem.Description) {
         changes.description = updateData.description;
@@ -429,11 +487,11 @@ export class MediaUpdateService {
       }
     }
 
-    // Check cover image changes
+    // Check cover image
     if (options.updateCoverImages && updateData.coverImageUrl) {
-      const shouldUpdate = options.onlyMissing 
-        ? !mediaItem.CoverImageUrl || mediaItem.CoverImageUrl.trim() === ''
-        : true;
+      const shouldUpdate = options.onlyMissing ? 
+        (!mediaItem.CoverImageUrl || mediaItem.CoverImageUrl.trim() === '') : 
+        true;
       
       if (shouldUpdate && updateData.coverImageUrl !== mediaItem.CoverImageUrl) {
         changes.coverImageUrl = updateData.coverImageUrl;
@@ -441,65 +499,69 @@ export class MediaUpdateService {
       }
     }
 
-    return { hasChanges, changes };
+    // Copy source info
+    if (updateData.source) {
+      changes.source = updateData.source;
+    }
+
+    return hasChanges ? changes : null;
   }
 
   /**
-   * Apply updates to a media item
-   */
-  static async applyUpdate(mediaItem: MediaItem, changes: Partial<MediaUpdateData>): Promise<void> {
-    const updateData: Partial<MediaItem> = {};
-
-    if (changes.title) updateData.DisplayName = changes.title;
-    if (changes.description) updateData.Description = changes.description;
-    if (changes.coverImageUrl) updateData.CoverImageUrl = changes.coverImageUrl;
-    if (changes.releaseDate) updateData.ReleaseDate = changes.releaseDate;
-    if (changes.runtime) updateData.Duration = changes.runtime;
-    if (changes.genres) updateData.Genre = changes.genres.join(', ');
-
-    await MediaLibraryService.updateMediaItem(mediaItem.Id, updateData);
-  }
-
-  /**
-   * Process bulk updates for multiple media items
+   * Process bulk update for multiple media items
    */
   static async processBulkUpdate(
-    mediaItems: MediaItem[],
+    mediaItems: MediaItem[], 
     options: UpdateOptions,
-    onProgress?: (current: number, total: number, item: MediaItem) => void
+    onProgress?: (current: number, total: number, currentItem: string) => void
   ): Promise<MediaUpdateResult[]> {
     const results: MediaUpdateResult[] = [];
 
     for (let i = 0; i < mediaItems.length; i++) {
       const mediaItem = mediaItems[i];
       
-      if (onProgress) {
-        onProgress(i + 1, mediaItems.length, mediaItem);
-      }
+      onProgress?.(i + 1, mediaItems.length, mediaItem.DisplayName || 'Unknown');
 
       try {
         // Fetch update data
-        const updateData = await this.fetchUpdateData(mediaItem);
+        const updateData = await this.fetchUpdateData(mediaItem, options);
         
-        if (!updateData) {
+        if (updateData) {
+          // Analyze what changes should be made
+          const changes = this.analyzeChanges(mediaItem, updateData, options);
+          
+          if (changes) {
+            // Apply the update with proper field mapping
+            const updateFields: Record<string, string | number | undefined> = {};
+            if (changes.title) updateFields.DisplayName = changes.title;
+            if (changes.description) updateFields.Description = changes.description;
+            if (changes.coverImageUrl) updateFields.CoverImageUrl = changes.coverImageUrl;
+            
+            console.log(`📝 Applying changes to "${mediaItem.DisplayName}":`, changes);
+            console.log(`🔄 Update fields:`, updateFields);
+            
+            await MediaLibraryService.updateMediaItem(mediaItem.Id, updateFields);
+            
+            results.push({
+              mediaItem,
+              updateData: changes,
+              hasChanges: true
+            });
+          } else {
+            results.push({
+              mediaItem,
+              updateData: null,
+              hasChanges: false
+            });
+          }
+        } else {
           results.push({
             mediaItem,
             updateData: null,
-            error: 'No data found on Trakt',
+            error: 'No data found',
             hasChanges: false
           });
-          continue;
         }
-
-        // Analyze changes
-        const { hasChanges, changes } = this.analyzeChanges(mediaItem, updateData, options);
-
-        results.push({
-          mediaItem,
-          updateData: changes,
-          hasChanges
-        });
-
       } catch (error) {
         results.push({
           mediaItem,
@@ -508,40 +570,43 @@ export class MediaUpdateService {
           hasChanges: false
         });
       }
+
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     return results;
   }
 
   /**
-   * Apply bulk updates after user confirmation
+   * Validate that the returned content actually matches what we're looking for
    */
-  static async applyBulkUpdates(
-    results: MediaUpdateResult[],
-    onProgress?: (current: number, total: number, item: MediaItem) => void
-  ): Promise<{ success: number; failed: number; errors: string[] }> {
-    const itemsToUpdate = results.filter(r => r.hasChanges && r.updateData);
-    let success = 0;
-    let failed = 0;
-    const errors: string[] = [];
+  private static validateContentMatch(data: MediaUpdateData, expectedTitle: string): boolean {
+    if (!data.title || !expectedTitle) return false;
 
-    for (let i = 0; i < itemsToUpdate.length; i++) {
-      const result = itemsToUpdate[i];
-      
-      if (onProgress) {
-        onProgress(i + 1, itemsToUpdate.length, result.mediaItem);
-      }
+    const normalizedExpected = expectedTitle.toLowerCase().trim();
+    const normalizedActual = data.title.toLowerCase().trim();
 
-      try {
-        await this.applyUpdate(result.mediaItem, result.updateData!);
-        success++;
-      } catch (error) {
-        failed++;
-        const errorMsg = `${result.mediaItem.DisplayName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-        errors.push(errorMsg);
-      }
-    }
+    // Exact match
+    if (normalizedActual === normalizedExpected) return true;
 
-    return { success, failed, errors };
+    // Check if the actual title is contained in expected (for series episodes/specials)
+    if (normalizedExpected.includes(normalizedActual)) return true;
+
+    // Check if the expected title starts with the actual title (for base series)
+    if (normalizedExpected.startsWith(normalizedActual)) return true;
+
+    // Check for common patterns like "Series: Episode" vs "Series"
+    const expectedBase = normalizedExpected.split(':')[0].trim();
+    if (normalizedActual === expectedBase) return true;
+
+    // Check for year variations
+    const yearPattern = /\(\d{4}\)/;
+    const expectedWithoutYear = normalizedExpected.replace(yearPattern, '').trim();
+    const actualWithoutYear = normalizedActual.replace(yearPattern, '').trim();
+    if (expectedWithoutYear === actualWithoutYear) return true;
+
+    return false;
   }
+
 }

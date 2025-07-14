@@ -194,3 +194,4 @@ dist/
 .yarn/install-state.gz
 .pnp.*
 .github/*.md
+**/.vite/

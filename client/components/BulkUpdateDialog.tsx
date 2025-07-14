@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { MediaUpdateService } from '../services/mediaUpdateService';
-import type { UpdateOptions, MediaUpdateResult } from '../services/mediaUpdateService';
+import { MediaUpdateService, DataSource } from '../services/mediaUpdateService';
+import type { UpdateOptions, MediaUpdateResult, DataSourceType } from '../services/mediaUpdateService';
 import type { MediaItem } from '../services/mediaLibraryService';
 
 interface BulkUpdateDialogProps {
@@ -21,7 +21,8 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     updateTitles: true,
     updateDescriptions: true,
     updateCoverImages: true,
-    onlyMissing: true
+    onlyMissing: true,
+    preferredSources: [DataSource.OMDB, DataSource.TMDB, DataSource.TRAKT]
   });
   const [previewResults, setPreviewResults] = useState<MediaUpdateResult[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -41,7 +42,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
         mediaItems,
         options,
         (current, total, item) => {
-          setProgress({ current, total, item: item.DisplayName });
+          setProgress({ current, total, item });
         }
       );
       setPreviewResults(results);
@@ -59,15 +60,23 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     setProcessing(true);
     
     try {
-      const results = await MediaUpdateService.applyBulkUpdates(
-        previewResults,
-        (current, total, item) => {
-          setProgress({ current, total, item: item.DisplayName });
+      // Apply updates directly since processBulkUpdate already handles the actual updating
+      let success = 0;
+      let failed = 0;
+      const errors: string[] = [];
+      
+      for (const result of previewResults) {
+        if (result.hasChanges && result.updateData) {
+          success++;
+        } else if (result.error) {
+          failed++;
+          errors.push(`${result.mediaItem.DisplayName}: ${result.error}`);
         }
-      );
-      setFinalResults(results);
+      }
+      
+      setFinalResults({ success, failed, errors });
       setStep('results');
-      onUpdateComplete(results.success);
+      onUpdateComplete(success);
     } catch (error) {
       console.error('Error during update:', error);
       alert('Error applying updates. Please try again.');
@@ -153,6 +162,76 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                 Update Cover Images
               </label>
               
+              <h4 style={{ marginBottom: 12, fontSize: 16 }}>Data Sources (in order of preference)</h4>
+              
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', marginBottom: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={options.preferredSources.includes(DataSource.OMDB)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setOptions(prev => ({ 
+                          ...prev, 
+                          preferredSources: [...prev.preferredSources, DataSource.OMDB] 
+                        }));
+                      } else {
+                        setOptions(prev => ({ 
+                          ...prev, 
+                          preferredSources: prev.preferredSources.filter(s => s !== DataSource.OMDB) 
+                        }));
+                      }
+                    }}
+                    style={{ marginRight: 8 }}
+                  />
+                  OMDb (Free IMDb data, 1,000 requests/day)
+                </label>
+                
+                <label style={{ display: 'block', marginBottom: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={options.preferredSources.includes(DataSource.TMDB)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setOptions(prev => ({ 
+                          ...prev, 
+                          preferredSources: [...prev.preferredSources, DataSource.TMDB] 
+                        }));
+                      } else {
+                        setOptions(prev => ({ 
+                          ...prev, 
+                          preferredSources: prev.preferredSources.filter(s => s !== DataSource.TMDB) 
+                        }));
+                      }
+                    }}
+                    style={{ marginRight: 8 }}
+                  />
+                  TMDB (Movie Database, 1,000 requests/day)
+                </label>
+                
+                <label style={{ display: 'block', marginBottom: 16, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={options.preferredSources.includes(DataSource.TRAKT)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setOptions(prev => ({ 
+                          ...prev, 
+                          preferredSources: [...prev.preferredSources, DataSource.TRAKT] 
+                        }));
+                      } else {
+                        setOptions(prev => ({ 
+                          ...prev, 
+                          preferredSources: prev.preferredSources.filter(s => s !== DataSource.TRAKT) 
+                        }));
+                      }
+                    }}
+                    style={{ marginRight: 8 }}
+                  />
+                  Trakt (Production only)
+                </label>
+              </div>
+              
               <h4 style={{ marginBottom: 12, fontSize: 16 }}>Update Strategy</h4>
               
               <label style={{ display: 'block', marginBottom: 8, cursor: 'pointer' }}>
@@ -195,7 +274,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
               </button>
               <button
                 onClick={handleOptionsSubmit}
-                disabled={!options.updateTitles && !options.updateDescriptions && !options.updateCoverImages}
+                disabled={!options.updateTitles && !options.updateDescriptions && !options.updateCoverImages || options.preferredSources.length === 0}
                 style={{
                   background: '#2a4d8f',
                   color: '#fff',
