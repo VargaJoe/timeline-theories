@@ -181,7 +181,13 @@ export const TimelineListPage: React.FC = () => {
                         lineHeight: 1.5,
                         fontSize: 14
                       }}
-                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(timeline.description) }}
+                      dangerouslySetInnerHTML={{
+                        __html: DOMPurify.sanitize(
+                          timeline.description.length > 180
+                            ? timeline.description.slice(0, 180) + '...'
+                            : timeline.description
+                        )
+                      }}
                     />
                   )}
                   <div style={{ 
