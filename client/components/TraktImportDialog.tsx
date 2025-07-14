@@ -48,21 +48,13 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     }
     setImporting(true);
     try {
-      console.log('Starting Trakt fetch for:', parsed.username, parsed.list, 'fetchOnly:', fetchOnly);
       // Always use fetchTraktList for consistent mapping
       const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list);
-      console.log('Successfully fetched', items.length, 'items from Trakt');
       
       // If fetchOnly mode, just return the items for review
       if (fetchOnly) {
-        console.log('TraktImportDialog fetchOnly mode - fetched items:', items.length, items);
         setSummary(`Fetched ${items.length} items for review`);
-        if (onImportComplete) {
-          console.log('Calling onImportComplete with items:', items);
-          onImportComplete(items);
-        } else {
-          console.log('No onImportComplete callback provided');
-        }
+        if (onImportComplete) onImportComplete(items);
         return;
       }
       
