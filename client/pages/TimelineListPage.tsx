@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { getTimelines } from '../services/timelineService';
 import type { Timeline } from '../services/timelineService';
@@ -173,14 +174,15 @@ export const TimelineListPage: React.FC = () => {
                     {timeline.displayName}
                   </h3>
                   {timeline.description && (
-                    <p style={{ 
-                      color: '#495057', 
-                      marginBottom: 16,
-                      lineHeight: 1.5,
-                      fontSize: 14
-                    }}>
-                      {timeline.description}
-                    </p>
+                    <div
+                      style={{ 
+                        color: '#495057', 
+                        marginBottom: 16,
+                        lineHeight: 1.5,
+                        fontSize: 14
+                      }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(timeline.description) }}
+                    />
                   )}
                   <div style={{ 
                     display: 'flex', 

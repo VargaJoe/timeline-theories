@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import DOMPurify from 'dompurify';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
@@ -225,12 +228,20 @@ export const TimelineViewPage: React.FC = () => {
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontWeight: 500 }}>Description</label>
-              <textarea
+              <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>Description</label>
+              <ReactQuill
                 value={editDescription}
-                onChange={e => setEditDescription(e.target.value)}
-                rows={3}
-                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+                onChange={setEditDescription}
+                theme="snow"
+                style={{ background: '#fff', borderRadius: 6 }}
+                modules={{
+                  toolbar: [
+                    [{ header: [1, 2, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ list: 'ordered' }, { list: 'bullet' }],
+                    ['link', 'clean']
+                  ]
+                }}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -256,7 +267,10 @@ export const TimelineViewPage: React.FC = () => {
           <>
             <h1 style={{ marginBottom: 16, color: '#2a4d8f' }}>{timeline.displayName}</h1>
             {timeline.description && (
-              <p style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}>{timeline.description}</p>
+              <div
+                style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(timeline.description) }}
+              />
             )}
           </>
         )}
