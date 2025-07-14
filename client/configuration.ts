@@ -1,4 +1,5 @@
 export const repositoryUrl = import.meta.env.VITE_SENSENET_REPO_URL || 'https://your-sensenet-repo-url';
+export const traktApiKey = import.meta.env.VITE_TRAKT_API_KEY || '';
 export const configuration = {
   client_id: import.meta.env.VITE_OIDC_CLIENT_ID || 'your-client-id',
   authority: import.meta.env.VITE_OIDC_AUTHORITY || 'https://your-identity-server-url',

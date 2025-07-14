@@ -59,27 +59,90 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add reorder mode toggle and drag-and-drop support to TimelineViewPage.tsx using react-beautiful-dnd
 - [x] Add TimelineEntryService.updateEntryPositions for bulk position update
 - [x] TimelineEntry creation and navigation now use the correct Name/path segment for all timeline and entry URLs, ensuring friendly and consistent navigation
-
-
-### Story 12 - Timeline Management and Media Library Improvements
 - [x] Clean up and reorder implementation-tasks.md, mark completed tasks, fix order
 - [x] Add edit feature for timelines on entries page
 - [x] Add delete feature for timelines on entries page (with robust path handling in deleteTimeline)
-- [x] Implement drag-and-drop functionality
-- [x] Add position field management
-- [x] Create manual position numbering
-- [x] Update timeline display logic
-- [x] Test reordering functionality
-- [x] Fix timeline entry rearrange to only send updates for changed items
-- [x] Add reorder mode toggle and drag-and-drop support to TimelineViewPage.tsx using react-beautiful-dnd
-- [x] Add TimelineEntryService.updateEntryPositions for bulk position update
-- [x] TimelineEntry creation and navigation now use the correct Name/path segment for all timeline and entry URLs, ensuring friendly and consistent navigation
+
+
+### Story 17 - Create Timeline by Trakt List ✅ COMPLETED
+- [x] Add "Import from Trakt List" option to Timeline Create Page.
+- [x] Allow user to enter a Trakt list URL or select from their lists.
+- [x] Fetch list items via Trakt API.
+- [x] For each item:
+    - [x] Check if media item exists; create if missing. (Now uses 'title (year)' format for display name)
+    - [x] Create timeline entry for each item. (Now uses 'title (year)' format for display name)
+- [x] Allow user to review and edit before finalizing the timeline.
+- [x] Implement Trakt API integration via Netlify function proxy (trakt-proxy.cjs)
+- [x] Add comprehensive error handling and import summary feedback
+- [x] Support both timeline creation with import and import to existing timelines
+- [x] Test end-to-end functionality with real Trakt lists
+- [x] **FIX: Prevent duplicate timeline creation by adding fetchOnly mode to TraktImportDialog**
+- [x] **FIX: Restore user-preferred review functionality for examining items before import**
+- [x] **FIX: Consistent media item naming using 'title (year)' format for deduplication**
+- [x] **FIX: Correct timeline path usage for consistent content creation**
+
+### Technical Task - Robust Scroll Restoration for SPA ✅ COMPLETED
+- [x] Integrate delayed-scroll-restoration-polyfill via CDN in index.html
+- [x] Set window.history.scrollRestoration = 'manual' in App.tsx
+- [x] Confirm robust scroll restoration on browser navigation (back/forward)
+- [x] Ensure scroll position resets to top on new page navigation (except for back/forward)
+- [x] Commit working solution and update project memory
+
+### Technical Task - Fix Trakt Import Issues ✅ COMPLETED
+- [x] **FIX: Duplicate import buttons** - Removed duplicate import logic from TimelineCreateForm
+- [x] **FIX: Duplicate timeline creation** - TraktImportDialog + TimelineCreateForm both creating timelines
+- [x] **FIX: Missing review functionality** - Users couldn't examine/edit items before import
+- [x] **FIX: Inconsistent media naming** - Different 'title (year)' formats causing deduplication issues
+- [x] **FIX: Wrong timeline paths** - Hardcoded paths vs projectPaths constants
+- [x] **FIX: Navigation to wrong timeline** - Created 'Timeline' and 'Timeline (1)', navigated to empty one
+- [x] Add fetchOnly mode to TraktImportDialog for fetch-then-review workflow
+- [x] Consistent button text and UX for different import modes
+
 
 ## In Progress Stories
 
 ---
 
 ## Planned Stories
+
+### Story 15 - Create Media Item by Trakt
+- [ ] Add a "Search Trakt" button or field to the Media Item Create Page.
+- [ ] Integrate Trakt API search endpoints for movies and shows.
+- [ ] Display search results with key info (title, year, poster).
+- [ ] On selection, auto-fill the media item form with Trakt data.
+- [ ] Allow user to edit imported details before saving.
+- [ ] Save Trakt IDs with the media item for future reference.
+
+### Story 16 - Create Timeline Entry by Trakt
+- [ ] Add a "Search Trakt" option to the Timeline Entry Create Page.
+- [ ] Integrate Trakt API search for movies, shows, and episodes.
+- [ ] On selection, check if the media item exists; if not, create it using Trakt data.
+- [ ] Auto-fill timeline entry fields (title, date, etc.) with Trakt info.
+- [ ] Allow user to edit before saving.
+- [ ] Link the entry to the imported media item.
+
+### Story 18 - Import Ratings from Trakt
+- [ ] Add "Import Ratings from Trakt" option in user settings or media library.
+- [ ] Fetch user ratings via Trakt API.
+- [ ] Update or annotate media items with imported ratings.
+- [ ] Optionally, display ratings in timelines and media item views.
+
+### Story 19 - Search and Discover New Media for Timelines
+- [ ] Add "Search Trakt" feature to main page or timeline management.
+- [ ] Search Trakt for movies/shows.
+- [ ] Indicate if the media is already in any timeline or synced list.
+- [ ] Provide option to add missing media to a timeline or list.
+
+### Story 21 - Manually Enrich Media Details from Trakt
+- [ ] Add "Update from Trakt" button to media item detail page.
+- [ ] Fetch latest details for the media item from Trakt using its ID.
+- [ ] Show a diff/preview of changes before applying.
+- [ ] Update media item with selected new data.
+
+### Story 20 - Suggest Timelines by Trending/Popular Media
+- [ ] Fetch trending/popular movies and shows from Trakt API.
+- [ ] Match these with existing timelines in the app.
+- [ ] Display suggested timelines on the main page, highlighting those related to trending media.
 
 ### Story 14 - UI/Design improvements inspired by Trakt
 - [ ] Design and implement a top navigation bar with menu and user login/profile
@@ -92,7 +155,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
     - [ ] Add controls row (Edit, Reorder, Share, etc.)
     - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
 - [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
-
 
 ### Story 07 - View and Share Timeline
 - [ ] Create timeline display component

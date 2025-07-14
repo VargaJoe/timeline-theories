@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
 import { LoginButton } from './components/LoginButton';
 import { AuthenticatedContent } from './components/AuthenticatedContent';
@@ -14,7 +14,23 @@ import { OidcTokenInjector } from './components/OidcTokenInjector';
 import { setupMediaLibrary } from './scripts/setupMediaLibrary';
 import TimelineEntryCreatePage from './pages/TimelineEntryCreatePage';
 
+function ScrollToTopOnRouteChange() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  useEffect(() => {
+    // Only scroll to top on PUSH or REPLACE (not POP/back/forward)
+    if (navigationType === 'PUSH' || navigationType === 'REPLACE') {
+      window.scrollTo(0, 0);
+    }
+  }, [location, navigationType]);
+  return null;
+}
+
 function App() {
+  // Ensure browser doesn't interfere with polyfill
+  if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
+    window.history.scrollRestoration = 'manual';
+  }
   useEffect(() => {
     // Setup MediaLibrary folder structure on app load
     setupMediaLibrary();
@@ -24,6 +40,7 @@ function App() {
     <AppProviders>
       <OidcTokenInjector />
       <BrowserRouter>
+        <ScrollToTopOnRouteChange />
         <div className="app-container">
           <div className="app-root">
             {/* Top Navigation Bar */}

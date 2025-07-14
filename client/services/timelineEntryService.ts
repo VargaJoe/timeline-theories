@@ -80,7 +80,7 @@ export class TimelineEntryService {
       contentType: TIMELINE_ENTRY_CONTENT_TYPE,
       content: {
         Name: data.mediaItem?.Name,
-        DisplayName:  data.mediaItem?.DisplayName,
+        DisplayName: data.mediaItem?.DisplayName,
         MediaItem: data.mediaItem?.Id, // Reference field (id)
         Position: data.position,
         ChronologicalDate: data.chronologicalDate,

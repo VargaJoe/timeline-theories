@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import DOMPurify from 'dompurify';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
@@ -34,6 +38,7 @@ export const TimelineViewPage: React.FC = () => {
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showFullDescription, setShowFullDescription] = useState(false);
 
   useEffect(() => {
     if (!timelineName) return;
@@ -177,6 +182,17 @@ export const TimelineViewPage: React.FC = () => {
         boxShadow: '0 2px 12px #0001',
         padding: 32
       }}>
+        {/* Trakt Import Button/Modal */}
+        <TraktImportDialog
+          timelineName={timeline.name}
+          onImportComplete={() => {
+            // Optionally reload entries after import
+            setEntriesLoading(true);
+            TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
+              .then(setEntries)
+              .finally(() => setEntriesLoading(false));
+          }}
+        />
         {editMode ? (
           <form
             onSubmit={async e => {
@@ -213,12 +229,20 @@ export const TimelineViewPage: React.FC = () => {
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontWeight: 500 }}>Description</label>
-              <textarea
+              <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>Description</label>
+              <ReactQuill
                 value={editDescription}
-                onChange={e => setEditDescription(e.target.value)}
-                rows={3}
-                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+                onChange={setEditDescription}
+                theme="snow"
+                style={{ background: '#fff', borderRadius: 6 }}
+                modules={{
+                  toolbar: [
+                    [{ header: [1, 2, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ list: 'ordered' }, { list: 'bullet' }],
+                    ['link', 'clean']
+                  ]
+                }}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -244,7 +268,34 @@ export const TimelineViewPage: React.FC = () => {
           <>
             <h1 style={{ marginBottom: 16, color: '#2a4d8f' }}>{timeline.displayName}</h1>
             {timeline.description && (
-              <p style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}>{timeline.description}</p>
+              <div style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}>
+                <div
+                  dangerouslySetInnerHTML={{
+                    __html: DOMPurify.sanitize(
+                      showFullDescription || timeline.description.length <= 600
+                        ? timeline.description
+                        : timeline.description.slice(0, 600) + '...'
+                    )
+                  }}
+                />
+                {timeline.description.length > 300 && (
+                  <button
+                    onClick={() => setShowFullDescription(v => !v)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#2a4d8f',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                      marginTop: 4,
+                      padding: 0,
+                      fontSize: 15
+                    }}
+                  >
+                    {showFullDescription ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+              </div>
             )}
           </>
         )}
