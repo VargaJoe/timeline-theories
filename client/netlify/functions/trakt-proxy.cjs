@@ -41,13 +41,26 @@ exports.handler = async function(event, context) {
     if (!res.ok) {
       const errorText = await res.text();
       console.log('Trakt API error response:', errorText);
+      
+      // Include debug info in error response for troubleshooting
+      const debugInfo = {
+        apiKeyPresent: !!apiKey,
+        apiKeyLength: apiKey.length,
+        apiKeyStart: apiKey.substring(0, 10),
+        apiKeyEnd: apiKey.substring(apiKey.length - 10),
+        requestUrl: url,
+        responseStatus: res.status,
+        responseHeaders: [...res.headers.entries()]
+      };
+      
       return {
         statusCode: res.status,
         body: JSON.stringify({ 
           error: 'Failed to fetch from Trakt', 
           status: res.status,
           details: errorText,
-          url: url
+          url: url,
+          debug: debugInfo
         })
       };
     }
