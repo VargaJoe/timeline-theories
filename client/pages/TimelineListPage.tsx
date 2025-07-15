@@ -220,14 +220,19 @@ export const TimelineListPage: React.FC = () => {
                     borderRadius: 12,
                     overflow: 'hidden',
                     boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                    transition: 'transform 0.2s, box-shadow 0.2s'
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                    height: 420, // Fixed height for consistent layout
+                    display: 'flex',
+                    flexDirection: 'column'
                   }}>
                     <Link 
                       to={`/timelines/${pathSegment}`} 
                       style={{ 
                         textDecoration: 'none',
                         color: 'inherit',
-                        display: 'block'
+                        display: 'flex',
+                        flexDirection: 'column',
+                        height: '100%'
                       }}
                       onMouseOver={(e) => {
                         e.currentTarget.parentElement!.style.transform = 'translateY(-2px)';
@@ -241,6 +246,7 @@ export const TimelineListPage: React.FC = () => {
                       {/* Cover Image */}
                       <div style={{
                         height: 200,
+                        flexShrink: 0, // Prevent shrinking
                         background: timeline.coverImageUrl 
                           ? `url(${timeline.coverImageUrl})` 
                           : 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
@@ -272,40 +278,46 @@ export const TimelineListPage: React.FC = () => {
                       </div>
                       
                       {/* Card Content */}
-                      <div style={{ padding: 20 }}>
+                      <div style={{ 
+                        padding: 20,
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}>
                         <h3 style={{ 
                           marginBottom: 12, 
                           color: '#2a4d8f',
                           fontSize: 20,
                           fontWeight: 600,
-                          lineHeight: 1.3,
-                          minHeight: 48 // Ensure consistent height
+                          lineHeight: 1.3
                         }}>
                           {timeline.displayName}
                         </h3>
                         
-                        {timeline.description && (
-                          <div
-                            style={{ 
-                              color: '#495057', 
-                              marginBottom: 16,
-                              lineHeight: 1.5,
-                              fontSize: 14,
-                              minHeight: 60, // Ensure consistent height
-                              overflow: 'hidden',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 3,
-                              WebkitBoxOrient: 'vertical'
-                            }}
-                            dangerouslySetInnerHTML={{
-                              __html: DOMPurify.sanitize(
-                                timeline.description.length > 120
-                                  ? timeline.description.slice(0, 120) + '...'
-                                  : timeline.description
-                              )
-                            }}
-                          />
-                        )}
+                        <div style={{ flex: 1 }}>
+                          {timeline.description && (
+                            <div
+                              style={{ 
+                                color: '#495057', 
+                                marginBottom: 16,
+                                lineHeight: 1.5,
+                                fontSize: 14,
+                                overflow: 'hidden',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 3,
+                                WebkitBoxOrient: 'vertical',
+                                maxHeight: 63 // 3 lines × 14px × 1.5 line-height = 63px
+                              }}
+                              dangerouslySetInnerHTML={{
+                                __html: DOMPurify.sanitize(
+                                  timeline.description.length > 80
+                                    ? timeline.description.slice(0, 80) + '...'
+                                    : timeline.description
+                                )
+                              }}
+                            />
+                          )}
+                        </div>
                         
                         <div style={{ 
                           display: 'flex', 
@@ -315,7 +327,7 @@ export const TimelineListPage: React.FC = () => {
                           color: '#6c757d',
                           borderTop: '1px solid #f0f0f0',
                           paddingTop: 12,
-                          marginTop: 12
+                          marginTop: 'auto'
                         }}>
                           <span style={{
                             background: '#f8f9fa',
