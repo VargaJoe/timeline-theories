@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { MediaUpdateService, DataSource } from '../services/mediaUpdateService';
-import type { UpdateOptions, MediaUpdateResult } from '../services/mediaUpdateService';
+import type { UpdateOptions, MediaUpdateResult, BulkUpdateProgress } from '../services/mediaUpdateService';
 import type { MediaItem } from '../services/mediaLibraryService';
 import { MediaLibraryService } from '../services/mediaLibraryService';
 
@@ -33,7 +33,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
   });
   const [previewResults, setPreviewResults] = useState<ValidatedUpdateResult[]>([]);
   const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0, item: '' });
+  const [progress, setProgress] = useState<BulkUpdateProgress>({ current: 0, total: 0, currentItem: '' });
   const [finalResults, setFinalResults] = useState<{ success: number; failed: number; errors: string[] }>({
     success: 0,
     failed: 0,
@@ -101,8 +101,8 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
       const results = await MediaUpdateService.processBulkUpdate(
         mediaItems,
         options,
-        (current, total, item) => {
-          setProgress({ current, total, item });
+        (progress) => {
+          setProgress(progress);
         }
       );
       const validatedResults = validateResults(results);
@@ -163,7 +163,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     setStep('options');
     setPreviewResults([]);
     setFinalResults({ success: 0, failed: 0, errors: [] });
-    setProgress({ current: 0, total: 0, item: '' });
+    setProgress({ current: 0, total: 0, currentItem: '' });
     onClose();
   }, [onClose]);
 
@@ -374,8 +374,28 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                   Progress: {progress.current} / {progress.total}
                 </div>
                 <div style={{ marginBottom: 16, fontStyle: 'italic' }}>
-                  {progress.item}
+                  {progress.currentItem}
                 </div>
+                {progress.apiStatus && (
+                  <div style={{ 
+                    marginBottom: 16, 
+                    padding: 12, 
+                    backgroundColor: progress.apiStatus.status === 'rate-limited' ? '#fff3cd' : '#d1ecf1',
+                    border: '1px solid ' + (progress.apiStatus.status === 'rate-limited' ? '#ffeaa7' : '#bee5eb'),
+                    borderRadius: 6,
+                    fontSize: 14
+                  }}>
+                    <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                      API Status: {progress.apiStatus.source}
+                    </div>
+                    <div style={{ color: '#6c757d' }}>
+                      {progress.apiStatus.message}
+                      {progress.apiStatus.retryAfter && (
+                        <span> (Retry in {progress.apiStatus.retryAfter}s)</span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div style={{
                   width: '100%',
                   height: 8,
@@ -568,7 +588,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
               Progress: {progress.current} / {progress.total}
             </div>
             <div style={{ marginBottom: 16, fontStyle: 'italic' }}>
-              {progress.item}
+              {progress.currentItem}
             </div>
             <div style={{
               width: '100%',
