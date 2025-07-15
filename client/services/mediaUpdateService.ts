@@ -1,6 +1,20 @@
 import { MediaLibraryService } from './mediaLibraryService';
 import type { MediaItem } from './mediaLibraryService';
 
+// Rate limiting interfaces
+export interface RateLimitInfo {
+  isLimited: boolean;
+  retryAfter?: number; // seconds to wait
+  remaining?: number;
+  resetTime?: Date;
+  source: DataSourceType;
+}
+
+export interface ApiError extends Error {
+  status?: number;
+  rateLimitInfo?: RateLimitInfo;
+}
+
 export interface MediaUpdateData {
   title?: string;
   description?: string;
@@ -37,7 +51,33 @@ export const DataSource = {
 
 export type DataSourceType = typeof DataSource[keyof typeof DataSource];
 
+// Interface for enhanced progress reporting with API status
+export interface BulkUpdateProgress {
+  current: number;
+  total: number;
+  currentItem: string;
+  apiStatus?: {
+    source: string;
+    status: 'active' | 'rate-limited' | 'failed';
+    message?: string;
+    retryAfter?: number;
+  };
+}
+
+// Type for enhanced progress callback
+export type ProgressCallback = (progress: BulkUpdateProgress) => void;
+
 export class MediaUpdateService {
+  // Static property to track rate limiting across API calls
+  private static rateLimitInfo: RateLimitInfo = {
+    isLimited: false,
+    resetTime: undefined,
+    source: DataSource.OMDB
+  };
+
+  // Rate limiting state
+  private static rateLimitState: Map<DataSourceType, RateLimitInfo> = new Map();
+
   /**
    * Fetch updated data for a single media item from multiple sources
    */
@@ -84,12 +124,25 @@ export class MediaUpdateService {
       // Try each available source in user's preferred order
       for (const { source, identifier } of availableSources) {
         console.log(`Trying ${source.toUpperCase()} with ID: ${identifier} for ${mediaItem.DisplayName}`);
-        const data = await this.fetchFromSource(source, identifier, mediaItem);
-        if (data) {
-          console.log(`Successfully fetched data from ${source.toUpperCase()}`);
-          return { ...data, source: source.toUpperCase() };
-        } else {
-          console.log(`${source.toUpperCase()} returned no data for ID: ${identifier}`);
+        
+        try {
+          const data = await this.fetchFromSource(source, identifier, mediaItem);
+          if (data) {
+            console.log(`Successfully fetched data from ${source.toUpperCase()}`);
+            return { ...data, source: source.toUpperCase() };
+          } else {
+            console.log(`${source.toUpperCase()} returned no data for ID: ${identifier}`);
+          }
+        } catch (error) {
+          if (error instanceof Error && 'status' in error) {
+            const apiError = error as ApiError;
+            if (apiError.status === 429 || apiError.message.includes('rate limit') || apiError.message.includes('limit exceeded')) {
+              console.warn(`Rate limit hit for ${source.toUpperCase()}: ${apiError.message}. Skipping to next source.`);
+              continue; // Skip to next source instead of failing entirely
+            }
+          }
+          console.error(`Error fetching from ${source.toUpperCase()}:`, error);
+          // Continue to next source on other errors too
         }
       }
 
@@ -257,21 +310,37 @@ export class MediaUpdateService {
   }
 
   /**
-   * Fetch from OMDb API using IMDb ID
+   * Fetch from OMDb API using IMDb ID with rate limit handling
    */
   private static async fetchFromOMDb(imdbId: string): Promise<MediaUpdateData | null> {
-    try {
-      const apiKey = import.meta.env.VITE_OMDB_API_KEY;
-      if (!apiKey) {
-        console.warn('OMDb API key not configured');
-        return null;
-      }
+    const apiKey = import.meta.env.VITE_OMDB_API_KEY;
+    if (!apiKey) {
+      console.warn('OMDb API key not configured');
+      return null;
+    }
 
+    return this.retryWithBackoff(async () => {
       // Ensure IMDb ID has proper format
       const formattedId = imdbId.startsWith('tt') ? imdbId : `tt${imdbId}`;
       
       const response = await fetch(`https://www.omdbapi.com/?i=${formattedId}&apikey=${apiKey}&plot=full`);
+      
+      if (!response.ok) {
+        const error: ApiError = new Error(`OMDb API error: ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      
       const data = await response.json();
+
+      if (data.Response === 'False') {
+        if (data.Error?.includes('daily limit exceeded')) {
+          const error: ApiError = new Error('OMDb daily limit exceeded');
+          error.status = 401;
+          throw error;
+        }
+        return null; // Not found, but not an error
+      }
 
       if (data.Response === 'True') {
         return {
@@ -285,10 +354,7 @@ export class MediaUpdateService {
       }
 
       return null;
-    } catch (error) {
-      console.error('Error fetching from OMDb:', error);
-      return null;
-    }
+    }, DataSource.OMDB);
   }
 
   /**
@@ -337,16 +403,16 @@ export class MediaUpdateService {
   }
 
   /**
-   * Fetch from TMDB API
+   * Fetch from TMDB API with rate limit handling
    */
   private static async fetchFromTMDB(tmdbId: string, mediaType?: string): Promise<MediaUpdateData | null> {
-    try {
-      const apiKey = import.meta.env.VITE_TMDB_API_KEY;
-      if (!apiKey) {
-        console.warn('TMDB API key not configured');
-        return null;
-      }
+    const apiKey = import.meta.env.VITE_TMDB_API_KEY;
+    if (!apiKey) {
+      console.warn('TMDB API key not configured');
+      return null;
+    }
 
+    return this.retryWithBackoff(async () => {
       console.log(`Attempting to fetch TMDB ID: ${tmdbId} with mediaType: ${mediaType}`);
 
       // Try different content types based on media type or try both
@@ -366,31 +432,41 @@ export class MediaUpdateService {
         
         const response = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${apiKey}`);
         
-        if (response.ok) {
-          const data = await response.json();
-          
-          if (data.id) {
-            console.log(`Successfully fetched from TMDB ${type}:`, data.title || data.name);
-            return {
-              title: data.title || data.name,
-              description: data.overview,
-              coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
-              releaseDate: data.release_date || data.first_air_date,
-              runtime: data.runtime || data.episode_run_time?.[0],
-              genres: data.genres?.map((g: { name: string }) => g.name)
-            };
+        if (!response.ok) {
+          // If it's the last type to try, throw the error
+          if (type === typesToTry[typesToTry.length - 1]) {
+            const error: ApiError = new Error(`TMDB API error: ${response.status}`);
+            error.status = response.status;
+            
+            if (response.status === 429) {
+              error.message = 'TMDB rate limit exceeded';
+            }
+            
+            throw error;
           }
-        } else {
+          // Otherwise continue to next type
           console.log(`TMDB ${type} endpoint returned ${response.status} for ID: ${tmdbId}`);
+          continue;
+        }
+        
+        const data = await response.json();
+        
+        if (data.id) {
+          console.log(`Successfully fetched from TMDB ${type}:`, data.title || data.name);
+          return {
+            title: data.title || data.name,
+            description: data.overview,
+            coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+            releaseDate: data.release_date || data.first_air_date,
+            runtime: data.runtime || data.episode_run_time?.[0],
+            genres: data.genres?.map((g: { name: string }) => g.name)
+          };
         }
       }
 
       console.log(`No data found on TMDB for ID: ${tmdbId}`);
       return null;
-    } catch (error) {
-      console.error('Error fetching from TMDB:', error);
-      return null;
-    }
+    }, DataSource.TMDB);
   }
 
   /**
@@ -448,12 +524,26 @@ export class MediaUpdateService {
   }
 
   /**
-   * Fetch from Trakt API (placeholder - requires proper API integration)
+   * Fetch from Trakt API with rate limit handling (placeholder - requires proper API integration)
    */
   private static async fetchFromTrakt(traktSlug: string): Promise<MediaUpdateData | null> {
-    // This would require proper Trakt API integration
-    console.log('Trakt integration not yet implemented for:', traktSlug);
-    return null;
+    return this.retryWithBackoff(async () => {
+      // This would require proper Trakt API integration
+      console.log('Trakt integration not yet implemented for:', traktSlug);
+      
+      // When implementing, use something like:
+      // const response = await fetch(`/.netlify/functions/trakt-proxy?slug=${traktSlug}`);
+      // if (!response.ok) {
+      //   const error: ApiError = new Error(`Trakt API error: ${response.status}`);
+      //   error.status = response.status;
+      //   if (response.status === 429) {
+      //     error.message = 'Trakt rate limit exceeded';
+      //   }
+      //   throw error;
+      // }
+      
+      return null;
+    }, DataSource.TRAKT);
   }
 
   /**
@@ -508,25 +598,64 @@ export class MediaUpdateService {
   }
 
   /**
-   * Process bulk update for multiple media items
+   * Process bulk update for multiple media items with enhanced progress reporting
    */
   static async processBulkUpdate(
     mediaItems: MediaItem[], 
     options: UpdateOptions,
-    onProgress?: (current: number, total: number, currentItem: string) => void
+    onProgress?: ProgressCallback
   ): Promise<MediaUpdateResult[]> {
     const results: MediaUpdateResult[] = [];
 
     for (let i = 0; i < mediaItems.length; i++) {
       const mediaItem = mediaItems[i];
       
-      onProgress?.(i + 1, mediaItems.length, mediaItem.DisplayName || 'Unknown');
+      // Report basic progress
+      const progress: BulkUpdateProgress = {
+        current: i + 1,
+        total: mediaItems.length,
+        currentItem: mediaItem.DisplayName || 'Unknown'
+      };
+      
+      onProgress?.(progress);
 
       try {
-        // Fetch update data
-        const updateData = await this.fetchUpdateData(mediaItem, options);
+        // Fetch update data with API status tracking
+        let apiError: ApiError | null = null;
+        let updateData: MediaUpdateData | null = null;
+        
+        try {
+          updateData = await this.fetchUpdateData(mediaItem, options);
+        } catch (error) {
+          if (error instanceof Error && 'status' in error) {
+            apiError = error as ApiError;
+            
+            // Report API status if there's a rate limit issue
+            if (apiError.status === 429 || apiError.message.includes('rate limit') || apiError.message.includes('limit exceeded')) {
+              progress.apiStatus = {
+                source: 'API',
+                status: 'rate-limited',
+                message: apiError.message,
+                retryAfter: this.rateLimitInfo.resetTime ? 
+                  Math.max(0, Math.ceil((this.rateLimitInfo.resetTime.getTime() - Date.now()) / 1000)) : 
+                  undefined
+              };
+              onProgress?.(progress);
+            }
+          }
+        }
         
         if (updateData) {
+          // Report successful API fetch
+          if (updateData.source) {
+            progress.apiStatus = {
+              source: updateData.source,
+              status: 'active',
+              message: `Successfully fetched from ${updateData.source}`
+            };
+            onProgress?.(progress);
+          }
+          
           // Analyze what changes should be made
           const changes = this.analyzeChanges(mediaItem, updateData, options);
           
@@ -607,6 +736,119 @@ export class MediaUpdateService {
     if (expectedWithoutYear === actualWithoutYear) return true;
 
     return false;
+  }
+
+  /**
+   * Retry helper with exponential backoff for rate limited requests
+   */
+  private static async retryWithBackoff<T>(
+    operation: () => Promise<T>,
+    source: DataSourceType,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Check if we're currently rate limited
+        const limitInfo = this.rateLimitState.get(source);
+        if (limitInfo?.isLimited) {
+          const waitTime = limitInfo.retryAfter || Math.pow(2, attempt - 1) * 1000;
+          console.log(`⏱️ Rate limited on ${source.toUpperCase()}, waiting ${waitTime}ms before retry ${attempt}/${maxRetries}`);
+          await this.delay(waitTime);
+        }
+
+        const result = await operation();
+        
+        // Clear rate limit state on success
+        this.rateLimitState.delete(source);
+        return result;
+        
+      } catch (error) {
+        lastError = error as Error;
+        const apiError = error as ApiError;
+        
+        // Check if this is a rate limit error
+        if (this.isRateLimitError(apiError, source)) {
+          const retryAfter = this.extractRetryAfter(apiError, source) || Math.pow(2, attempt) * 1000;
+          
+          this.rateLimitState.set(source, {
+            isLimited: true,
+            retryAfter,
+            source,
+            resetTime: new Date(Date.now() + retryAfter)
+          });
+          
+          console.log(`🚫 Rate limit hit on ${source.toUpperCase()}, attempt ${attempt}/${maxRetries}, waiting ${retryAfter}ms`);
+          
+          if (attempt < maxRetries) {
+            await this.delay(retryAfter);
+            continue;
+          }
+        }
+        
+        // For non-rate-limit errors, don't retry
+        if (!this.isRateLimitError(apiError, source)) {
+          throw error;
+        }
+      }
+    }
+    
+    throw lastError;
+  }
+
+  /**
+   * Check if an error is due to rate limiting
+   */
+  private static isRateLimitError(error: ApiError, source: DataSourceType): boolean {
+    if (!error.status) return false;
+    
+    switch (source) {
+      case DataSource.OMDB:
+        return error.status === 401 || error.message?.includes('daily limit exceeded');
+      case DataSource.TMDB:
+        return error.status === 429;
+      case DataSource.TRAKT:
+        return error.status === 420 || error.status === 429;
+      default:
+        return error.status === 429 || error.status === 420;
+    }
+  }
+
+  /**
+   * Extract retry-after time from API response
+   */
+  private static extractRetryAfter(error: ApiError, source: DataSourceType): number | null {
+    // Some APIs include retry-after in headers or error messages
+    if (error.rateLimitInfo?.retryAfter) {
+      return error.rateLimitInfo.retryAfter * 1000; // Convert to milliseconds
+    }
+    
+    // Default backoff times by source
+    switch (source) {
+      case DataSource.OMDB:
+        return 24 * 60 * 60 * 1000; // 24 hours for daily limit
+      case DataSource.TMDB:
+        return 10 * 1000; // 10 seconds
+      case DataSource.TRAKT:
+        return 60 * 1000; // 1 minute
+      default:
+        return 60 * 1000; // 1 minute default
+    }
+  }
+
+  /**
+   * Simple delay helper
+   */
+  private static delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Get current rate limit status for all sources
+   */
+  static getRateLimitStatus(): Map<DataSourceType, RateLimitInfo> {
+    return new Map(this.rateLimitState);
   }
 
 }
