@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { TraktImportDialog } from '../components/TraktImportDialog';
+import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
@@ -39,6 +40,7 @@ export const TimelineViewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showFullDescription, setShowFullDescription] = useState(false);
+  const [showBulkUpdateDialog, setShowBulkUpdateDialog] = useState(false);
 
   useEffect(() => {
     if (!timelineName) return;
@@ -182,17 +184,7 @@ export const TimelineViewPage: React.FC = () => {
         boxShadow: '0 2px 12px #0001',
         padding: 32
       }}>
-        {/* Trakt Import Button/Modal */}
-        <TraktImportDialog
-          timelineName={timeline.name}
-          onImportComplete={() => {
-            // Optionally reload entries after import
-            setEntriesLoading(true);
-            TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
-              .then(setEntries)
-              .finally(() => setEntriesLoading(false));
-          }}
-        />
+        {/* Move Trakt Import inside admin buttons below */}
         {editMode ? (
           <form
             onSubmit={async e => {
@@ -310,15 +302,47 @@ export const TimelineViewPage: React.FC = () => {
           )}
         </div>
         {oidcUser && (
-          <div style={{ marginBottom: 24, display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ marginBottom: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={() => setEditMode(m => !m)}
-              style={{ background: '#007bff', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: 'pointer' }}
+              style={{ 
+                background: '#007bff', 
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: 6, 
+                padding: '8px 16px', 
+                fontWeight: 500, 
+                fontSize: 16, 
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
             >
-              {editMode ? 'Cancel Edit' : 'Edit'}
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              {editMode ? 'Cancel' : 'Edit'}
             </button>
-            <Link to={`/timelines/${timelineName}/add-entry`} style={{ background: '#2a4d8f', color: '#fff', padding: '8px 16px', borderRadius: 6, textDecoration: 'none', fontWeight: 500, fontSize: 16 }}>
-              + Add Media Entry
+            <Link 
+              to={`/timelines/${timelineName}/add-entry`} 
+              style={{ 
+                background: '#2a4d8f', 
+                color: '#fff', 
+                padding: '8px 16px', 
+                borderRadius: 6, 
+                textDecoration: 'none', 
+                fontWeight: 500, 
+                fontSize: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+            >
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add Entry
             </Link>
             <button
               onClick={toggleReorderMode}
@@ -331,10 +355,46 @@ export const TimelineViewPage: React.FC = () => {
                 fontWeight: 500,
                 fontSize: 16,
                 cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
               }}
             >
-              {reorderMode ? 'Save Order' : 'Reorder Entries'}
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+              </svg>
+              {reorderMode ? 'Save Order' : 'Reorder'}
             </button>
+            <button
+              onClick={() => setShowBulkUpdateDialog(true)}
+              style={{
+                background: '#17a2b8',
+                color: '#fff',
+                padding: '8px 16px',
+                borderRadius: 6,
+                border: 'none',
+                fontWeight: 500,
+                fontSize: 16,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+            >
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Update Media
+            </button>
+            <TraktImportDialog
+              timelineName={timeline.name}
+              onImportComplete={() => {
+                setEntriesLoading(true);
+                TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
+                  .then(setEntries)
+                  .finally(() => setEntriesLoading(false));
+              }}
+            />
             <button
               onClick={async () => {
                 if (!timelineName) return;
@@ -347,8 +407,23 @@ export const TimelineViewPage: React.FC = () => {
                   }
                 }
               }}
-              style={{ background: '#dc3545', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: 'pointer' }}
+              style={{ 
+                background: '#dc3545', 
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: 6, 
+                padding: '8px 16px', 
+                fontWeight: 500, 
+                fontSize: 16, 
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
             >
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
               Delete
             </button>
           </div>
@@ -477,6 +552,33 @@ export const TimelineViewPage: React.FC = () => {
           </table>
         )}
       </div>
+
+      {/* Bulk Update Dialog */}
+      <BulkUpdateDialog
+        mediaItems={entries
+          .map(entry => entry.mediaItem)
+          .filter((item): item is NonNullable<typeof item> => item !== null)
+          .map(ref => ({
+            Id: ref.Id,
+            DisplayName: ref.DisplayName || ref.Name,
+            Description: '',
+            MediaType: '',
+            CoverImageUrl: ref.CoverImageUrl,
+            CreationDate: '',
+            CreatedBy: { DisplayName: '' }
+          }))}
+        isOpen={showBulkUpdateDialog}
+        onClose={() => setShowBulkUpdateDialog(false)}
+        onUpdateComplete={(updatedCount) => {
+          // Reload entries after update
+          if (updatedCount > 0) {
+            setEntriesLoading(true);
+            TimelineEntryService.listTimelineEntries(Number(timeline?.id), `${timelinesPath}/${timeline?.name}`)
+              .then(setEntries)
+              .finally(() => setEntriesLoading(false));
+          }
+        }}
+      />
     </div>
   );
 };

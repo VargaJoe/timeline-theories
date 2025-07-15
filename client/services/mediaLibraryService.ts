@@ -213,35 +213,69 @@ export class MediaLibraryService {
     try {
       console.log('Updating media item:', id, data);
 
-      // Get current item to preserve existing data
-      const currentItem = await this.getMediaItem(id);
-      const currentMetadata = this.parseMediaMetadata(currentItem.SortOrder || '{}');
+      // Prepare external links if provided
+      let externalLinksJson: string | undefined = undefined;
+      if (data.ExternalLinks !== undefined) {
+        externalLinksJson = typeof data.ExternalLinks === 'string' ? data.ExternalLinks : JSON.stringify(data.ExternalLinks);
+      }
 
-      // Merge new data with existing data
-      const updatedMetadata = {
-        ...currentMetadata,
-        MediaType: data.MediaType || currentMetadata.MediaType,
-        ReleaseDate: data.ReleaseDate || currentMetadata.ReleaseDate,
-        ChronologicalDate: data.ChronologicalDate || currentMetadata.ChronologicalDate,
-        CoverImageUrl: data.CoverImageUrl || currentMetadata.CoverImageUrl,
-        Duration: data.Duration || currentMetadata.Duration,
-        Genre: data.Genre || currentMetadata.Genre,
-        Rating: data.Rating || currentMetadata.Rating,
-        ExternalLinks: data.ExternalLinks || currentMetadata.ExternalLinks,
-        Tags: data.Tags || currentMetadata.Tags
-      };
+      // Date conversion helper
+      function toIsoDateString(date?: string): string | undefined {
+        if (!date) return undefined;
+        const parsed = new Date(date);
+        return isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+      }
+
+      // Validate and map data similar to creation
+      const allowedMediaTypes = [
+        'movie', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
+      ];
+      const allowedGenres = [
+        'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
+      ];
+
+      function mapToAllowedValue(value: string | undefined, allowed: string[]): string | undefined {
+        if (!value) return undefined;
+        const lower = value.toLowerCase();
+        if (allowed.includes(lower)) return lower;
+        const found = allowed.find(opt => opt.toLowerCase() === lower.replace(/[^a-z0-9]/gi, ''));
+        return found || undefined;
+      }
+
+      const mappedMediaType = data.MediaType !== undefined ? mapToAllowedValue(data.MediaType, allowedMediaTypes) : undefined;
+      const mappedGenre = data.Genre !== undefined ? mapToAllowedValue(data.Genre, allowedGenres) : undefined;
+
+      // Validate rating
+      let safeRating: number | undefined = undefined;
+      if (data.Rating !== undefined) {
+        if (typeof data.Rating === 'number' && data.Rating >= 1 && data.Rating <= 10) {
+          safeRating = Math.round(data.Rating);
+        }
+      }
+
+      // Build update content with only provided fields
+      const updateContent: Record<string, string | number | undefined> = {};
+      if (data.DisplayName !== undefined) updateContent.DisplayName = data.DisplayName;
+      if (data.Description !== undefined) updateContent.Description = data.Description;
+      if (mappedMediaType !== undefined) updateContent.MediaType = mappedMediaType;
+      if (data.ReleaseDate !== undefined) updateContent.ReleaseDate = toIsoDateString(data.ReleaseDate);
+      if (data.ChronologicalDate !== undefined) updateContent.ChronologicalDate = toIsoDateString(data.ChronologicalDate);
+      if (data.CoverImageUrl !== undefined) updateContent.CoverImageUrl = data.CoverImageUrl;
+      if (data.Duration !== undefined) updateContent.Duration = data.Duration;
+      if (mappedGenre !== undefined) updateContent.Genre = mappedGenre;
+      if (safeRating !== undefined) updateContent.Rating = safeRating;
+      if (externalLinksJson !== undefined) updateContent.ExternalLinks = externalLinksJson;
+      if (data.Tags !== undefined) updateContent.Tags = data.Tags;
+
+      console.log('📝 Update content:', updateContent);
 
       const response = await repository.patch({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         },
-        content: {
-          DisplayName: data.DisplayName || currentItem.DisplayName,
-          Description: data.Description || currentItem.Description,
-          SortOrder: JSON.stringify(updatedMetadata)
-        }
+        content: updateContent
       });
 
       console.log('Media item updated successfully:', response);

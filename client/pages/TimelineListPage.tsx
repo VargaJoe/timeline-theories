@@ -72,7 +72,7 @@ export const TimelineListPage: React.FC = () => {
               style={{ padding: 6, borderRadius: 6, border: '1px solid #ccc', fontSize: 15 }}
             >
               <option value="alphabetical">Alphabetical</option>
-              <option value="created_desc">Creation Date (Newest on Top)</option>
+              <option value="created_desc">Newest on Top</option>
             </select>
           </div>
           {oidcUser && (
