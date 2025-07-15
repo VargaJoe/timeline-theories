@@ -11,7 +11,16 @@ export const TimelineListPage: React.FC = () => {
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [sortOrder, setSortOrder] = useState<'alphabetical' | 'created_desc'>('alphabetical');
+  const [sortOrder, setSortOrder] = useState<'alphabetical' | 'created_desc'>(() => {
+    // Get sort order from localStorage or default to alphabetical
+    const saved = localStorage.getItem('timeline-sort-order');
+    return (saved === 'alphabetical' || saved === 'created_desc') ? saved : 'alphabetical';
+  });
+
+  const handleSortOrderChange = (newSortOrder: 'alphabetical' | 'created_desc') => {
+    setSortOrder(newSortOrder);
+    localStorage.setItem('timeline-sort-order', newSortOrder);
+  };
 
   useEffect(() => {
     console.log('TimelineListPage: Starting to load timelines...');
@@ -61,6 +70,7 @@ export const TimelineListPage: React.FC = () => {
       <PageHeader 
         title="Timeline Library" 
         subtitle="Discover community-created chronological timelines for your favorite universes"
+        backgroundImage="/temp/background.webp"
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -68,7 +78,7 @@ export const TimelineListPage: React.FC = () => {
             <select
               id="timeline-sort"
               value={sortOrder}
-              onChange={e => setSortOrder(e.target.value as 'alphabetical' | 'created_desc')}
+              onChange={e => handleSortOrderChange(e.target.value as 'alphabetical' | 'created_desc')}
               style={{ 
                 padding: '8px 12px', 
                 borderRadius: 6, 
@@ -191,18 +201,24 @@ export const TimelineListPage: React.FC = () => {
                         e.currentTarget.parentElement!.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
                       }}
                     >
-                      {/* Cover Image Placeholder */}
+                      {/* Cover Image */}
                       <div style={{
                         height: 200,
-                        background: 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
+                        background: timeline.coverImageUrl 
+                          ? `url(${timeline.coverImageUrl})` 
+                          : 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         position: 'relative'
                       }}>
-                        <svg width="48" height="48" fill="none" stroke="rgba(255,255,255,0.7)" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
+                        {!timeline.coverImageUrl && (
+                          <svg width="48" height="48" fill="none" stroke="rgba(255,255,255,0.7)" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        )}
                         <div style={{
                           position: 'absolute',
                           bottom: 12,

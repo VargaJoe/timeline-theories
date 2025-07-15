@@ -31,6 +31,7 @@ export interface Timeline {
   description?: string;
   sort_order?: string;
   created_at?: string;
+  coverImageUrl?: string;
 }
 
 export async function createTimeline(data: { name: string; displayName?: string; description?: string; sortOrder?: string }): Promise<Timeline> {
@@ -71,7 +72,7 @@ export async function getTimelines(): Promise<Timeline[]> {
       path: timelinesPath,
       oDataOptions: {
         query: `TypeIs:${TIMELINE_CONTENT_TYPE}`,
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl'],
         orderby: ['DisplayName'],
       },
     });
@@ -81,16 +82,28 @@ export async function getTimelines(): Promise<Timeline[]> {
       Name: string;
       DisplayName: string; 
       Description?: string; 
-      SortOrder?: string; 
-      CreationDate: string; 
-    }) => ({
-      id: String(item.Id),
-      name: item.Name, 
-      displayName: item.DisplayName,
-      description: item.Description || '',
-      sort_order: item.SortOrder || 'chronological',
-      created_at: item.CreationDate,
-    }));
+      SortOrder?: string | string[];
+      CreationDate: string;
+      CoverImageUrl?: string;
+    }) => {
+      // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
+      let sortOrder = 'chronological';
+      if (Array.isArray(item.SortOrder) && item.SortOrder.length > 0) {
+        sortOrder = item.SortOrder[0];
+      } else if (typeof item.SortOrder === 'string') {
+        sortOrder = item.SortOrder;
+      }
+      
+      return {
+        id: String(item.Id),
+        name: item.Name, 
+        displayName: item.DisplayName,
+        description: item.Description || '',
+        sort_order: sortOrder,
+        created_at: item.CreationDate,
+        coverImageUrl: item.CoverImageUrl,
+      };
+    });
   } catch (error) {
     console.error('Failed to load timelines:', error);
     throw new Error('Failed to load timelines. Please check your connection and try again.');

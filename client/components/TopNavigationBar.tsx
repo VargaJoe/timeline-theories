@@ -83,25 +83,6 @@ export const TopNavigationBar: React.FC = () => {
             Media Library
           </Link>
 
-          {oidcUser && (
-            <Link 
-              to="/create" 
-              style={{
-                color: '#fff',
-                textDecoration: 'none',
-                fontSize: '16px',
-                fontWeight: 500,
-                padding: '8px 12px',
-                borderRadius: 6,
-                transition: 'background 0.2s'
-              }}
-              onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-              onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              Create
-            </Link>
-          )}
-
           {/* User Profile/Login */}
           <div style={{
             display: 'flex',
@@ -127,10 +108,10 @@ export const TopNavigationBar: React.FC = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {oidcUser.profile?.name?.charAt(0)?.toUpperCase() || 'U'}
+                  {(oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email || 'U').charAt(0)?.toUpperCase()}
                 </div>
                 <span style={{ fontSize: '14px' }}>
-                  {oidcUser.profile?.name || 'User'}
+                  {oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email?.split('@')[0] || 'User'}
                 </span>
                 <LoginButton />
               </div>

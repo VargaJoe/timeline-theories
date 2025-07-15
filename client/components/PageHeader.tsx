@@ -16,10 +16,11 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   return (
     <div style={{
       background: backgroundImage 
-        ? `linear-gradient(rgba(42, 77, 143, 0.8), rgba(42, 77, 143, 0.8)), url(${backgroundImage})` 
+        ? `linear-gradient(rgba(42, 77, 143, 0.7), rgba(42, 77, 143, 0.7)), url(${backgroundImage})` 
         : 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
       backgroundSize: 'cover',
       backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat',
       color: '#fff',
       padding: '40px 20px',
       marginBottom: '32px'
