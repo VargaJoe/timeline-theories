@@ -98,9 +98,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add fetchOnly mode to TraktImportDialog for fetch-then-review workflow
 - [x] Consistent button text and UX for different import modes
 
-
-## In Progress Stories
-
 ### Story 22 - Bulk Update Media Details for Timeline Entries ✅ COMPLETED
 - [x] Create BulkUpdateDialog component for update options and preview
 - [x] Add "Update Media Data" button to TimelineViewPage next to Import button
@@ -127,6 +124,38 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
   - [x] Production-ready system that handles API limitations without complete failure
   - [x] Handles OMDb daily limits, TMDb 429 errors, and Trakt rate limits properly
 
+### Technical Task - Various Fixes
+- [] import tv shows elements missing data
+
+---
+
+## In Progress Stories
+
+### Story 14 - UI/Design improvements inspired by Trakt
+- [ ] Design and implement a top navigation bar with menu and user login/profile
+- [ ] Add a banner/header row with site name and optional banner image
+- [ ] Redesign timelines page:
+    - [ ] Add controls row (Add Timeline/List, Reorder, etc.)
+    - [ ] Display timelines as cards with cover images, title, short description, and action buttons
+- [ ] Redesign timeline entries page:
+    - [ ] Add timeline-specific banner (title, description, cover image)
+    - [ ] Add controls row (Edit, Reorder, Share, etc.)
+    - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
+- [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
+
+### Story 23 - UI/UX Improvements for Timeline Action Buttons
+- [ ] **UI Consistency**: Move "Import from Trakt" button to be grouped with other timeline action buttons (Edit, Add Media Entry, Reorder Entries, Update Media Data, Delete)
+- [ ] **Icon-Based Design**: Replace verbose text buttons with intuitive icons to reduce visual clutter:
+  - [ ] Edit Timeline: ✏️ or 🔧 icon
+  - [ ] Add Media Entry: ➕ icon 
+  - [ ] Import from Trakt: 📥 or 🔗 icon
+  - [ ] Reorder Entries: ↕️ or 🔀 icon
+  - [ ] Update Media Data: 🔄 or ⬆️ icon
+  - [ ] Delete Timeline: 🗑️ icon
+- [ ] Add tooltips to explain each icon's function
+- [ ] Maintain accessibility with proper ARIA labels
+- [ ] Design consistent button group styling
+- [ ] Test usability and ensure icons are intuitive
 
 ---
 
@@ -171,17 +200,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Match these with existing timelines in the app.
 - [ ] Display suggested timelines on the main page, highlighting those related to trending media.
 
-### Story 14 - UI/Design improvements inspired by Trakt
-- [ ] Design and implement a top navigation bar with menu and user login/profile
-- [ ] Add a banner/header row with site name and optional banner image
-- [ ] Redesign timelines page:
-    - [ ] Add controls row (Add Timeline/List, Reorder, etc.)
-    - [ ] Display timelines as cards with cover images, title, short description, and action buttons
-- [ ] Redesign timeline entries page:
-    - [ ] Add timeline-specific banner (title, description, cover image)
-    - [ ] Add controls row (Edit, Reorder, Share, etc.)
-    - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
-- [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
 
 ### Story 07 - View and Share Timeline
 - [ ] Create timeline display component
@@ -265,20 +283,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Implement migration tool for at least one source (API or HTML)
 - [ ] Add UI for importing timelines/lists from other apps
 - [ ] Test migration with real-world data
-
-### Story 23 - UI/UX Improvements for Timeline Action Buttons
-- [ ] **UI Consistency**: Move "Import from Trakt" button to be grouped with other timeline action buttons (Edit, Add Media Entry, Reorder Entries, Update Media Data, Delete)
-- [ ] **Icon-Based Design**: Replace verbose text buttons with intuitive icons to reduce visual clutter:
-  - [ ] Edit Timeline: ✏️ or 🔧 icon
-  - [ ] Add Media Entry: ➕ icon 
-  - [ ] Import from Trakt: 📥 or 🔗 icon
-  - [ ] Reorder Entries: ↕️ or 🔀 icon
-  - [ ] Update Media Data: 🔄 or ⬆️ icon
-  - [ ] Delete Timeline: 🗑️ icon
-- [ ] Add tooltips to explain each icon's function
-- [ ] Maintain accessibility with proper ARIA labels
-- [ ] Design consistent button group styling
-- [ ] Test usability and ensure icons are intuitive
 
 ### Story 24 - Enhanced Multi-Source Data Merging
 - [ ] Add "Smart Merge" option for bulk updates that combines data from multiple sources
