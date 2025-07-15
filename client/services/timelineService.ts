@@ -125,21 +125,35 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
         select: ['MediaItem'],
         expand: ['MediaItem'],
         orderby: ['Position'],
-        top: limit * 2, // Get more entries to account for entries without covers
+        top: 50, // Get more entries to have a good pool for random selection
       },
     });
 
-    const coverUrls: string[] = [];
+    // Collect all available cover URLs
+    const allCoverUrls: string[] = [];
     for (const item of result.d.results) {
-      if (coverUrls.length >= limit) break;
-      
       const mediaItem = item.MediaItem;
       if (mediaItem && mediaItem.CoverImageUrl) {
-        coverUrls.push(mediaItem.CoverImageUrl);
+        allCoverUrls.push(mediaItem.CoverImageUrl);
       }
     }
 
-    return coverUrls;
+    // If we have fewer covers than requested, return all
+    if (allCoverUrls.length <= limit) {
+      return allCoverUrls;
+    }
+
+    // Randomly select covers from the available pool
+    const selectedCovers: string[] = [];
+    const availableCovers = [...allCoverUrls]; // Create a copy to avoid modifying original
+    
+    for (let i = 0; i < limit && availableCovers.length > 0; i++) {
+      const randomIndex = Math.floor(Math.random() * availableCovers.length);
+      selectedCovers.push(availableCovers[randomIndex]);
+      availableCovers.splice(randomIndex, 1); // Remove selected cover to avoid duplicates
+    }
+
+    return selectedCovers;
   } catch (error) {
     console.error('Failed to load timeline media covers:', error);
     return [];
