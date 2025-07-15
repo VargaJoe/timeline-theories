@@ -125,13 +125,22 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
   - [x] Handles OMDb daily limits, TMDb 429 errors, and Trakt rate limits properly
 
 ### Technical Task - Various Fixes
-- [] import tv shows elements missing data
+- [x] import tv shows elements missing data
+
+### Technical Task - Fix TV Show Import Naming ⚠️ IN PROGRESS
+- [ ] Fix TV show import to handle different media types properly
+- [ ] For whole shows: use format "show title (year)" (e.g., "Breaking Bad (2008)")
+- [ ] For seasons: use format "show title (year) Season X" (e.g., "Breaking Bad (2008) Season 5")
+- [ ] For episodes: use format "show title (year) SXXeXX" (e.g., "Breaking Bad (2008) S05E14")
+- [ ] Update TraktService to extract show information from season/episode objects
+- [ ] Update TraktImportDialog to use appropriate naming conventions
+- [ ] Test with real Trakt data containing shows, seasons, and episodes
 
 ---
 
 ## In Progress Stories
 
-### Story 14 - UI/Design improvements inspired by Trakt
+### Story 14 - UI/Design improvements inspired by Trakt ⚠️ IN PROGRESS
 - [ ] Design and implement a top navigation bar with menu and user login/profile
 - [ ] Add a banner/header row with site name and optional banner image
 - [ ] Redesign timelines page:
@@ -143,7 +152,7 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
     - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
 - [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
 
-### Story 23 - UI/UX Improvements for Timeline Action Buttons
+### Story 23 - UI/UX Improvements for Timeline Action Buttons ⚠️ IN PROGRESS
 - [ ] **UI Consistency**: Move "Import from Trakt" button to be grouped with other timeline action buttons (Edit, Add Media Entry, Reorder Entries, Update Media Data, Delete)
 - [ ] **Icon-Based Design**: Replace verbose text buttons with intuitive icons to reduce visual clutter:
   - [ ] Edit Timeline: ✏️ or 🔧 icon

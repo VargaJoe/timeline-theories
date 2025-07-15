@@ -81,8 +81,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         let found: MediaItem | undefined = undefined;
         try {
           const allMedia = await MediaLibraryService.getMediaItems();
-          // Use 'title (year)' format for matching if year is present
-          const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+          // Use the properly formatted title from TraktService
+          const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
           found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
         } catch (err) {
           console.error('Error searching media items:', err);
@@ -94,7 +94,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             mediaItem = found;
             reused++;
           } else {
-            const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+            const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
             const req = {
               DisplayName: displayName,
               Description: '',
