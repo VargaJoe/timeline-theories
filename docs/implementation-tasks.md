@@ -127,14 +127,14 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 ### Technical Task - Various Fixes
 - [x] import tv shows elements missing data
 
-### Technical Task - Fix TV Show Import Naming ⚠️ IN PROGRESS
-- [ ] Fix TV show import to handle different media types properly
-- [ ] For whole shows: use format "show title (year)" (e.g., "Breaking Bad (2008)")
-- [ ] For seasons: use format "show title (year) Season X" (e.g., "Breaking Bad (2008) Season 5")
-- [ ] For episodes: use format "show title (year) SXXeXX" (e.g., "Breaking Bad (2008) S05E14")
-- [ ] Update TraktService to extract show information from season/episode objects
-- [ ] Update TraktImportDialog to use appropriate naming conventions
-- [ ] Test with real Trakt data containing shows, seasons, and episodes
+### Technical Task - Fix TV Show Import Naming ✅ COMPLETED
+- [x] Fix TV show import to handle different media types properly
+- [x] For whole shows: use format "show title (year)" (e.g., "Breaking Bad (2008)")
+- [x] For seasons: use format "show title (year) Season X" (e.g., "Breaking Bad (2008) Season 5")
+- [x] For episodes: use format "show title (year) SXXeXX" (e.g., ":DRYVRS (2015) S01E05")
+- [x] Update TraktService to extract show information from season/episode objects
+- [x] Update TraktImportDialog to use appropriate naming conventions
+- [x] Test with real Trakt data containing shows, seasons, and episodes
 
 ---
 

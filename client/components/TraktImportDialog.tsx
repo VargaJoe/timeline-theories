@@ -143,7 +143,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   };
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ display: 'inline-block' }}>
       <button 
         onClick={() => setShow(s => !s)} 
         disabled={disabled} 
@@ -164,25 +164,66 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
         </svg>
-        {show ? 'Cancel' : fetchOnly ? 'Import Trakt' : 'Import Trakt'}
+        {show ? 'Cancel' : 'Import'}
       </button>
       {show && (
-        <div style={{ marginTop: 16, background: '#f8f9fa', borderRadius: 8, padding: 16, boxShadow: '0 1px 4px #0001' }}>
-          <div style={{ marginBottom: 8 }}>
+        <div style={{ 
+          position: 'absolute', 
+          zIndex: 1000, 
+          marginTop: 8, 
+          background: '#fff', 
+          borderRadius: 8, 
+          padding: 16, 
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+          border: '1px solid #ddd',
+          minWidth: 320
+        }}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Trakt List URL:</label>
             <input
               type="text"
-              placeholder="Paste Trakt list URL"
+              placeholder="https://trakt.tv/users/username/lists/listname"
               value={traktUrl}
               onChange={e => setTraktUrl(e.target.value)}
-              style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
               disabled={importing}
             />
           </div>
-          <button onClick={handleImport} disabled={importing || !traktUrl.trim()} style={{ background: '#007bff', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: importing ? 'not-allowed' : 'pointer' }}>
-            {importing ? (fetchOnly ? 'Fetching...' : 'Importing...') : (fetchOnly ? 'Fetch Items' : 'Import')}
-          </button>
-          {error && <div style={{ color: '#dc3545', marginTop: 8 }}>{error}</div>}
-          {summary && <div style={{ color: '#155724', marginTop: 8 }}>{summary}</div>}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button 
+              onClick={() => setShow(false)} 
+              style={{ 
+                background: '#6c757d', 
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: 6, 
+                padding: '8px 16px', 
+                fontWeight: 500, 
+                fontSize: 14, 
+                cursor: 'pointer' 
+              }}
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={handleImport} 
+              disabled={importing || !traktUrl.trim()} 
+              style={{ 
+                background: importing || !traktUrl.trim() ? '#ccc' : '#007bff', 
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: 6, 
+                padding: '8px 16px', 
+                fontWeight: 500, 
+                fontSize: 14, 
+                cursor: importing || !traktUrl.trim() ? 'not-allowed' : 'pointer' 
+              }}
+            >
+              {importing ? (fetchOnly ? 'Fetching...' : 'Importing...') : (fetchOnly ? 'Fetch Items' : 'Import')}
+            </button>
+          </div>
+          {error && <div style={{ color: '#dc3545', marginTop: 12, fontSize: 14 }}>{error}</div>}
+          {summary && <div style={{ color: '#155724', marginTop: 12, fontSize: 14 }}>{summary}</div>}
         </div>
       )}
     </div>
