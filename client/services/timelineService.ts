@@ -109,3 +109,39 @@ export async function getTimelines(): Promise<Timeline[]> {
     throw new Error('Failed to load timelines. Please check your connection and try again.');
   }
 }
+
+/**
+ * Get media cover images for a timeline to display in card montage
+ * @param timelinePath Timeline path for fetching entries
+ * @param limit Maximum number of covers to return (default: 4)
+ */
+export async function getTimelineMediaCovers(timelinePath: string, limit = 4): Promise<string[]> {
+  try {
+    // Fetch timeline entries with expanded MediaItem references
+    const result = await repository.loadCollection({
+      path: timelinePath,
+      oDataOptions: {
+        query: `TypeIs:TimelineEntry`,
+        select: ['MediaItem'],
+        expand: ['MediaItem'],
+        orderby: ['Position'],
+        top: limit * 2, // Get more entries to account for entries without covers
+      },
+    });
+
+    const coverUrls: string[] = [];
+    for (const item of result.d.results) {
+      if (coverUrls.length >= limit) break;
+      
+      const mediaItem = item.MediaItem;
+      if (mediaItem && mediaItem.CoverImageUrl) {
+        coverUrls.push(mediaItem.CoverImageUrl);
+      }
+    }
+
+    return coverUrls;
+  } catch (error) {
+    console.error('Failed to load timeline media covers:', error);
+    return [];
+  }
+}

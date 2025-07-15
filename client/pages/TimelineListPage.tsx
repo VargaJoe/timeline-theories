@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
-import { getTimelines } from '../services/timelineService';
+import { getTimelines, getTimelineMediaCovers } from '../services/timelineService';
 import type { Timeline } from '../services/timelineService';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
+import { MediaCoverMontage } from '../components/MediaCoverMontage';
 import { loadBackgroundImage } from '../services/sensenet';
 import { siteConfig } from '../configuration';
+import { timelinesPath } from '../projectPaths';
 
 export const TimelineListPage: React.FC = () => {
   const { oidcUser } = useOidcAuthentication();
@@ -14,6 +16,7 @@ export const TimelineListPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
+  const [mediaCovers, setMediaCovers] = useState<Record<string, string[]>>({});
   const [sortOrder, setSortOrder] = useState<'alphabetical' | 'created_desc'>(() => {
     // Get sort order from localStorage or default to alphabetical
     const saved = localStorage.getItem('timeline-sort-order');
@@ -31,6 +34,24 @@ export const TimelineListPage: React.FC = () => {
       .then(timelines => {
         console.log('TimelineListPage: Successfully loaded timelines:', timelines);
         setTimelines(timelines);
+        
+        // Fetch media covers for each timeline
+        const fetchMediaCovers = async () => {
+          const covers: Record<string, string[]> = {};
+          for (const timeline of timelines) {
+            try {
+              const timelinePath = `${timelinesPath}/${timeline.name}`;
+              const timelineCovers = await getTimelineMediaCovers(timelinePath, 4);
+              covers[timeline.id] = timelineCovers;
+            } catch (error) {
+              console.error(`Failed to load covers for timeline ${timeline.name}:`, error);
+              covers[timeline.id] = [];
+            }
+          }
+          setMediaCovers(covers);
+        };
+        
+        fetchMediaCovers();
       })
       .catch(err => {
         console.error('TimelineListPage: Failed to load timelines:', err);
@@ -258,9 +279,10 @@ export const TimelineListPage: React.FC = () => {
                         position: 'relative'
                       }}>
                         {!timeline.coverImageUrl && (
-                          <svg width="48" height="48" fill="none" stroke="rgba(255,255,255,0.7)" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
+                          <MediaCoverMontage 
+                            coverUrls={mediaCovers[timeline.id] || []}
+                            timelineName={timeline.displayName}
+                          />
                         )}
                         <div style={{
                           position: 'absolute',
