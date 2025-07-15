@@ -4,6 +4,7 @@ interface PageHeaderProps {
   title: string;
   subtitle?: string;
   backgroundImage?: string;
+  overlayOpacity?: number; // 0.0 to 1.0, default 0.4
   children?: React.ReactNode;
 }
 
@@ -11,13 +12,23 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   title, 
   subtitle, 
   backgroundImage,
+  overlayOpacity = 0.4,
   children 
 }) => {
+  // Debug logging for background image
+  React.useEffect(() => {
+    console.log('[PageHeader] Background image prop:', backgroundImage);
+  }, [backgroundImage]);
+
+  const backgroundStyle = backgroundImage 
+    ? `linear-gradient(rgba(42, 77, 143, ${overlayOpacity}), rgba(42, 77, 143, ${overlayOpacity})), url(${backgroundImage})` 
+    : 'linear-gradient(135deg, #1e3b73 0%, #2a4d8f 20%, #3d5aa3 40%, #4a6bb5 60%, #2a4d8f 80%, #1e3b73 100%)';
+
+  console.log('[PageHeader] Background style:', backgroundStyle);
+
   return (
     <div style={{
-      background: backgroundImage 
-        ? `linear-gradient(rgba(42, 77, 143, 0.7), rgba(42, 77, 143, 0.7)), url(${backgroundImage})` 
-        : 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
+      background: backgroundStyle,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',

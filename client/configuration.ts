@@ -1,5 +1,20 @@
 export const repositoryUrl = import.meta.env.VITE_SENSENET_REPO_URL || 'https://your-sensenet-repo-url';
 export const traktApiKey = import.meta.env.VITE_TRAKT_API_KEY || '';
+
+// Base paths for content organization
+export const contentPaths = {
+  timelines: import.meta.env.VITE_PROJECT_ROOT_PATH || '/Root/Content',
+  get assets() { return import.meta.env.VITE_ASSETS_BASE_PATH || `${this.timelines}/(structure)/style`; }
+};
+
+// Site configuration
+export const siteConfig = {
+  // Background image: base path + relative path
+  headerBackgroundImagePath: `${contentPaths.assets}/${import.meta.env.VITE_HEADER_BACKGROUND_IMAGE || 'background.webp'}`,
+  headerBackgroundFallback: null, // Use gradient fallback instead of external image
+  headerOverlayOpacity: parseFloat(import.meta.env.VITE_HEADER_OVERLAY_OPACITY || '0.3') // 0.0 = no overlay (full image), 1.0 = full overlay (no image)
+};
+
 export const configuration = {
   client_id: import.meta.env.VITE_OIDC_CLIENT_ID || 'your-client-id',
   authority: import.meta.env.VITE_OIDC_AUTHORITY || 'https://your-identity-server-url',

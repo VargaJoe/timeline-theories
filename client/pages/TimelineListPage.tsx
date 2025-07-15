@@ -5,12 +5,15 @@ import { getTimelines } from '../services/timelineService';
 import type { Timeline } from '../services/timelineService';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
+import { loadBackgroundImage } from '../services/sensenet';
+import { siteConfig } from '../configuration';
 
 export const TimelineListPage: React.FC = () => {
   const { oidcUser } = useOidcAuthentication();
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<'alphabetical' | 'created_desc'>(() => {
     // Get sort order from localStorage or default to alphabetical
     const saved = localStorage.getItem('timeline-sort-order');
@@ -34,6 +37,39 @@ export const TimelineListPage: React.FC = () => {
         setError('Failed to load timelines');
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  // Load background image from SenseNet
+  useEffect(() => {
+    const loadBackground = async () => {
+      try {
+        const imageUrl = await loadBackgroundImage(siteConfig.headerBackgroundImagePath);
+        if (imageUrl) {
+          console.log('[TimelineListPage] Background image loaded:', imageUrl);
+          
+          // Test if the image can be loaded by creating an Image object
+          const testImage = new Image();
+          testImage.onload = () => {
+            console.log('[TimelineListPage] Background image successfully tested');
+            setBackgroundImageUrl(imageUrl);
+          };
+          testImage.onerror = (error) => {
+            console.error('[TimelineListPage] Background image failed to load:', error);
+            console.log('[TimelineListPage] Falling back to gradient background');
+            setBackgroundImageUrl(null); // This will trigger gradient fallback in PageHeader
+          };
+          testImage.src = imageUrl;
+        } else {
+          console.warn('[TimelineListPage] No background image URL received, using gradient fallback');
+          setBackgroundImageUrl(null); // This will trigger gradient fallback in PageHeader
+        }
+      } catch (error) {
+        console.error('[TimelineListPage] Error loading background image:', error);
+        setBackgroundImageUrl(null); // This will trigger gradient fallback in PageHeader
+      }
+    };
+    
+    loadBackground();
   }, []);
 
   if (loading) {
@@ -70,7 +106,8 @@ export const TimelineListPage: React.FC = () => {
       <PageHeader 
         title="Timeline Library" 
         subtitle="Discover community-created chronological timelines for your favorite universes"
-        backgroundImage="/temp/background.webp"
+        backgroundImage={backgroundImageUrl || undefined}
+        overlayOpacity={siteConfig.headerOverlayOpacity}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
