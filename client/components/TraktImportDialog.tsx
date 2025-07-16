@@ -151,20 +151,30 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           background: '#6f42c1', 
           color: '#fff', 
           border: 'none', 
-          borderRadius: 6, 
-          padding: '8px 16px', 
-          fontWeight: 500, 
-          fontSize: 16, 
-          cursor: 'pointer',
+          borderRadius: 8, 
+          padding: '12px', 
+          cursor: disabled ? 'not-allowed' : 'pointer',
           display: 'flex',
           alignItems: 'center',
-          gap: 8
+          justifyContent: 'center',
+          transition: 'all 0.2s ease',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          opacity: disabled ? 0.6 : 1
+        }}
+        onMouseEnter={(e) => {
+          if (!disabled) {
+            e.currentTarget.style.transform = 'translateY(-1px)';
+            e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
         }}
       >
-        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
         </svg>
-        {show ? 'Cancel' : 'Import'}
       </button>
       {show && (
         <div style={{ 

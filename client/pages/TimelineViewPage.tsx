@@ -14,11 +14,28 @@ import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import type { Timeline } from '../services/timelineService';
 import type { TimelineEntry } from '../services/timelineEntryService';
-// DropResult and other types are not exported as types in some versions, so use 'any' as a workaround for build compatibility
-type DropResult = any;
-type DraggableProvided = any;
-type DraggableStateSnapshot = any;
-type DroppableProvided = any;
+// Type definitions for react-beautiful-dnd to avoid TypeScript any warnings
+interface DropResult {
+  source: { index: number; droppableId: string };
+  destination?: { index: number; droppableId: string } | null;
+  draggableId: string;
+}
+
+interface DraggableProvided {
+  innerRef: (element: HTMLElement | null) => void;
+  draggableProps: Record<string, unknown>;
+  dragHandleProps: Record<string, unknown>;
+}
+
+interface DraggableStateSnapshot {
+  isDragging: boolean;
+}
+
+interface DroppableProvided {
+  innerRef: (element: HTMLElement | null) => void;
+  droppableProps: Record<string, unknown>;
+  placeholder: React.ReactElement;
+}
 // import { MediaLibraryService } from '../services/mediaLibraryService';
 // import type { MediaItem } from '../services/mediaLibraryService';
 
@@ -302,99 +319,133 @@ export const TimelineViewPage: React.FC = () => {
           )}
         </div>
         {oidcUser && (
-          <div style={{ marginBottom: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ marginBottom: 32, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={() => setEditMode(m => !m)}
+              title={editMode ? 'Cancel Edit' : 'Edit Timeline'}
               style={{ 
                 background: '#007bff', 
                 color: '#fff', 
                 border: 'none', 
-                borderRadius: 6, 
-                padding: '8px 16px', 
-                fontWeight: 500, 
-                fontSize: 16, 
+                borderRadius: 8, 
+                padding: '12px', 
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
               }}
             >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
-              {editMode ? 'Cancel' : 'Edit'}
             </button>
             <Link 
               to={`/timelines/${timelineName}/add-entry`} 
+              title="Add Timeline Entry"
               style={{ 
-                background: '#2a4d8f', 
+                background: '#28a745', 
                 color: '#fff', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                textDecoration: 'none', 
-                fontWeight: 500, 
-                fontSize: 16,
+                padding: '12px', 
+                borderRadius: 8, 
+                textDecoration: 'none',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
               }}
             >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              Add Entry
             </Link>
             <button
               onClick={toggleReorderMode}
+              title={reorderMode ? 'Save New Order' : 'Reorder Entries'}
               style={{
                 background: reorderMode ? '#28a745' : '#ffc107',
                 color: reorderMode ? '#fff' : '#333',
-                padding: '8px 16px',
-                borderRadius: 6,
+                padding: '12px',
+                borderRadius: 8,
                 border: 'none',
-                fontWeight: 500,
-                fontSize: 16,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
               }}
             >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
               </svg>
-              {reorderMode ? 'Save Order' : 'Reorder'}
             </button>
             <button
               onClick={() => setShowBulkUpdateDialog(true)}
+              title="Update Media Data"
               style={{
                 background: '#17a2b8',
                 color: '#fff',
-                padding: '8px 16px',
-                borderRadius: 6,
+                padding: '12px',
+                borderRadius: 8,
                 border: 'none',
-                fontWeight: 500,
-                fontSize: 16,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
               }}
             >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Update Media
             </button>
-            <TraktImportDialog
-              timelineName={timeline.name}
-              onImportComplete={() => {
-                setEntriesLoading(true);
-                TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
-                  .then(setEntries)
-                  .finally(() => setEntriesLoading(false));
-              }}
-            />
+            <div title="Import from Trakt List" style={{ display: 'inline-block' }}>
+              <TraktImportDialog
+                timelineName={timeline.name}
+                onImportComplete={() => {
+                  setEntriesLoading(true);
+                  TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
+                    .then(setEntries)
+                    .finally(() => setEntriesLoading(false));
+                }}
+              />
+            </div>
             <button
               onClick={async () => {
                 if (!timelineName) return;
@@ -407,149 +458,339 @@ export const TimelineViewPage: React.FC = () => {
                   }
                 }
               }}
+              title="Delete Timeline"
               style={{ 
                 background: '#dc3545', 
                 color: '#fff', 
                 border: 'none', 
-                borderRadius: 6, 
-                padding: '8px 16px', 
-                fontWeight: 500, 
-                fontSize: 16, 
+                borderRadius: 8, 
+                padding: '12px', 
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
               }}
             >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
-              Delete
             </button>
           </div>
         )}
-        <h3 style={{ marginBottom: 16 }}>Timeline Entries</h3>
+        <h3 style={{ marginBottom: 24, color: '#2a4d8f', fontSize: 24, fontWeight: 600 }}>Timeline Entries</h3>
         {entriesLoading ? (
-          <div>Loading entries...</div>
+          <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>Loading entries...</div>
         ) : entries.length === 0 ? (
-          <div style={{ color: '#888', fontStyle: 'italic' }}>No entries yet.</div>
+          <div style={{ 
+            textAlign: 'center', 
+            padding: 60, 
+            color: '#888', 
+            fontStyle: 'italic',
+            background: '#f8f9fa',
+            borderRadius: 12,
+            border: '2px dashed #dee2e6'
+          }}>
+            <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ marginBottom: 16, opacity: 0.5 }}>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div style={{ fontSize: 18, marginBottom: 8 }}>No entries yet</div>
+            <div style={{ fontSize: 14 }}>Start building your timeline by adding media entries</div>
+          </div>
         ) : reorderMode && pendingOrder ? (
           <DragDropContext onDragEnd={onDragEnd}>
             <Droppable droppableId="timeline-entries">
               {(provided: DroppableProvided) => (
-                <table
+                <div
                   ref={provided.innerRef}
                   {...provided.droppableProps}
-                  style={{ width: '100%', borderCollapse: 'collapse', background: '#f8f9fa', borderRadius: 8 }}
+                  style={{ display: 'grid', gap: 16 }}
                 >
-                  <thead>
-                    <tr style={{ background: '#e9ecef' }}>
-                      <th style={{ padding: 8, textAlign: 'left' }}>#</th>
-                      <th style={{ padding: 8, textAlign: 'left' }}>Media</th>
-                      <th style={{ padding: 8, textAlign: 'left' }}>Title</th>
-                      <th style={{ padding: 8, textAlign: 'left' }}>Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pendingOrder.map((entry, idx) => {
-                      const media = entry.mediaItem;
-                      const isBroken = !media || !media.Id;
-                      const displayName = entry?.displayName || 'Unknown';
-                      const coverUrl = !isBroken ? (media?.CoverImageUrl || '') : '';
-                      return (
-                        <Draggable key={entry.id} draggableId={entry.id} index={idx}>
-                          {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
-                            <tr
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              style={{
-                                borderBottom: '1px solid #e9ecef',
-                                background: snapshot.isDragging ? '#d1ecf1' : isBroken ? '#fff3cd' : undefined,
-                                ...provided.draggableProps.style
-                              }}
-                            >
-                              <td style={{ padding: 8 }}>{idx + 1}</td>
-                              <td style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                                {isBroken ? (
-                                  <div style={{ width: 48, height: 72, background: '#f8d7da', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#721c24', fontWeight: 600, fontSize: 12, border: '1px solid #f5c6cb' }}>
-                                    !
-                                  </div>
-                                ) : coverUrl ? (
-                                  <img
-                                    src={coverUrl}
-                                    alt={displayName}
-                                    style={{ width: 48, height: 72, objectFit: 'cover', borderRadius: 4, boxShadow: '0 1px 4px #0002' }}
-                                  />
-                                ) : (
-                                  <div style={{ width: 48, height: 72, background: '#ddd', borderRadius: 4 }} />
+                  {pendingOrder.map((entry, idx) => {
+                    const media = entry.mediaItem;
+                    const isBroken = !media || !media.Id;
+                    const displayName = entry?.displayName || 'Unknown';
+                    const coverUrl = !isBroken ? (media?.CoverImageUrl || '') : '';
+                    return (
+                      <Draggable key={entry.id} draggableId={entry.id} index={idx}>
+                        {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            {...provided.dragHandleProps}
+                            style={{
+                              background: snapshot.isDragging ? '#e3f2fd' : isBroken ? '#fff3cd' : '#fff',
+                              borderRadius: 12,
+                              padding: 20,
+                              border: `2px solid ${snapshot.isDragging ? '#2196f3' : isBroken ? '#ffc107' : '#e9ecef'}`,
+                              boxShadow: snapshot.isDragging ? '0 8px 24px rgba(0,0,0,0.15)' : '0 2px 8px rgba(0,0,0,0.1)',
+                              cursor: 'grab',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 20,
+                              ...(provided.draggableProps.style as React.CSSProperties || {})
+                            }}
+                          >
+                            <div style={{ 
+                              fontSize: 18, 
+                              fontWeight: 600, 
+                              color: '#2a4d8f',
+                              minWidth: 40,
+                              textAlign: 'center',
+                              background: '#f8f9fa',
+                              borderRadius: 8,
+                              padding: '8px 12px'
+                            }}>
+                              {idx + 1}
+                            </div>
+                            <div style={{ flexShrink: 0 }}>
+                              {isBroken ? (
+                                <div style={{ 
+                                  width: 80, 
+                                  height: 120, 
+                                  background: '#f8d7da', 
+                                  borderRadius: 8, 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center', 
+                                  color: '#721c24', 
+                                  fontWeight: 600, 
+                                  fontSize: 24, 
+                                  border: '2px solid #f5c6cb' 
+                                }}>
+                                  !
+                                </div>
+                              ) : coverUrl ? (
+                                <img
+                                  src={coverUrl}
+                                  alt={displayName}
+                                  style={{ 
+                                    width: 80, 
+                                    height: 120, 
+                                    objectFit: 'cover', 
+                                    borderRadius: 8, 
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)' 
+                                  }}
+                                />
+                              ) : (
+                                <div style={{ 
+                                  width: 80, 
+                                  height: 120, 
+                                  background: '#e9ecef', 
+                                  borderRadius: 8,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: '#6c757d'
+                                }}>
+                                  <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <h4 style={{ 
+                                fontSize: 18, 
+                                fontWeight: 600, 
+                                color: isBroken ? '#b94a48' : '#2a4d8f',
+                                margin: '0 0 8px 0',
+                                wordBreak: 'break-word'
+                              }}>
+                                {displayName}
+                                {isBroken && (
+                                  <span style={{ 
+                                    marginLeft: 8, 
+                                    fontSize: 12, 
+                                    background: '#f8d7da', 
+                                    color: '#721c24', 
+                                    padding: '2px 6px', 
+                                    borderRadius: 4,
+                                    fontWeight: 500
+                                  }}>
+                                    Missing Media
+                                  </span>
                                 )}
-                              </td>
-                              <td style={{ padding: 8 }}>
-                                <span style={{ fontWeight: 500, color: isBroken ? '#b94a48' : undefined }}>
-                                  {displayName}
-                                </span>
-                              </td>
-                              <td style={{ padding: 8 }}>{entry.notes || ''}</td>
-                            </tr>
-                          )}
-                        </Draggable>
-                      );
-                    })}
-                    {provided.placeholder}
-                  </tbody>
-                </table>
+                              </h4>
+                              {entry.notes && (
+                                <p style={{ 
+                                  color: '#666', 
+                                  margin: 0, 
+                                  fontSize: 14,
+                                  lineHeight: 1.5,
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden'
+                                }}>
+                                  {entry.notes}
+                                </p>
+                              )}
+                            </div>
+                            <div style={{ 
+                              padding: '8px 12px',
+                              background: '#f8f9fa',
+                              borderRadius: 8,
+                              fontSize: 24,
+                              color: '#6c757d',
+                              cursor: 'grab'
+                            }}>
+                              ⋮⋮
+                            </div>
+                          </div>
+                        )}
+                      </Draggable>
+                    );
+                  })}
+                  {provided.placeholder}
+                </div>
               )}
             </Droppable>
           </DragDropContext>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', background: '#f8f9fa', borderRadius: 8 }}>
-            <thead>
-              <tr style={{ background: '#e9ecef' }}>
-                <th style={{ padding: 8, textAlign: 'left' }}>#</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Media</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Title</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => {
-                const media = entry.mediaItem;
-                const isBroken = !media || !media.Id;
-                const displayName = entry?.displayName || 'Unknown';
-                const coverUrl = !isBroken ? (media?.CoverImageUrl || '') : '';
-                return (
-                  <tr
-                    key={entry.id}
-                    style={{ borderBottom: '1px solid #e9ecef', background: isBroken ? '#fff3cd' : undefined }}
-                  >
-                    <td style={{ padding: 8 }}>{entry.position}</td>
-                    <td style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {isBroken ? (
-                        <div style={{ width: 48, height: 72, background: '#f8d7da', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#721c24', fontWeight: 600, fontSize: 12, border: '1px solid #f5c6cb' }}>
-                          !
-                        </div>
-                      ) : coverUrl ? (
-                        <img
-                          src={coverUrl}
-                          alt={displayName}
-                          style={{ width: 48, height: 72, objectFit: 'cover', borderRadius: 4, boxShadow: '0 1px 4px #0002' }}
-                        />
-                      ) : (
-                        <div style={{ width: 48, height: 72, background: '#ddd', borderRadius: 4 }} />
+          <div style={{ display: 'grid', gap: 16 }}>
+            {entries.map((entry) => {
+              const media = entry.mediaItem;
+              const isBroken = !media || !media.Id;
+              const displayName = entry?.displayName || 'Unknown';
+              const coverUrl = !isBroken ? (media?.CoverImageUrl || '') : '';
+              return (
+                <div
+                  key={entry.id}
+                  style={{
+                    background: isBroken ? '#fff3cd' : '#fff',
+                    borderRadius: 12,
+                    padding: 20,
+                    border: `2px solid ${isBroken ? '#ffc107' : '#e9ecef'}`,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 20
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isBroken) {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.15)';
+                      e.currentTarget.style.borderColor = '#2196f3';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                    e.currentTarget.style.borderColor = isBroken ? '#ffc107' : '#e9ecef';
+                  }}
+                >
+                  <div style={{ 
+                    fontSize: 18, 
+                    fontWeight: 600, 
+                    color: '#2a4d8f',
+                    minWidth: 40,
+                    textAlign: 'center',
+                    background: '#f8f9fa',
+                    borderRadius: 8,
+                    padding: '8px 12px'
+                  }}>
+                    {entry.position}
+                  </div>
+                  <div style={{ flexShrink: 0 }}>
+                    {isBroken ? (
+                      <div style={{ 
+                        width: 80, 
+                        height: 120, 
+                        background: '#f8d7da', 
+                        borderRadius: 8, 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        color: '#721c24', 
+                        fontWeight: 600, 
+                        fontSize: 24, 
+                        border: '2px solid #f5c6cb' 
+                      }}>
+                        !
+                      </div>
+                    ) : coverUrl ? (
+                      <img
+                        src={coverUrl}
+                        alt={displayName}
+                        style={{ 
+                          width: 80, 
+                          height: 120, 
+                          objectFit: 'cover', 
+                          borderRadius: 8, 
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)' 
+                        }}
+                      />
+                    ) : (
+                      <div style={{ 
+                        width: 80, 
+                        height: 120, 
+                        background: '#e9ecef', 
+                        borderRadius: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#6c757d'
+                      }}>
+                        <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h4 style={{ 
+                      fontSize: 18, 
+                      fontWeight: 600, 
+                      color: isBroken ? '#b94a48' : '#2a4d8f',
+                      margin: '0 0 8px 0',
+                      wordBreak: 'break-word'
+                    }}>
+                      {displayName}
+                      {isBroken && (
+                        <span style={{ 
+                          marginLeft: 8, 
+                          fontSize: 12, 
+                          background: '#f8d7da', 
+                          color: '#721c24', 
+                          padding: '2px 6px', 
+                          borderRadius: 4,
+                          fontWeight: 500
+                        }}>
+                          Missing Media
+                        </span>
                       )}
-                    </td>
-                    <td style={{ padding: 8 }}>
-                      <span style={{ fontWeight: 500, color: isBroken ? '#b94a48' : undefined }}>
-                        {displayName}
-                      </span>
-                    </td>
-                    <td style={{ padding: 8 }}>{entry.notes || ''}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </h4>
+                    {entry.notes && (
+                      <p style={{ 
+                        color: '#666', 
+                        margin: 0, 
+                        fontSize: 14,
+                        lineHeight: 1.5,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden'
+                      }}>
+                        {entry.notes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
