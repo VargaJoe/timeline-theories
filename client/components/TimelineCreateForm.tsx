@@ -54,8 +54,8 @@ export const TimelineCreateForm: React.FC = () => {
           let found: MediaItem | undefined = undefined;
           try {
             const allMedia = await MediaLibraryService.getMediaItems();
-            // Use 'title (year)' format for matching if year is present, like TraktImportDialog
-            const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+            // Consistent 'title (year)' format from title for matching if year is present, like TraktImportDialog
+            const displayName = item.title;
             found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
           } catch {
             // Ignore errors in searching media items
@@ -66,8 +66,8 @@ export const TimelineCreateForm: React.FC = () => {
               mediaItem = found;
               reused++;
             } else {
-              // Use consistent 'title (year)' format for display name
-              const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+              // Consistent 'title (year)' format is already set in title
+              const displayName = item.title;
               const req = {
                 DisplayName: displayName,
                 Description: '',
@@ -152,7 +152,7 @@ export const TimelineCreateForm: React.FC = () => {
               <ul style={{ maxHeight: 200, overflowY: 'auto', margin: 0, padding: 0, listStyle: 'none' }}>
                 {traktReviewItems.map((item, idx) => (
                   <li key={idx} style={{ padding: 4, borderBottom: '1px solid #eee', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {item.type.toUpperCase()}: {item.title} {item.year ? `(${item.year})` : ''}
+                    {item.type.toUpperCase()}: {item.title}
                     <button type="button" style={{ marginLeft: 'auto', background: '#b71c1c', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 13, cursor: 'pointer' }} onClick={() => {
                       setTraktReviewItems(traktReviewItems.filter((_, i) => i !== idx));
                     }}>Remove</button>
