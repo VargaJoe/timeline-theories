@@ -43,6 +43,8 @@ interface DroppableProvided {
 }
 
 export const TimelineViewPage: React.FC = () => {
+  const DESCRIPTION_ROW_LIMIT = 3;
+  const [showFullDescription, setShowFullDescription] = useState(false);
   const { id: timelineName } = useParams<{ id: string }>();
   const { oidcUser } = useOidcAuthentication();
 
@@ -516,47 +518,14 @@ export const TimelineViewPage: React.FC = () => {
         </div>
       </PageHeader>
 
-      {/* Timeline Description */}
-      {timeline?.description && !editMode && (
-        <div style={{
-          maxWidth: '900px',
-          margin: '24px auto 32px auto',
-          padding: '0 20px'
-        }}>
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            border: '1px solid rgba(0, 0, 0, 0.1)',
-            borderRadius: 12,
-            padding: 24,
-            fontSize: 16,
-            lineHeight: 1.6,
-            color: '#374151',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-            backdropFilter: 'blur(10px)'
-          }}>
-            <div style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: '#6b7280',
-              marginBottom: 8,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px'
-            }}>
-              Description
-            </div>
-            {timeline.description}
-          </div>
-        </div>
-      )}
-      
       {/* Main Content */}
       <div style={{ 
         maxWidth: 1200, 
         margin: '0 auto', 
-        padding: '24px'
+        padding: '0 24px 24px 24px'
       }}>
         {/* Debug Info */}
-        <div style={{ background: '#f8f9fa', padding: 12, marginBottom: 16, fontSize: 12, fontFamily: 'monospace' }}>
+        <div className='hidden' style={{ background: '#f8f9fa', padding: 12, marginBottom: 16, fontSize: 12, fontFamily: 'monospace' }}>
           <strong>Debug:</strong> timelineName={timelineName}, timeline.name={timeline?.name}, entries.length={entries.length}, entriesLoading={entriesLoading.toString()}, error={error}
         </div>
         {/* Navigation */}
@@ -578,6 +547,89 @@ export const TimelineViewPage: React.FC = () => {
             Back to Timelines
           </Link>
         </div>
+
+        {/* Timeline Description */}
+        {timeline?.description && !editMode && (
+        (() => {
+          // Create a temporary element to count lines
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = timeline.description;
+          tempDiv.style.position = 'absolute';
+          tempDiv.style.visibility = 'hidden';
+          tempDiv.style.fontSize = '16px';
+          tempDiv.style.lineHeight = '1.6';
+          tempDiv.style.width = '900px';
+          document.body.appendChild(tempDiv);
+          const lineHeight = parseFloat(getComputedStyle(tempDiv).lineHeight);
+          const totalHeight = tempDiv.offsetHeight;
+          const numLines = Math.round(totalHeight / lineHeight);
+          document.body.removeChild(tempDiv);
+          const isDescriptionLong = numLines > DESCRIPTION_ROW_LIMIT;
+          return (
+            <div style={{
+              // maxWidth: '900px',
+              margin: '24px auto 32px auto',
+              padding: '0 20px'
+            }}>
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.95)',
+                border: '1px solid rgba(0, 0, 0, 0.1)',
+                borderRadius: 12,
+                padding: 24,
+                fontSize: 16,
+                lineHeight: 1.6,
+                color: '#374151',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                backdropFilter: 'blur(10px)'
+              }}>
+                <div style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: '#6b7280',
+                  marginBottom: 8,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Description
+                </div>
+                <div
+                  style={
+                    showFullDescription || !isDescriptionLong
+                      ? {}
+                      : {
+                          display: '-webkit-box',
+                          WebkitLineClamp: DESCRIPTION_ROW_LIMIT,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }
+                  }
+                  dangerouslySetInnerHTML={{ __html: timeline.description }}
+                />
+                {isDescriptionLong && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFullDescription(v => !v)}
+                    style={{
+                      marginTop: 12,
+                      background: '#e5e7eb',
+                      color: '#374151',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '6px 16px',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: 500
+                    }}
+                  >
+                    {showFullDescription ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()
+        )}
 
         {reorderMode && (
           <div style={{

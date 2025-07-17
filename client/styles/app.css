@@ -1,8 +1,9 @@
 /* Basic production-ready skin for Timeline Theories */
 
-/* Cyberpunk-inspired skin for Timeline Theories */
+.hidden {
+  display: none;
+}
 
-/* Calm forest-inspired skin for Timeline Theories */
 .app-root {
   font-family: 'Segoe UI', Arial, sans-serif;
   background: linear-gradient(135deg, #e6f2e6 0%, #b7d3b7 100%);
