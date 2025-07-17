@@ -751,15 +751,21 @@ export const TimelineViewPage: React.FC = () => {
                               overflow: 'hidden'
                             }}>
                               {entry.mediaItem?.CoverImageUrl ? (
-                                <img
-                                  src={entry.mediaItem.CoverImageUrl}
-                                  alt={entry.mediaItem.DisplayName}
-                                  style={{ 
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'cover'
-                                  }}
-                                />
+                                <Link
+                                  to={`/media-library/${entry.mediaItem.Id}`}
+                                  style={{ display: 'block', width: '100%', height: '100%' }}
+                                  title={entry.mediaItem.DisplayName}
+                                >
+                                  <img
+                                    src={entry.mediaItem.CoverImageUrl}
+                                    alt={entry.mediaItem.DisplayName}
+                                    style={{ 
+                                      width: '100%',
+                                      height: '100%',
+                                      objectFit: 'cover'
+                                    }}
+                                  />
+                                </Link>
                               ) : (
                                 <div style={{ 
                                   width: '100%',
@@ -790,7 +796,15 @@ export const TimelineViewPage: React.FC = () => {
                                 WebkitBoxOrient: 'vertical',
                                 overflow: 'hidden'
                               }}>
-                                {entry.mediaItem?.DisplayName || 'Unknown Media'}
+                                {entry.mediaItem ? (
+                                  <Link
+                                    to={`/media-library/${entry.mediaItem.Id}`}
+                                    style={{ color: '#1f2937', textDecoration: 'none' }}
+                                    title={entry.mediaItem.DisplayName}
+                                  >
+                                    {entry.mediaItem.DisplayName}
+                                  </Link>
+                                ) : 'Unknown Media'}
                               </h4>
                               {entry.notes && (
                                 <p style={{ 
@@ -877,22 +891,28 @@ export const TimelineViewPage: React.FC = () => {
                     overflow: 'hidden'
                   }}>
                     {entry.mediaItem?.CoverImageUrl ? (
-                      <img
-                        src={entry.mediaItem.CoverImageUrl}
-                        alt={entry.mediaItem.DisplayName}
-                        style={{ 
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          transition: 'transform 0.3s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = 'scale(1.05)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = 'scale(1)';
-                        }}
-                      />
+                      <Link
+                        to={`/media-library/${entry.mediaItem.Id}`}
+                        style={{ display: 'block', width: '100%', height: '100%' }}
+                        title={entry.mediaItem.DisplayName}
+                      >
+                        <img
+                          src={entry.mediaItem.CoverImageUrl}
+                          alt={entry.mediaItem.DisplayName}
+                          style={{ 
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.3s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'scale(1.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
+                        />
+                      </Link>
                     ) : (
                       <div style={{ 
                         width: '100%',
@@ -923,7 +943,15 @@ export const TimelineViewPage: React.FC = () => {
                       WebkitBoxOrient: 'vertical',
                       overflow: 'hidden'
                     }}>
-                      {entry.mediaItem?.DisplayName || 'Unknown Media'}
+                      {entry.mediaItem ? (
+                        <Link
+                          to={`/media-library/${entry.mediaItem.Id}`}
+                          style={{ color: '#1f2937', textDecoration: 'none' }}
+                          title={entry.mediaItem.DisplayName}
+                        >
+                          {entry.mediaItem.DisplayName}
+                        </Link>
+                      ) : 'Unknown Media'}
                     </h3>
                     
                     {entry.notes && (
