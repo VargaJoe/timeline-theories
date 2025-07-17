@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import type { MediaItem } from '../services/mediaLibraryService';
 import { MediaLibraryService } from '../services/mediaLibraryService';
 
 export const MediaItemViewPage: React.FC = () => {
+  const navigate = useNavigate();
   const { id } = useParams();
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,24 +137,35 @@ export const MediaItemViewPage: React.FC = () => {
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ marginBottom: 32 }}>
-          <Link 
-            to="/media-library" 
+          <button
+            type="button"
+            onClick={() => {
+              if (window.history.length > 2) {
+                window.history.back();
+              } else {
+                navigate('/media-library');
+              }
+            }}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               color: '#2a4d8f',
+              background: 'none',
+              border: 'none',
               textDecoration: 'none',
               marginBottom: 16,
               fontSize: 14,
-              gap: 8
+              gap: 8,
+              cursor: 'pointer',
+              fontWeight: 500,
+              padding: 0
             }}
           >
             <svg style={{ width: 20, height: 20 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Media Library
-          </Link>
-          
+            Back
+          </button>
           <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 2px 12px #0001', padding: 32 }}>
             <h1 style={{ fontSize: 32, fontWeight: 'bold', color: '#2a4d8f', marginBottom: 16 }}>
               {mediaItem.DisplayName}
