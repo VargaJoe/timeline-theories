@@ -33,12 +33,19 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
       color: '#fff',
-      padding: '40px 20px',
-      marginBottom: '32px'
+      padding: '48px 24px',
+      minHeight: '220px',
+      marginBottom: '32px',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center'
     }}>
       <div style={{
-        maxWidth: '1200px',
-        margin: '0 auto'
+        width: '1200px',
+        marginLeft: 'auto',
+        padding: '0 20px',
+        marginRight: 'auto',
+        textAlign: 'left'
       }}>
         <h1 style={{
           fontSize: '36px',

@@ -522,14 +522,14 @@ export const TimelineViewPage: React.FC = () => {
       <div style={{ 
         maxWidth: 1200, 
         margin: '0 auto', 
-        padding: '0 24px 24px 24px'
+        padding: '0 20px 24px 20px'
       }}>
         {/* Debug Info */}
         <div className='hidden' style={{ background: '#f8f9fa', padding: 12, marginBottom: 16, fontSize: 12, fontFamily: 'monospace' }}>
           <strong>Debug:</strong> timelineName={timelineName}, timeline.name={timeline?.name}, entries.length={entries.length}, entriesLoading={entriesLoading.toString()}, error={error}
         </div>
         {/* Navigation */}
-        <div style={{ marginBottom: 24 }}>
+        <div>
           <Link 
             to="/timelines" 
             style={{ 
@@ -568,8 +568,8 @@ export const TimelineViewPage: React.FC = () => {
           return (
             <div style={{
               // maxWidth: '900px',
-              margin: '24px auto 32px auto',
-              padding: '0 20px'
+              margin: '0 auto 32px auto',
+              padding: '0'
             }}>
               <div style={{
                 background: 'rgba(255, 255, 255, 0.95)',
@@ -685,7 +685,7 @@ export const TimelineViewPage: React.FC = () => {
                     gap: 16,
                     maxWidth: '1200px',
                     margin: '0 auto',
-                    padding: '0 20px'
+                    padding: '0'
                   }}
                 >
                   {pendingOrder.map((entry, idx) => {
@@ -824,7 +824,7 @@ export const TimelineViewPage: React.FC = () => {
             gap: 16,
             maxWidth: '1200px',
             margin: '0 auto',
-            padding: '0 20px'
+            padding: '0'
           }}>
             {entries.map((entry) => {
               return (
