@@ -273,7 +273,7 @@ export default function MediaLibraryPage() {
                 transition: 'transform 0.2s, box-shadow 0.2s',
                 cursor: 'pointer'
               }}
-                onClick={() => navigate(`/media-library/${item.Id}`)}
+                onClick={() => navigate(`/media-library/${item.Name}`)}
               >
                 <div style={{ marginBottom: 12 }}>
                   <h3 style={{ 

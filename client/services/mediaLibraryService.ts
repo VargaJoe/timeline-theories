@@ -5,6 +5,7 @@ import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
 
 export interface MediaItem {
   Id: number;
+  Name: string;
   DisplayName: string;
   Description: string;
   MediaType: string;
@@ -37,6 +38,7 @@ interface MediaMetadata {
 
 interface SenseNetContent {
   Id: number;
+  Name: string;
   DisplayName: string;
   Description: string;
   SortOrder?: string;
@@ -206,6 +208,31 @@ export class MediaLibraryService {
     }
   }
 
+    /**
+   * Gets a single media item by its SEO-friendly Name
+   */
+  static async getMediaItemByName(name: string): Promise<MediaItem> {
+    try {
+      // Use a query to find by Name, supporting subfolders
+      const query = `TypeIs:'${MEDIA_ITEM_CONTENT_TYPE}' and Name:'${name}'`;
+      const response = await repository.loadCollection({
+        path: mediaLibraryPath,
+        oDataOptions: {
+          query,
+          select: ['Id', 'Name', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          expand: ['CreatedBy']
+        }
+      });
+      if (response.d.results.length === 0) {
+        throw new Error('Media item not found by Name.');
+      }
+      return this.mapMemoToMediaItem(response.d.results[0]);
+    } catch (error) {
+      console.error('Error fetching media item by Name:', error);
+      throw new Error('Failed to load media item by Name. Please check your connection and try again.');
+    }
+  }
+
   /**
    * Updates an existing media item
    */
@@ -355,6 +382,7 @@ export class MediaLibraryService {
   private static mapMemoToMediaItem(memo: SenseNetContent): MediaItem {
     return {
       Id: memo.Id,
+      Name: memo.Name,
       DisplayName: memo.DisplayName,
       Description: memo.Description,
       MediaType: memo.MediaType || 'Other',

@@ -752,7 +752,7 @@ export const TimelineViewPage: React.FC = () => {
                             }}>
                               {entry.mediaItem?.CoverImageUrl ? (
                                 <Link
-                                  to={`/media-library/${entry.mediaItem.Id}`}
+                                  to={`/media-library/${entry.mediaItem.Name}`}
                                   style={{ display: 'block', width: '100%', height: '100%' }}
                                   title={entry.mediaItem.DisplayName}
                                 >
@@ -798,7 +798,7 @@ export const TimelineViewPage: React.FC = () => {
                               }}>
                                 {entry.mediaItem ? (
                                   <Link
-                                    to={`/media-library/${entry.mediaItem.Id}`}
+                                    to={`/media-library/${entry.mediaItem.Name}`}
                                     style={{ color: '#1f2937', textDecoration: 'none' }}
                                     title={entry.mediaItem.DisplayName}
                                   >
@@ -892,7 +892,7 @@ export const TimelineViewPage: React.FC = () => {
                   }}>
                     {entry.mediaItem?.CoverImageUrl ? (
                       <Link
-                        to={`/media-library/${entry.mediaItem.Id}`}
+                        to={`/media-library/${entry.mediaItem.Name}`}
                         style={{ display: 'block', width: '100%', height: '100%' }}
                         title={entry.mediaItem.DisplayName}
                       >
@@ -945,7 +945,7 @@ export const TimelineViewPage: React.FC = () => {
                     }}>
                       {entry.mediaItem ? (
                         <Link
-                          to={`/media-library/${entry.mediaItem.Id}`}
+                          to={`/media-library/${entry.mediaItem.Name}`}
                           style={{ color: '#1f2937', textDecoration: 'none' }}
                           title={entry.mediaItem.DisplayName}
                         >

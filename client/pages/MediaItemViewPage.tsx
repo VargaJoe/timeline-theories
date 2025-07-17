@@ -5,18 +5,17 @@ import { MediaLibraryService } from '../services/mediaLibraryService';
 
 export const MediaItemViewPage: React.FC = () => {
   const navigate = useNavigate();
-  const { id } = useParams();
+  const { id: mediaName } = useParams();
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!id) return;
-    
+    if (!mediaName) return;
     const loadMediaItem = async () => {
       try {
         setLoading(true);
-        const item = await MediaLibraryService.getMediaItem(Number(id));
+        const item = await MediaLibraryService.getMediaItemByName(mediaName);
         setMediaItem(item);
       } catch (err) {
         console.error('Failed to load media item:', err);
@@ -25,9 +24,8 @@ export const MediaItemViewPage: React.FC = () => {
         setLoading(false);
       }
     };
-
     loadMediaItem();
-  }, [id]);
+  }, [mediaName]);
 
   const formatDate = (dateString: string) => {
     try {
