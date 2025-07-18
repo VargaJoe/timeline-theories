@@ -305,35 +305,37 @@ export default function MediaLibraryPage() {
                 transition: 'transform 0.2s, box-shadow 0.2s',
                 cursor: 'pointer',
                 display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                minHeight: 340,
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                minHeight: 180,
+                gap: 20,
               }}
                 onClick={() => navigate(`/media-library/${item.Name}`)}
               >
-                {/* Cover image */}
+                {/* Cover image left-aligned */}
                 {item.CoverImageUrl && (
                   <img
                     src={item.CoverImageUrl}
                     alt={item.DisplayName + ' cover'}
                     style={{
-                      width: 120,
-                      height: 160,
+                      width: 90,
+                      height: 120,
                       objectFit: 'cover',
                       borderRadius: 8,
-                      marginBottom: 12,
-                      boxShadow: '0 2px 8px rgba(42,77,143,0.10)'
+                      boxShadow: '0 2px 8px rgba(42,77,143,0.10)',
+                      flexShrink: 0,
                     }}
                     onError={e => (e.currentTarget.style.display = 'none')}
                   />
                 )}
-                <div style={{ marginBottom: 12, width: '100%' }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
                   <h3 style={{
                     marginBottom: 4,
                     color: '#2a4d8f',
                     fontSize: 18,
                     fontWeight: 600,
                     textAlign: 'left',
+                    marginTop: 0,
                   }}>
                     {item.DisplayName}
                   </h3>
@@ -361,37 +363,37 @@ export default function MediaLibraryPage() {
                       </span>
                     )}
                   </div>
-                </div>
-                {/* Description omitted for cleaner card UI */}
-                {/* External Links */}
-                {Object.keys(externalLinks).length > 0 && (
-                  <div style={{ marginBottom: 12, width: '100%' }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {Object.entries(externalLinks).slice(0, 2).map(([key, url]) => (
-                        <a
-                          key={key}
-                          href={url as string}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{
-                            color: '#2a4d8f',
-                            fontSize: 12,
-                            textDecoration: 'none',
-                            background: '#f8f9fa',
-                            padding: '2px 6px',
-                            borderRadius: 3,
-                            border: '1px solid #e9ecef'
-                          }}
-                        >
-                          {key === 'url' ? 'Link' : key}
-                        </a>
-                      ))}
+                  {/* Description omitted for cleaner card UI */}
+                  {/* External Links */}
+                  {Object.keys(externalLinks).length > 0 && (
+                    <div style={{ marginBottom: 12, width: '100%' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {Object.entries(externalLinks).slice(0, 2).map(([key, url]) => (
+                          <a
+                            key={key}
+                            href={url as string}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              color: '#2a4d8f',
+                              fontSize: 12,
+                              textDecoration: 'none',
+                              background: '#f8f9fa',
+                              padding: '2px 6px',
+                              borderRadius: 3,
+                              border: '1px solid #e9ecef'
+                            }}
+                          >
+                            {key === 'url' ? 'Link' : key}
+                          </a>
+                        ))}
+                      </div>
                     </div>
+                  )}
+                  <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'left' }}>
+                    Added {formatDate(item.CreationDate)}
                   </div>
-                )}
-                <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'left' }}>
-                  Added {formatDate(item.CreationDate)}
                 </div>
               </div>
             );
