@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
+import { PageHeader } from '../components/PageHeader';
+import { siteConfig } from '../configuration';
+import { loadBackgroundImage } from '../services/sensenet';
 
 const MEDIA_TYPES = ['Film', 'TV Series', 'TV Episode', 'Book', 'Comic', 'Video Game', 'Podcast', 'Other'];
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
@@ -15,6 +18,28 @@ export default function MediaLibraryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
+
+  // Load background image (same as timeline/media item pages)
+  useEffect(() => {
+    const loadBackground = async () => {
+      try {
+        const imageUrl = await loadBackgroundImage(siteConfig.headerBackgroundImagePath);
+        if (imageUrl) {
+          // Test if the image can be loaded by creating an Image object
+          const testImage = new window.Image();
+          testImage.onload = () => setBackgroundImageUrl(imageUrl);
+          testImage.onerror = () => setBackgroundImageUrl(null);
+          testImage.src = imageUrl;
+        } else {
+          setBackgroundImageUrl(null);
+        }
+      } catch {
+        setBackgroundImageUrl(null);
+      }
+    };
+    loadBackground();
+  }, []);
 
   useEffect(() => {
     loadMediaItems();
@@ -63,32 +88,34 @@ export default function MediaLibraryPage() {
     }
   };
 
+
   if (loading && mediaItems.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ marginBottom: 16, fontSize: 16, color: '#666' }}>Loading media library...</div>
-      </div>
+      <>
+        <PageHeader
+          title="Media Library"
+          subtitle="Browse and manage your global media collection."
+          backgroundImage={backgroundImageUrl || undefined}
+          overlayOpacity={siteConfig.headerOverlayOpacity}
+        />
+        <div style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ marginBottom: 16, fontSize: 16, color: '#666' }}>Loading media library...</div>
+        </div>
+      </>
     );
   }
 
+
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div>
-            <h1 style={{ marginBottom: 8, color: '#2a4d8f', fontSize: 28, fontWeight: 700 }}>Media Library</h1>
-            <p style={{ color: '#666', margin: 0 }}>
-              Browse and manage your global media collection.
-              {oidcUser && (
-                <>
-                  {' '}or{' '}
-                  <Link to="/media-library/create" style={{ color: '#2a4d8f', fontWeight: 500 }}>add a new item</Link>.
-                </>
-              )}
-            </p>
-          </div>
-          {oidcUser && (
+    <>
+      <PageHeader
+        title="Media Library"
+        subtitle="Browse and manage your global media collection."
+        backgroundImage={backgroundImageUrl || undefined}
+        overlayOpacity={siteConfig.headerOverlayOpacity}
+      >
+        {oidcUser && (
+          <>
             <Link
               to="/media-library/create"
               style={{
@@ -98,14 +125,20 @@ export default function MediaLibraryPage() {
                 padding: '12px 24px',
                 borderRadius: 6,
                 fontWeight: 500,
-                display: 'inline-block'
+                display: 'inline-block',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
+                marginTop: 8
               }}
             >
               Add Media Item
             </Link>
-          )}
-        </div>
-      </div>
+            <span style={{ color: '#fff', marginLeft: 16, fontWeight: 400 }}>
+              or <Link to="/media-library/create" style={{ color: '#fff', fontWeight: 500, textDecoration: 'underline' }}>add a new item</Link>.
+            </span>
+          </>
+        )}
+      </PageHeader>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
 
       {/* Search and Filters */}
       <div style={{
@@ -362,6 +395,7 @@ export default function MediaLibraryPage() {
           })}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
