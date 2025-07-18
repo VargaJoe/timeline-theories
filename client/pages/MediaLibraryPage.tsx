@@ -59,16 +59,31 @@ export default function MediaLibraryPage() {
     }
   };
 
+  // Filtered media items based on search and filters
+  const getFilteredMediaItems = () => {
+    return mediaItems.filter((item) => {
+      // Search by title or description (case-insensitive)
+      const query = searchQuery.trim().toLowerCase();
+      const matchesQuery =
+        !query ||
+        (item.DisplayName && item.DisplayName.toLowerCase().includes(query)) ||
+        (item.Description && item.Description.toLowerCase().includes(query));
+      // Filter by type
+      const matchesType = !selectedType || item.MediaType === selectedType;
+      // Filter by genre
+      const matchesGenre = !selectedGenre || item.Genre === selectedGenre;
+      return matchesQuery && matchesType && matchesGenre;
+    });
+  };
+
   const handleSearch = () => {
-    // In a real app, this would filter server-side
-    loadMediaItems();
+    // No-op: filtering is now client-side and reactive
   };
 
   const clearFilters = () => {
     setSearchQuery('');
     setSelectedType('');
     setSelectedGenre('');
-    loadMediaItems();
   };
 
   const formatDate = (dateString: string) => {
@@ -260,7 +275,7 @@ export default function MediaLibraryPage() {
       )}
 
       {/* Media Items Grid */}
-      {mediaItems.length === 0 && !loading ? (
+      {getFilteredMediaItems().length === 0 && !loading ? (
         <div style={{
           background: '#f8f9fa',
           border: '1px solid #e9ecef',
@@ -293,7 +308,7 @@ export default function MediaLibraryPage() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-          {mediaItems.map((item) => {
+          {getFilteredMediaItems().map((item) => {
             const externalLinks = getExternalLinks(item.ExternalLinks);
             return (
               <div key={item.Id} style={{
