@@ -250,9 +250,9 @@ export const MediaItemViewPage: React.FC = () => {
             position: 'relative',
             overflow: 'hidden',
           }}>
-            {mediaItem.CoverImageUrl ? (
+            {MediaLibraryService.getCoverImageUrl(mediaItem) ? (
               <img
-                src={mediaItem.CoverImageUrl}
+                src={MediaLibraryService.getCoverImageUrl(mediaItem)!}
                 alt={mediaItem.DisplayName}
                 style={{
                   width: '100%',
