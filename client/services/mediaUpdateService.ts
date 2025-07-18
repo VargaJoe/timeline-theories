@@ -1,4 +1,4 @@
-import { MediaLibraryService } from './mediaLibraryService';
+import { MediaLibraryService, resizeImageToDefault, uploadCoverImageBinary } from './mediaLibraryService';
 import type { MediaItem } from './mediaLibraryService';
 
 // Rate limiting interfaces
@@ -23,6 +23,7 @@ export interface MediaUpdateData {
   runtime?: number;
   genres?: string[];
   source?: string; // Which source was used for the data
+  _binaryCoverImageUploaded?: boolean; // Internal flag for binary upload
 }
 
 export interface MediaUpdateResult {
@@ -549,7 +550,7 @@ export class MediaUpdateService {
   /**
    * Analyze what changes would be made to a media item
    */
-  static analyzeChanges(mediaItem: MediaItem, updateData: MediaUpdateData, options: UpdateOptions): MediaUpdateData | null {
+  static analyzeChanges(mediaItem: MediaItem, updateData: MediaUpdateData, options: UpdateOptions & { coverImageMode?: 'url' | 'binary' }): MediaUpdateData | null {
     const changes: MediaUpdateData = {};
     let hasChanges = false;
 
@@ -583,9 +584,24 @@ export class MediaUpdateService {
         (!mediaItem.CoverImageUrl || mediaItem.CoverImageUrl.trim() === '') : 
         true;
       
-      if (shouldUpdate && updateData.coverImageUrl !== mediaItem.CoverImageUrl) {
+      // For binary mode, we need to trigger update even if URL is the same
+      // because we want to convert the URL to a binary upload
+      const urlChanged = updateData.coverImageUrl !== mediaItem.CoverImageUrl;
+      const binaryModeConversion = options.coverImageMode === 'binary' && updateData.coverImageUrl;
+      
+      console.log(`[analyzeChanges] Cover image check for "${mediaItem.DisplayName}":`, {
+        shouldUpdate,
+        urlChanged,
+        binaryModeConversion,
+        coverImageMode: options.coverImageMode,
+        currentUrl: mediaItem.CoverImageUrl,
+        newUrl: updateData.coverImageUrl
+      });
+      
+      if (shouldUpdate && (urlChanged || binaryModeConversion)) {
         changes.coverImageUrl = updateData.coverImageUrl;
         hasChanges = true;
+        console.log(`[analyzeChanges] Cover image will be updated for "${mediaItem.DisplayName}"`);
       }
     }
 
@@ -601,9 +617,10 @@ export class MediaUpdateService {
    * Process bulk update for multiple media items with enhanced progress reporting
    */
   static async processBulkUpdate(
-    mediaItems: MediaItem[], 
-    options: UpdateOptions,
-    onProgress?: ProgressCallback
+    mediaItems: MediaItem[],
+    options: UpdateOptions & { coverImageMode?: 'url' | 'binary' },
+    onProgress?: ProgressCallback,
+    isPreview: boolean = true
   ): Promise<MediaUpdateResult[]> {
     const results: MediaUpdateResult[] = [];
 
@@ -664,13 +681,45 @@ export class MediaUpdateService {
             const updateFields: Record<string, string | number | undefined> = {};
             if (changes.title) updateFields.DisplayName = changes.title;
             if (changes.description) updateFields.Description = changes.description;
-            if (changes.coverImageUrl) updateFields.CoverImageUrl = changes.coverImageUrl;
-            
+
+            // Cover image update logic
+            console.log('[processBulkUpdate] options:', options, 'changes:', changes);
+            if (changes.coverImageUrl) {
+              if (options.coverImageMode === 'binary' && !isPreview) {
+                // Download, resize, and upload as binary (only during final processing)
+                try {
+                  console.log('[MediaUpdateService] Binary cover image mode selected for', mediaItem.DisplayName, changes.coverImageUrl);
+                  const blob = await resizeImageToDefault(changes.coverImageUrl);
+                  console.log('[MediaUpdateService] Resized image blob for', mediaItem.DisplayName, blob);
+                  await uploadCoverImageBinary(mediaItem.Id, blob);
+                  console.log('[MediaUpdateService] uploadCoverImageBinary called for', mediaItem.DisplayName, mediaItem.Id);
+                  // Clear CoverImageUrl field if storing as binary only
+                  updateFields.CoverImageUrl = '';
+                  // Mark as a change even if no other fields are updated
+                  if (!changes.title && !changes.description) {
+                    changes._binaryCoverImageUploaded = true;
+                  }
+                } catch (e) {
+                  console.error('Failed to upload cover image as binary:', e);
+                  // fallback: set URL if binary upload fails
+                  updateFields.CoverImageUrl = changes.coverImageUrl;
+                }
+              } else {
+                // For preview or URL mode, just set the URL
+                updateFields.CoverImageUrl = changes.coverImageUrl;
+              }
+            }
+
             console.log(`📝 Applying changes to "${mediaItem.DisplayName}":`, changes);
             console.log(`🔄 Update fields:`, updateFields);
-            
-            await MediaLibraryService.updateMediaItem(mediaItem.Id, updateFields);
-            
+
+            // Only apply database updates if this is NOT a preview
+            if (!isPreview) {
+              await MediaLibraryService.updateMediaItem(mediaItem.Id, updateFields);
+            } else {
+              console.log(`[processBulkUpdate] Preview mode - skipping database update for "${mediaItem.DisplayName}"`);
+            }
+
             results.push({
               mediaItem,
               updateData: changes,

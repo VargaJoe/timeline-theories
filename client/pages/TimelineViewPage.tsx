@@ -10,9 +10,25 @@ import { timelinesPath } from '../projectPaths';
 import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { loadBackgroundImage } from '../services/sensenet';
-import { siteConfig } from '../configuration';
+import { siteConfig, repositoryUrl } from '../configuration';
 import type { Timeline } from '../services/timelineService';
-import type { TimelineEntry } from '../services/timelineEntryService';
+import type { TimelineEntry, MediaItemRef } from '../services/timelineEntryService';
+
+// Helper function to get cover image URL from MediaItemRef
+function getCoverImageUrl(mediaItem: MediaItemRef): string | null {
+  // If URL is set, use it
+  if (mediaItem.CoverImageUrl) {
+    return mediaItem.CoverImageUrl;
+  }
+  
+  // Otherwise, check if we have a binary image
+  if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
+    const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
+    return `${repositoryUrl}${relativePath}`;
+  }
+  
+  return null;
+}
 
 // Type definitions for react-beautiful-dnd to avoid TypeScript any warnings
 interface DropResult {
@@ -750,14 +766,14 @@ export const TimelineViewPage: React.FC = () => {
                               position: 'relative',
                               overflow: 'hidden'
                             }}>
-                              {entry.mediaItem?.CoverImageUrl ? (
+                              {entry.mediaItem && getCoverImageUrl(entry.mediaItem) ? (
                                 <Link
                                   to={`/media-library/${entry.mediaItem.Name}`}
                                   style={{ display: 'block', width: '100%', height: '100%' }}
                                   title={entry.mediaItem.DisplayName}
                                 >
                                   <img
-                                    src={entry.mediaItem.CoverImageUrl}
+                                    src={getCoverImageUrl(entry.mediaItem)!}
                                     alt={entry.mediaItem.DisplayName}
                                     style={{ 
                                       width: '100%',
@@ -890,14 +906,14 @@ export const TimelineViewPage: React.FC = () => {
                     position: 'relative',
                     overflow: 'hidden'
                   }}>
-                    {entry.mediaItem?.CoverImageUrl ? (
+                    {entry.mediaItem && getCoverImageUrl(entry.mediaItem) ? (
                       <Link
                         to={`/media-library/${entry.mediaItem.Name}`}
                         style={{ display: 'block', width: '100%', height: '100%' }}
                         title={entry.mediaItem.DisplayName}
                       >
                         <img
-                          src={entry.mediaItem.CoverImageUrl}
+                          src={getCoverImageUrl(entry.mediaItem)!}
                           alt={entry.mediaItem.DisplayName}
                           style={{ 
                             width: '100%',

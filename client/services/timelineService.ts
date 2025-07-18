@@ -22,6 +22,30 @@ export async function deleteTimeline(idOrPath: string | number, permanent = fals
 import { repository } from './sensenet';
 import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
+import { repositoryUrl } from '../configuration';
+
+// Helper function to get cover image URL from MediaItem reference
+function getCoverImageUrl(mediaItem: {
+  CoverImageUrl?: string;
+  CoverImageBin?: {
+    __mediaresource?: {
+      media_src: string;
+    };
+  };
+}): string | null {
+  // If URL is set, use it
+  if (mediaItem.CoverImageUrl) {
+    return mediaItem.CoverImageUrl;
+  }
+  
+  // Otherwise, check if we have a binary image
+  if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
+    const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
+    return `${repositoryUrl}${relativePath}`;
+  }
+  
+  return null;
+}
 
 // Timeline service for frontend API calls
 export interface Timeline {
@@ -122,7 +146,7 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
       path: timelinePath,
       oDataOptions: {
         query: `TypeIs:TimelineEntry`,
-        select: ['MediaItem'],
+        select: ['MediaItem', 'MediaItem/CoverImageUrl', 'MediaItem/CoverImageBin'],
         expand: ['MediaItem'],
         orderby: ['Position'],
         top: 50, // Get more entries to have a good pool for random selection
@@ -133,8 +157,12 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
     const allCoverUrls: string[] = [];
     for (const item of result.d.results) {
       const mediaItem = item.MediaItem;
-      if (mediaItem && mediaItem.CoverImageUrl) {
-        allCoverUrls.push(mediaItem.CoverImageUrl);
+      if (mediaItem) {
+        // Use the helper function to get cover URL (either from URL or binary field)
+        const coverUrl = getCoverImageUrl(mediaItem);
+        if (coverUrl) {
+          allCoverUrls.push(coverUrl);
+        }
       }
     }
 

@@ -341,9 +341,9 @@ export default function MediaLibraryPage() {
                 onClick={() => navigate(`/media-library/${item.Name}`)}
               >
                 {/* Cover image left-aligned */}
-                {item.CoverImageUrl && (
+                {MediaLibraryService.getCoverImageUrl(item) && (
                   <img
-                    src={item.CoverImageUrl}
+                    src={MediaLibraryService.getCoverImageUrl(item)!}
                     alt={item.DisplayName + ' cover'}
                     style={{
                       width: 90,

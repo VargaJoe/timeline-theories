@@ -1,10 +1,101 @@
+// Utility: Resize image to default dimensions and return Blob
+import { siteConfig } from '../configuration';
+
+export async function resizeImageToDefault(url: string): Promise<Blob> {
+  const img = document.createElement('img');
+  img.crossOrigin = 'anonymous';
+  img.src = url;
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = siteConfig.coverImageDefaultWidth;
+  canvas.height = siteConfig.coverImageDefaultHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas not supported');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error('Failed to convert image to blob'));
+    }, 'image/jpeg', 0.92);
+  });
+}
+
+// Upload cover image as binary to SenseNet
+/**
+ * Upload cover image as binary to SenseNet
+ * @param mediaItemRef - number (content ID) or string (full path)
+ * @param imageBlob - image data
+ * @param fileName - optional file name
+ */
+export async function uploadCoverImageBinary(
+  mediaItemRef: number | string,
+  imageBlob: Blob,
+  fileName: string = 'cover.jpg'
+): Promise<void> {
+  console.log('[uploadCoverImageBinary] called with:', { mediaItemRef, imageBlob, fileName });
+  
+  try {
+    // Get the media item's Name and parent ID
+    const content = await repository.load({
+      idOrPath: mediaItemRef,
+      oDataOptions: {
+        select: ['Id', 'ParentId', 'Name']
+      }
+    });
+    
+    if (!content?.d?.Id || !content?.d?.Name || !content?.d?.ParentId) {
+      throw new Error(`Cannot find content or missing ParentId: ${mediaItemRef}`);
+    }
+    
+    const mediaItemName = content.d.Name;
+    const parentId = content.d.ParentId;
+    console.log('[uploadCoverImageBinary] resolved:', { mediaItemName, parentId, mediaItemRef });
+
+    // Create FormData for multipart upload
+    const formData = new FormData();
+    formData.append('ChunkToken', '0*0*False*False');
+    formData.append('FileName', mediaItemName); // Use media item's Name as filename
+    formData.append('Overwrite', 'true');
+    formData.append('PropertyName', 'CoverImageBin'); // Target the binary field
+    formData.append('FileLength', imageBlob.size.toString());
+    formData.append('ContentType', 'MediaItem'); // Specify content type
+    formData.append(mediaItemName, imageBlob, fileName); // Use media item Name as form field name
+
+    // Upload to parent container using SenseNet upload endpoint with parent ID
+    const uploadUrl = `${repositoryUrl}/odata.svc/content(${parentId})/upload`;
+    console.log('[uploadCoverImageBinary] uploading to:', uploadUrl);
+    
+    const uploadResult = await repository.fetch(uploadUrl, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!uploadResult.ok) {
+      const errorText = await uploadResult.text();
+      console.error('[uploadCoverImageBinary] uploadResult error:', errorText);
+      throw new Error(`Failed to upload cover image binary: ${uploadResult.status} ${uploadResult.statusText}`);
+    }
+
+    const result = await uploadResult.json();
+    console.log('[uploadCoverImageBinary] upload successful:', result);
+  } catch (err) {
+    console.error('[uploadCoverImageBinary] exception:', err);
+    throw new Error('Failed to upload cover image binary');
+  }
+}
+
 // src/client/services/mediaLibraryService.ts
 import { repository } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
+import { repositoryUrl } from '../configuration';
 
 export interface MediaItem {
   Id: number;
+  ParentId?: number; 
   Name: string;
   DisplayName: string;
   Description: string;
@@ -12,6 +103,12 @@ export interface MediaItem {
   ReleaseDate?: string;
   ChronologicalDate?: string;
   CoverImageUrl?: string;
+  CoverImageBin?: {
+    __mediaresource: {
+      media_src: string;
+      content_type: string;
+    };
+  };
   Duration?: number;
   Genre?: string;
   Rating?: number;
@@ -51,6 +148,12 @@ interface SenseNetContent {
   ReleaseDate?: string;
   ChronologicalDate?: string;
   CoverImageUrl?: string;
+  CoverImageBin?: {
+    __mediaresource: {
+      media_src: string;
+      content_type: string;
+    };
+  };
   Duration?: number;
   Genre?: string;
   Rating?: number;
@@ -134,7 +237,7 @@ export class MediaLibraryService {
         parentPath: this.MEDIA_LIBRARY_PATH,
         contentType: MEDIA_ITEM_CONTENT_TYPE,
         oDataOptions: {
-          select: ['Id', 'DisplayName', 'Description', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         },
         content: {
@@ -171,7 +274,7 @@ export class MediaLibraryService {
         path: this.MEDIA_LIBRARY_PATH,
         oDataOptions: {
           query: `TypeIs:${MEDIA_ITEM_CONTENT_TYPE}`,
-          select: ['Id', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy'],
           orderby: ['CreationDate desc']
         }
@@ -195,7 +298,7 @@ export class MediaLibraryService {
       const response = await repository.load({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         }
       });
@@ -219,7 +322,7 @@ export class MediaLibraryService {
         path: mediaLibraryPath,
         oDataOptions: {
           query,
-          select: ['Id', 'Name', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'Name', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         }
       });
@@ -299,7 +402,7 @@ export class MediaLibraryService {
       const response = await repository.patch({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         },
         content: updateContent
@@ -349,7 +452,7 @@ export class MediaLibraryService {
         name: 'GetChildren',
         idOrPath: this.MEDIA_LIBRARY_PATH,
         oDataOptions: {
-          select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy'],
           filter,
           orderby: [['CreationDate', 'desc']]
@@ -389,6 +492,7 @@ export class MediaLibraryService {
       ReleaseDate: memo.ReleaseDate,
       ChronologicalDate: memo.ChronologicalDate,
       CoverImageUrl: memo.CoverImageUrl,
+      CoverImageBin: memo.CoverImageBin,
       Duration: memo.Duration,
       Genre: memo.Genre,
       Rating: memo.Rating,
@@ -398,6 +502,24 @@ export class MediaLibraryService {
       CreatedBy: memo.CreatedBy || { DisplayName: 'Unknown' },
       SortOrder: memo.SortOrder // Keep original for updates
     };
+  }
+
+  /**
+   * Helper function to get cover image URL (either from URL field or binary field)
+   */
+  static getCoverImageUrl(mediaItem: MediaItem): string | null {
+    // If URL is set, use it
+    if (mediaItem.CoverImageUrl) {
+      return mediaItem.CoverImageUrl;
+    }
+    
+    // Otherwise, check if we have a binary image
+    if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
+      const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
+      return `${repositoryUrl}${relativePath}`;
+    }
+    
+    return null;
   }
 
   /**

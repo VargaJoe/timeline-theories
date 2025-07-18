@@ -268,7 +268,7 @@ export const TimelineListPage: React.FC = () => {
                       <div style={{
                         height: 200,
                         flexShrink: 0, // Prevent shrinking
-                        background: timeline.coverImageUrl 
+                        backgroundImage: timeline.coverImageUrl 
                           ? `url(${timeline.coverImageUrl})` 
                           : 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
                         backgroundSize: 'cover',

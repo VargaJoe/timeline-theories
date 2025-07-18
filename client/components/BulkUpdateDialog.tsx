@@ -2,7 +2,6 @@ import React, { useState, useCallback } from 'react';
 import { MediaUpdateService, DataSource } from '../services/mediaUpdateService';
 import type { UpdateOptions, MediaUpdateResult, BulkUpdateProgress } from '../services/mediaUpdateService';
 import type { MediaItem } from '../services/mediaLibraryService';
-import { MediaLibraryService } from '../services/mediaLibraryService';
 
 interface BulkUpdateDialogProps {
   mediaItems: MediaItem[];
@@ -24,12 +23,13 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
   onUpdateComplete
 }) => {
   const [step, setStep] = useState<'options' | 'preview' | 'processing' | 'results'>('options');
-  const [options, setOptions] = useState<UpdateOptions>({
+  const [options, setOptions] = useState<UpdateOptions & { coverImageMode?: 'url' | 'binary' }>({
     updateTitles: true,
     updateDescriptions: true,
     updateCoverImages: true,
     onlyMissing: true,
-    preferredSources: [DataSource.OMDB, DataSource.TMDB, DataSource.TRAKT]
+    preferredSources: [DataSource.OMDB, DataSource.TMDB, DataSource.TRAKT],
+    coverImageMode: 'url' // default to url, admin can change to binary
   });
   const [previewResults, setPreviewResults] = useState<ValidatedUpdateResult[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -103,7 +103,8 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
         options,
         (progress) => {
           setProgress(progress);
-        }
+        },
+        true // isPreview = true
       );
       const validatedResults = validateResults(results);
       setPreviewResults(validatedResults);
@@ -132,13 +133,13 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
       for (const result of approvedItems) {
         try {
           if (result.updateData) {
-            // Call the update service for this specific item
-            const updateFields: Record<string, string | number | undefined> = {};
-            if (result.updateData.title) updateFields.DisplayName = result.updateData.title;
-            if (result.updateData.description) updateFields.Description = result.updateData.description;
-            if (result.updateData.coverImageUrl) updateFields.CoverImageUrl = result.updateData.coverImageUrl;
-            
-            await MediaLibraryService.updateMediaItem(result.mediaItem.Id, updateFields);
+            // Use MediaUpdateService to handle binary uploads properly
+            await MediaUpdateService.processBulkUpdate(
+              [result.mediaItem],
+              options,
+              undefined, // no progress callback for individual items
+              false // isPreview = false (final processing)
+            );
             success++;
           }
         } catch (error) {
@@ -157,7 +158,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     } finally {
       setProcessing(false);
     }
-  }, [previewResults, onUpdateComplete]);
+  }, [previewResults, onUpdateComplete, options]);
 
   const handleClose = useCallback(() => {
     setStep('options');
@@ -225,7 +226,8 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                 Update Descriptions
               </label>
               
-              <label style={{ display: 'block', marginBottom: 16, cursor: 'pointer' }}>
+
+              <label style={{ display: 'block', marginBottom: 8, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={options.updateCoverImages}
@@ -234,6 +236,30 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                 />
                 Update Cover Images
               </label>
+              {options.updateCoverImages && (
+                <div style={{ marginLeft: 24, marginBottom: 12 }}>
+                  <label style={{ marginRight: 16, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="coverImageMode"
+                      checked={options.coverImageMode === 'url'}
+                      onChange={() => setOptions(prev => ({ ...prev, coverImageMode: 'url' }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    Set Cover Image URL (default)
+                  </label>
+                  <label style={{ cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="coverImageMode"
+                      checked={options.coverImageMode === 'binary'}
+                      onChange={() => setOptions(prev => ({ ...prev, coverImageMode: 'binary' }))}
+                      style={{ marginRight: 6 }}
+                    />
+                    Upload and store cover as binary (resized to site default)
+                  </label>
+                </div>
+              )}
               
               <h4 style={{ marginBottom: 12, fontSize: 16 }}>Data Sources (in order of preference)</h4>
               

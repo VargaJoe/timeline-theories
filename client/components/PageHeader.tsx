@@ -28,7 +28,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
 
   return (
     <div style={{
-      background: backgroundStyle,
+      backgroundImage: backgroundStyle,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',

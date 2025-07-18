@@ -12,7 +12,11 @@ export const siteConfig = {
   // Background image: base path + relative path
   headerBackgroundImagePath: `${contentPaths.assets}/${import.meta.env.VITE_HEADER_BACKGROUND_IMAGE || 'background.webp'}`,
   headerBackgroundFallback: null, // Use gradient fallback instead of external image
-  headerOverlayOpacity: parseFloat(import.meta.env.VITE_HEADER_OVERLAY_OPACITY || '0.3') // 0.0 = no overlay (full image), 1.0 = full overlay (no image)
+  headerOverlayOpacity: parseFloat(import.meta.env.VITE_HEADER_OVERLAY_OPACITY || '0.3'), // 0.0 = no overlay (full image), 1.0 = full overlay (no image)
+
+  // Default cover image dimensions for binary upload (px)
+  coverImageDefaultWidth: 360,
+  coverImageDefaultHeight: 480
 };
 
 export const configuration = {
