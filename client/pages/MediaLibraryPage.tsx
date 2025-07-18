@@ -295,7 +295,6 @@ export default function MediaLibraryPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
           {mediaItems.map((item) => {
             const externalLinks = getExternalLinks(item.ExternalLinks);
-            
             return (
               <div key={item.Id} style={{
                 background: '#fff',
@@ -304,20 +303,40 @@ export default function MediaLibraryPage() {
                 padding: 20,
                 boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
                 transition: 'transform 0.2s, box-shadow 0.2s',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                minHeight: 340,
               }}
                 onClick={() => navigate(`/media-library/${item.Name}`)}
               >
-                <div style={{ marginBottom: 12 }}>
-                  <h3 style={{ 
-                    marginBottom: 4, 
+                {/* Cover image */}
+                {item.CoverImageUrl && (
+                  <img
+                    src={item.CoverImageUrl}
+                    alt={item.DisplayName + ' cover'}
+                    style={{
+                      width: 120,
+                      height: 160,
+                      objectFit: 'cover',
+                      borderRadius: 8,
+                      marginBottom: 12,
+                      boxShadow: '0 2px 8px rgba(42,77,143,0.10)'
+                    }}
+                    onError={e => (e.currentTarget.style.display = 'none')}
+                  />
+                )}
+                <div style={{ marginBottom: 12, width: '100%' }}>
+                  <h3 style={{
+                    marginBottom: 4,
                     color: '#2a4d8f',
                     fontSize: 18,
-                    fontWeight: 600
+                    fontWeight: 600,
+                    textAlign: 'left',
                   }}>
                     {item.DisplayName}
                   </h3>
-                  
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <span style={{
                       background: '#e3f2fd',
@@ -343,25 +362,10 @@ export default function MediaLibraryPage() {
                     )}
                   </div>
                 </div>
-                
-                {item.Description && (
-                  <p style={{ 
-                    color: '#666',
-                    fontSize: 14,
-                    marginBottom: 12,
-                    lineHeight: 1.4,
-                    display: '-webkit-box',
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden'
-                  }}>
-                    {item.Description}
-                  </p>
-                )}
-
+                {/* Description omitted for cleaner card UI */}
                 {/* External Links */}
                 {Object.keys(externalLinks).length > 0 && (
-                  <div style={{ marginBottom: 12 }}>
+                  <div style={{ marginBottom: 12, width: '100%' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                       {Object.entries(externalLinks).slice(0, 2).map(([key, url]) => (
                         <a
@@ -386,8 +390,7 @@ export default function MediaLibraryPage() {
                     </div>
                   </div>
                 )}
-
-                <div style={{ fontSize: 12, color: '#999', marginTop: 'auto' }}>
+                <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'left' }}>
                   Added {formatDate(item.CreationDate)}
                 </div>
               </div>
