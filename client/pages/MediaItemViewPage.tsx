@@ -180,7 +180,7 @@ export const MediaItemViewPage: React.FC = () => {
     }
   } else if (mediaTypeStr === 'movie') {
     // Movie: "MovieTitle (year)"
-    const year = mediaItem.ReleaseDate ? ` (${new Date(mediaItem.ReleaseDate).getFullYear()})` : '';
+    // const year = mediaItem.ReleaseDate ? ` (${new Date(mediaItem.ReleaseDate).getFullYear()})` : '';
     headerTitle = mediaItem.DisplayName; // + year;
     headerSubtitle = '';
   }

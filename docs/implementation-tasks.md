@@ -124,8 +124,10 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
   - [x] Production-ready system that handles API limitations without complete failure
   - [x] Handles OMDb daily limits, TMDb 429 errors, and Trakt rate limits properly
 
+
 ### Technical Task - Various Fixes
 - [x] import tv shows elements missing data
+- [x] **FIX: Robust genre filter and display in MediaLibraryPage.tsx** - Added normalizeGenre function to handle both array and string values for item.Genre, mirroring MediaType handling. Prevents crash when filtering or displaying genre if data shape varies.
 
 ### Technical Task - Fix TV Show Import Naming
 - [x] Fix TV show import to handle different media types properly
