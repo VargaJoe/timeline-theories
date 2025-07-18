@@ -983,7 +983,8 @@ export const TimelineViewPage: React.FC = () => {
           .filter((item): item is NonNullable<typeof item> => item !== null)
           .map(ref => ({
             Id: ref.Id,
-            DisplayName: ref.DisplayName || ref.Name,
+            Name: ref.Name || '',
+            DisplayName: ref.DisplayName || ref.Name || '',
             Description: '',
             MediaType: '',
             CoverImageUrl: ref.CoverImageUrl,
