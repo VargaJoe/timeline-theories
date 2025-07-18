@@ -2,8 +2,22 @@ import { useState, useEffect } from 'react';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
+import { PageHeader } from '../components/PageHeader';
+import { siteConfig } from '../configuration';
+import { loadBackgroundImage } from '../services/sensenet';
 
-const MEDIA_TYPES = ['Film', 'TV Series', 'TV Episode', 'Book', 'Comic', 'Video Game', 'Podcast', 'Other'];
+// Media types from MediaItem content type definition (see deployment/contenttypes/MediaItem.xml)
+const MEDIA_TYPES = [
+  { value: 'movie', label: 'Movie' },
+  { value: 'tvepisode', label: 'TV Episode' },
+  { value: 'tvseries', label: 'TV Series' },
+  { value: 'book', label: 'Book' },
+  { value: 'comic', label: 'Comic' },
+  { value: 'videogame', label: 'Video Game' },
+  { value: 'podcast', label: 'Podcast' },
+  { value: 'documentary', label: 'Documentary' },
+  { value: 'other', label: 'Other' },
+];
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
 
 export default function MediaLibraryPage() {
@@ -15,6 +29,28 @@ export default function MediaLibraryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
+
+  // Load background image (same as timeline/media item pages)
+  useEffect(() => {
+    const loadBackground = async () => {
+      try {
+        const imageUrl = await loadBackgroundImage(siteConfig.headerBackgroundImagePath);
+        if (imageUrl) {
+          // Test if the image can be loaded by creating an Image object
+          const testImage = new window.Image();
+          testImage.onload = () => setBackgroundImageUrl(imageUrl);
+          testImage.onerror = () => setBackgroundImageUrl(null);
+          testImage.src = imageUrl;
+        } else {
+          setBackgroundImageUrl(null);
+        }
+      } catch {
+        setBackgroundImageUrl(null);
+      }
+    };
+    loadBackground();
+  }, []);
 
   useEffect(() => {
     loadMediaItems();
@@ -34,16 +70,49 @@ export default function MediaLibraryPage() {
     }
   };
 
+  // Filtered media items based on search and filters
+  // Normalize MediaType to string for filtering and display
+  function normalizeMediaType(val: unknown): string {
+    if (Array.isArray(val)) return val[0] || '';
+    if (typeof val === 'string') return val;
+    return '';
+  }
+
+  // Normalize Genre to string for filtering
+  function normalizeGenre(val: unknown): string {
+    if (Array.isArray(val)) return val[0] || '';
+    if (typeof val === 'string') return val;
+    return '';
+  }
+
+  const getFilteredMediaItems = () => {
+    return mediaItems.filter((item) => {
+      // Search by title or description (case-insensitive)
+      const query = searchQuery.trim().toLowerCase();
+      const matchesQuery =
+        !query ||
+        (item.DisplayName && item.DisplayName.toLowerCase().includes(query)) ||
+        (item.Description && item.Description.toLowerCase().includes(query));
+      // Filter by type (normalize both sides)
+      const itemType = normalizeMediaType(item.MediaType).toLowerCase();
+      const filterType = (selectedType || '').toLowerCase();
+      const matchesType = !filterType || itemType === filterType;
+      // Filter by genre (case-insensitive, normalize both sides)
+      const itemGenre = normalizeGenre(item.Genre).toLowerCase();
+      const filterGenre = (selectedGenre || '').toLowerCase();
+      const matchesGenre = !filterGenre || itemGenre === filterGenre;
+      return matchesQuery && matchesType && matchesGenre;
+    });
+  };
+
   const handleSearch = () => {
-    // In a real app, this would filter server-side
-    loadMediaItems();
+    // No-op: filtering is now client-side and reactive
   };
 
   const clearFilters = () => {
     setSearchQuery('');
     setSelectedType('');
     setSelectedGenre('');
-    loadMediaItems();
   };
 
   const formatDate = (dateString: string) => {
@@ -63,32 +132,34 @@ export default function MediaLibraryPage() {
     }
   };
 
+
   if (loading && mediaItems.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ marginBottom: 16, fontSize: 16, color: '#666' }}>Loading media library...</div>
-      </div>
+      <>
+        <PageHeader
+          title="Media Library"
+          subtitle="Browse and manage your global media collection."
+          backgroundImage={backgroundImageUrl || undefined}
+          overlayOpacity={siteConfig.headerOverlayOpacity}
+        />
+        <div style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ marginBottom: 16, fontSize: 16, color: '#666' }}>Loading media library...</div>
+        </div>
+      </>
     );
   }
 
+
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div>
-            <h1 style={{ marginBottom: 8, color: '#2a4d8f', fontSize: 28, fontWeight: 700 }}>Media Library</h1>
-            <p style={{ color: '#666', margin: 0 }}>
-              Browse and manage your global media collection.
-              {oidcUser && (
-                <>
-                  {' '}or{' '}
-                  <Link to="/media-library/create" style={{ color: '#2a4d8f', fontWeight: 500 }}>add a new item</Link>.
-                </>
-              )}
-            </p>
-          </div>
-          {oidcUser && (
+    <>
+      <PageHeader
+        title="Media Library"
+        subtitle="Browse and manage your global media collection."
+        backgroundImage={backgroundImageUrl || undefined}
+        overlayOpacity={siteConfig.headerOverlayOpacity}
+      >
+        {oidcUser && (
+          <>
             <Link
               to="/media-library/create"
               style={{
@@ -98,14 +169,20 @@ export default function MediaLibraryPage() {
                 padding: '12px 24px',
                 borderRadius: 6,
                 fontWeight: 500,
-                display: 'inline-block'
+                display: 'inline-block',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
+                marginTop: 8
               }}
             >
               Add Media Item
             </Link>
-          )}
-        </div>
-      </div>
+            <span style={{ color: '#fff', marginLeft: 16, fontWeight: 400 }}>
+              or <Link to="/media-library/create" style={{ color: '#fff', fontWeight: 500, textDecoration: 'underline' }}>add a new item</Link>.
+            </span>
+          </>
+        )}
+      </PageHeader>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
 
       {/* Search and Filters */}
       <div style={{
@@ -151,7 +228,7 @@ export default function MediaLibraryPage() {
             >
               <option value="">All Types</option>
               {MEDIA_TYPES.map(type => (
-                <option key={type} value={type}>{type}</option>
+                <option key={type.value} value={type.value}>{type.label}</option>
               ))}
             </select>
           </div>
@@ -176,22 +253,6 @@ export default function MediaLibraryPage() {
             </select>
           </div>
           <div style={{ display: 'flex', alignItems: 'end', gap: 8 }}>
-            <button
-              onClick={handleSearch}
-              disabled={loading}
-              style={{
-                background: loading ? '#94a3b8' : '#2a4d8f',
-                color: 'white',
-                border: 'none',
-                borderRadius: 6,
-                padding: '8px 16px',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                fontSize: 14,
-                fontWeight: 500
-              }}
-            >
-              Search
-            </button>
             <button
               onClick={clearFilters}
               disabled={loading}
@@ -227,7 +288,7 @@ export default function MediaLibraryPage() {
       )}
 
       {/* Media Items Grid */}
-      {mediaItems.length === 0 && !loading ? (
+      {getFilteredMediaItems().length === 0 && !loading ? (
         <div style={{
           background: '#f8f9fa',
           border: '1px solid #e9ecef',
@@ -260,9 +321,8 @@ export default function MediaLibraryPage() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-          {mediaItems.map((item) => {
+          {getFilteredMediaItems().map((item) => {
             const externalLinks = getExternalLinks(item.ExternalLinks);
-            
             return (
               <div key={item.Id} style={{
                 background: '#fff',
@@ -271,20 +331,42 @@ export default function MediaLibraryPage() {
                 padding: 20,
                 boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
                 transition: 'transform 0.2s, box-shadow 0.2s',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                minHeight: 180,
+                gap: 20,
               }}
-                onClick={() => navigate(`/media-library/${item.Id}`)}
+                onClick={() => navigate(`/media-library/${item.Name}`)}
               >
-                <div style={{ marginBottom: 12 }}>
-                  <h3 style={{ 
-                    marginBottom: 4, 
+                {/* Cover image left-aligned */}
+                {item.CoverImageUrl && (
+                  <img
+                    src={item.CoverImageUrl}
+                    alt={item.DisplayName + ' cover'}
+                    style={{
+                      width: 90,
+                      height: 120,
+                      objectFit: 'cover',
+                      borderRadius: 8,
+                      boxShadow: '0 2px 8px rgba(42,77,143,0.10)',
+                      flexShrink: 0,
+                    }}
+                    onError={e => (e.currentTarget.style.display = 'none')}
+                  />
+                )}
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <h3 style={{
+                    marginBottom: 4,
                     color: '#2a4d8f',
                     fontSize: 18,
-                    fontWeight: 600
+                    fontWeight: 600,
+                    textAlign: 'left',
+                    marginTop: 0,
                   }}>
                     {item.DisplayName}
                   </h3>
-                  
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <span style={{
                       background: '#e3f2fd',
@@ -294,7 +376,11 @@ export default function MediaLibraryPage() {
                       fontSize: 12,
                       fontWeight: 500
                     }}>
-                      {item.MediaType}
+                      {(() => {
+                        const mt = normalizeMediaType(item.MediaType);
+                        const found = MEDIA_TYPES.find(t => t.value === mt.toLowerCase());
+                        return found ? found.label : mt;
+                      })()}
                     </span>
                     {item.Genre && (
                       <span style={{
@@ -305,63 +391,48 @@ export default function MediaLibraryPage() {
                         fontSize: 12,
                         fontWeight: 500
                       }}>
-                        {item.Genre}
+                        {normalizeGenre(item.Genre)}
                       </span>
                     )}
                   </div>
-                </div>
-                
-                {item.Description && (
-                  <p style={{ 
-                    color: '#666',
-                    fontSize: 14,
-                    marginBottom: 12,
-                    lineHeight: 1.4,
-                    display: '-webkit-box',
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden'
-                  }}>
-                    {item.Description}
-                  </p>
-                )}
-
-                {/* External Links */}
-                {Object.keys(externalLinks).length > 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {Object.entries(externalLinks).slice(0, 2).map(([key, url]) => (
-                        <a
-                          key={key}
-                          href={url as string}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{
-                            color: '#2a4d8f',
-                            fontSize: 12,
-                            textDecoration: 'none',
-                            background: '#f8f9fa',
-                            padding: '2px 6px',
-                            borderRadius: 3,
-                            border: '1px solid #e9ecef'
-                          }}
-                        >
-                          {key === 'url' ? 'Link' : key}
-                        </a>
-                      ))}
+                  {/* Description omitted for cleaner card UI */}
+                  {/* External Links */}
+                  {Object.keys(externalLinks).length > 0 && (
+                    <div style={{ marginBottom: 12, width: '100%' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {Object.entries(externalLinks).slice(0, 2).map(([key, url]) => (
+                          <a
+                            key={key}
+                            href={url as string}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              color: '#2a4d8f',
+                              fontSize: 12,
+                              textDecoration: 'none',
+                              background: '#f8f9fa',
+                              padding: '2px 6px',
+                              borderRadius: 3,
+                              border: '1px solid #e9ecef'
+                            }}
+                          >
+                            {key === 'url' ? 'Link' : key}
+                          </a>
+                        ))}
+                      </div>
                     </div>
+                  )}
+                  <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'left' }}>
+                    Added {formatDate(item.CreationDate)}
                   </div>
-                )}
-
-                <div style={{ fontSize: 12, color: '#999', marginTop: 'auto' }}>
-                  Added {formatDate(item.CreationDate)}
                 </div>
               </div>
             );
           })}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

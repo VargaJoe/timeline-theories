@@ -195,3 +195,6 @@ dist/
 .pnp.*
 .github/*.md
 **/.vite/
+**/example-*.json
+docs/temp-*.md
+

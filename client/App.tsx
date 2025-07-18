@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
-import { LoginButton } from './components/LoginButton';
+import { TopNavigationBar } from './components/TopNavigationBar';
 import { AuthenticatedContent } from './components/AuthenticatedContent';
 
 import { TimelineCreatePage } from './pages/TimelineCreatePage';
@@ -41,27 +41,9 @@ function App() {
       <OidcTokenInjector />
       <BrowserRouter>
         <ScrollToTopOnRouteChange />
-        <div className="app-container">
-          <div className="app-root">
-            {/* Top Navigation Bar */}
-            <nav className="top-nav">
-              <div className="nav-left">
-                <span className="site-logo">Timeline Theories</span>
-                <ul className="nav-menu">
-                  <li><a href="/timelines">Timelines</a></li>
-                  <li><a href="/media-library">Media Library</a></li>
-                </ul>
-              </div>
-              <div className="nav-right">
-                <LoginButton />
-              </div>
-            </nav>
-            {/* Banner/Header Row */}
-            <header className="site-banner">
-              {/* Banner image can be added via CSS background-image later */}
-              <h1 className="site-title">Timeline Theories</h1>
-              <p className="site-subtitle">Chronological timelines for every universe</p>
-            </header>
+        <div style={{ minHeight: '100vh', background: '#f8f9fa' }}>
+          <TopNavigationBar />
+          <main>
             <Routes>
               <Route path="/timelines" element={<TimelineListPage />} />
               <Route path="/timelines/:id" element={<TimelineViewPage />} />
@@ -86,7 +68,7 @@ function App() {
               <Route path="/timelines/:timelineId/add-entry" element={<TimelineEntryCreatePage />} />
               <Route path="*" element={<Navigate to="/timelines" />} />
             </Routes>
-          </div>
+          </main>
         </div>
       </BrowserRouter>
     </AppProviders>

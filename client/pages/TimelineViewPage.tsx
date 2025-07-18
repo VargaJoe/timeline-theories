@@ -1,58 +1,92 @@
 import { useState, useEffect } from 'react';
-import DOMPurify from 'dompurify';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
-import { TraktImportDialog } from '../components/TraktImportDialog';
 import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
+import { TraktImportDialog } from '../components/TraktImportDialog';
+import { PageHeader } from '../components/PageHeader';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
-import { deleteTimeline } from '../services/timelineService';
 import { timelinesPath } from '../projectPaths';
 import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
+import { loadBackgroundImage } from '../services/sensenet';
+import { siteConfig } from '../configuration';
 import type { Timeline } from '../services/timelineService';
 import type { TimelineEntry } from '../services/timelineEntryService';
-// DropResult and other types are not exported as types in some versions, so use 'any' as a workaround for build compatibility
-type DropResult = any;
-type DraggableProvided = any;
-type DraggableStateSnapshot = any;
-type DroppableProvided = any;
-// import { MediaLibraryService } from '../services/mediaLibraryService';
-// import type { MediaItem } from '../services/mediaLibraryService';
+
+// Type definitions for react-beautiful-dnd to avoid TypeScript any warnings
+interface DropResult {
+  destination?: {
+    index: number;
+    droppableId: string;
+  } | null;
+  source: {
+    index: number;
+    droppableId: string;
+  };
+}
+
+interface DraggableProvided {
+  innerRef: (element: HTMLElement | null) => void;
+  draggableProps: Record<string, unknown>;
+  dragHandleProps: Record<string, unknown>;
+}
+
+interface DraggableStateSnapshot {
+  isDragging: boolean;
+}
+
+interface DroppableProvided {
+  innerRef: (element: HTMLElement | null) => void;
+  droppableProps: Record<string, unknown>;
+  placeholder: React.ReactElement;
+}
 
 export const TimelineViewPage: React.FC = () => {
+  const DESCRIPTION_ROW_LIMIT = 3;
+  const [showFullDescription, setShowFullDescription] = useState(false);
+  const { id: timelineName } = useParams<{ id: string }>();
+  const { oidcUser } = useOidcAuthentication();
+
+  console.log('[TimelineViewPage] Component mounted with timelineName:', timelineName);
+
+  const [timeline, setTimeline] = useState<Timeline | null>(null);
+  const [entries, setEntries] = useState<TimelineEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
+  const [entriesLoading, setEntriesLoading] = useState(false);
+  const [entriesError] = useState<string | null>(null);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [pendingOrder, setPendingOrder] = useState<TimelineEntry[] | null>(null);
+  const [showBulkUpdateDialog, setShowBulkUpdateDialog] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editSortOrder, setEditSortOrder] = useState<'chronological' | 'release'>('chronological');
-  const [editError, setEditError] = useState('');
   const [editLoading, setEditLoading] = useState(false);
-  const { oidcUser } = useOidcAuthentication();
-  const [entries, setEntries] = useState<TimelineEntry[]>([]);
-  const [reorderMode, setReorderMode] = useState(false);
-  const [pendingOrder, setPendingOrder] = useState<TimelineEntry[] | null>(null);
-  // const [mediaMap, setMediaMap] = useState<Record<number, MediaItem>>({});
-  const [entriesLoading, setEntriesLoading] = useState(true);
-  const { id: timelineName } = useParams();
-  const [timeline, setTimeline] = useState<Timeline | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [showFullDescription, setShowFullDescription] = useState(false);
-  const [showBulkUpdateDialog, setShowBulkUpdateDialog] = useState(false);
+  const [editError, setEditError] = useState('');
 
+  // Load timeline data
   useEffect(() => {
-    if (!timelineName) return;
+    console.log('[TimelineViewPage] useEffect triggered, timelineName:', timelineName);
+    if (!timelineName) {
+      console.log('[TimelineViewPage] No timelineName, returning early');
+      return;
+    }
+    
     const loadTimeline = async () => {
       try {
         setLoading(true);
+        const decodedTimelineName = decodeURIComponent(timelineName);
+        console.log(`[TimelineViewPage] Loading timeline: ${timelineName} -> ${decodedTimelineName}`);
         // Load the specific timeline by name (path segment)
-        const parentPath = `${timelinesPath}/${timelineName}`;
+        const parentPath = `${timelinesPath}/${decodedTimelineName}`;
+        console.log(`[TimelineViewPage] Parent path: ${parentPath}`);
         const result = await repository.load({
           idOrPath: parentPath,
           oDataOptions: {
-            select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
+            select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
           },
         });
         // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
@@ -70,7 +104,7 @@ export const TimelineViewPage: React.FC = () => {
         }
         setTimeline({
           id: String(result.d.Id),
-          name: result.d.Name,
+          name: decodedTimelineName, // Use the decoded timeline name
           displayName: result.d.DisplayName,
           description: result.d.Description || '',
           sort_order: sortOrder,
@@ -81,9 +115,16 @@ export const TimelineViewPage: React.FC = () => {
         setEditSortOrder(sortOrder);
         // Load timeline entries and media items
         setEntriesLoading(true);
-        const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id), parentPath);
-        setEntries(entries);
-        setEntriesLoading(false);
+        try {
+          const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id), parentPath);
+          setEntries(entries);
+          console.log(`[TimelineViewPage] Successfully loaded ${entries.length} entries`);
+        } catch (entriesError) {
+          console.error('[TimelineViewPage] Error loading entries:', entriesError);
+          setError('Failed to load timeline entries: ' + (entriesError instanceof Error ? entriesError.message : String(entriesError)));
+        } finally {
+          setEntriesLoading(false);
+        }
       } catch (err) {
         let message = 'Failed to load timeline';
         if (err && typeof err === 'object') {
@@ -103,89 +144,262 @@ export const TimelineViewPage: React.FC = () => {
     loadTimeline();
   }, [timelineName]);
 
+  // Load background image from SenseNet
+  useEffect(() => {
+    const loadBackground = async () => {
+      try {
+        const imageUrl = await loadBackgroundImage(siteConfig.headerBackgroundImagePath);
+        if (imageUrl) {
+          console.log('[TimelineViewPage] Background image loaded:', imageUrl);
+          
+          // Test if the image can be loaded by creating an Image object
+          const testImage = new Image();
+          testImage.onload = () => {
+            console.log('[TimelineViewPage] Background image successfully tested');
+            setBackgroundImageUrl(imageUrl);
+          };
+          testImage.onerror = (error) => {
+            console.error('[TimelineViewPage] Background image failed to load:', error);
+            console.log('[TimelineViewPage] Falling back to gradient background');
+            setBackgroundImageUrl(null); // This will trigger gradient fallback in PageHeader
+          };
+          testImage.src = imageUrl;
+        } else {
+          console.warn('[TimelineViewPage] No background image URL received, using gradient fallback');
+          setBackgroundImageUrl(null); // This will trigger gradient fallback in PageHeader
+        }
+      } catch (error) {
+        console.error('[TimelineViewPage] Error loading background image:', error);
+        console.log('[TimelineViewPage] Using gradient fallback due to error');
+        setBackgroundImageUrl(null); // This will trigger gradient fallback in PageHeader
+      }
+    };
+
+    loadBackground();
+  }, []);
+
+  const toggleReorderMode = async () => {
+    if (reorderMode && pendingOrder) {
+      // Save the new order
+      const updates = pendingOrder.map((entry, index) => ({
+        id: entry.id,
+        position: index + 1
+      }));
+      
+      try {
+        await Promise.all(
+          updates.map(update =>
+            repository.patch({
+              idOrPath: update.id,
+              content: { Position: update.position }
+            })
+          )
+        );
+        setEntries(pendingOrder);
+        setPendingOrder(null);
+      } catch (error) {
+        console.error('Error saving display order:', error);
+      }
+    } else {
+      setPendingOrder([...entries]);
+    }
+    setReorderMode(!reorderMode);
+  };
+
+  const onDragEnd = (result: DropResult) => {
+    if (!result.destination || !pendingOrder) return;
+
+    const newEntries = Array.from(pendingOrder);
+    const [reorderedEntry] = newEntries.splice(result.source.index, 1);
+    newEntries.splice(result.destination.index, 0, reorderedEntry);
+
+    setPendingOrder(newEntries);
+  };
+
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: 40 }}>Loading timeline...</div>;
+    return (
+      <div style={{ padding: 24, textAlign: 'center' }}>
+        <div style={{ color: '#666' }}>Loading timeline...</div>
+      </div>
+    );
   }
 
   if (error) {
     return (
-      <div style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ color: 'red', marginBottom: 16 }}>{error}</div>
-        <Link to="/timelines" style={{ color: '#2a4d8f', textDecoration: 'none' }}>← Back to timelines</Link>
+      <div style={{ padding: 24, textAlign: 'center' }}>
+        <div style={{ color: '#dc3545', marginBottom: 16 }}>{error}</div>
+        <Link 
+          to="/timelines" 
+          style={{ 
+            color: '#007bff', 
+            textDecoration: 'none' 
+          }}
+        >
+          ← Back to Timelines
+        </Link>
       </div>
     );
   }
 
   if (!timeline) {
     return (
-      <div style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ marginBottom: 16 }}>Timeline not found</div>
-        <Link to="/timelines" style={{ color: '#2a4d8f', textDecoration: 'none' }}>← Back to timelines</Link>
+      <div style={{ padding: 24, textAlign: 'center' }}>
+        <div style={{ color: '#666' }}>Timeline not found</div>
+        <Link 
+          to="/timelines" 
+          style={{ 
+            color: '#007bff', 
+            textDecoration: 'none' 
+          }}
+        >
+          ← Back to Timelines
+        </Link>
       </div>
     );
   }
 
-  // Handle drag end
-  const onDragEnd = (result: DropResult) => {
-    if (!result.destination) return;
-    const sourceIdx = result.source.index;
-    const destIdx = result.destination.index;
-    if (!pendingOrder) return;
-    const reordered = Array.from(pendingOrder);
-    const [removed] = reordered.splice(sourceIdx, 1);
-    reordered.splice(destIdx, 0, removed);
-    setPendingOrder(reordered);
-  };
-
-  // Save new order to backend
-  const saveOrder = async () => {
-    if (!pendingOrder) return;
-    // Only update if order changed
-    const changed = pendingOrder.some((entry, idx) => entry.position !== idx + 1);
-    if (!changed) {
-      setReorderMode(false);
-      setPendingOrder(null);
-      return;
-    }
-    // Prepare updates
-    try {
-      // Call a new service method to update positions in bulk
-      await TimelineEntryService.updateEntryPositions(
-        pendingOrder.map((entry, idx) => ({ ...entry, position: idx + 1 }))
-      );
-      setEntries(pendingOrder.map((entry, idx) => ({ ...entry, position: idx + 1 })));
-      setReorderMode(false);
-      setPendingOrder(null);
-    } catch {
-      alert('Failed to save new order.');
-    }
-  };
-
-  // Toggle reorder mode
-  const toggleReorderMode = () => {
-    if (!reorderMode) {
-      setPendingOrder([...entries]);
-      setReorderMode(true);
-    } else {
-      saveOrder();
-    }
-  };
-
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto', padding: 20 }}>
-      <div style={{ marginBottom: 24 }}>
-        <Link to="/timelines" style={{ color: '#2a4d8f', textDecoration: 'none', fontSize: 14 }}>
-          ← Back to timelines
-        </Link>
-      </div>
-      <div style={{
-        background: '#fff',
-        borderRadius: 12,
-        boxShadow: '0 2px 12px #0001',
-        padding: 32
-      }}>
-        {/* Move Trakt Import inside admin buttons below */}
-        {editMode ? (
+    <>
+      <PageHeader 
+        title={timeline.displayName || timeline.name || 'Timeline'}
+        subtitle="Timeline Entries"
+        backgroundImage={backgroundImageUrl || undefined}
+        overlayOpacity={siteConfig.headerOverlayOpacity}
+      >
+        {/* Header Actions */}
+        {oidcUser && (
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setEditMode(m => !m)}
+              title={editMode ? 'Cancel Edit' : 'Edit Timeline'}
+              style={{ 
+                background: '#007bff', 
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: 8, 
+                padding: '12px', 
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+            <Link 
+              to={`/timelines/${timelineName}/add-entry`} 
+              title="Add Timeline Entry"
+              style={{ 
+                background: '#28a745', 
+                color: '#fff', 
+                padding: '12px', 
+                borderRadius: 8, 
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </Link>
+            <button
+              onClick={toggleReorderMode}
+              title={reorderMode ? 'Save New Order' : 'Reorder Entries'}
+              style={{
+                background: reorderMode ? '#dc3545' : '#6c757d',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setShowBulkUpdateDialog(true)}
+              title="Bulk Update Media Items"
+              style={{
+                background: '#fd7e14',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </button>
+            <div title="Import from Trakt List" style={{ display: 'inline-block' }}>
+              <TraktImportDialog
+                timelineName={timeline.name}
+                onImportComplete={() => {
+                  setEntriesLoading(true);
+                  TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
+                    .then(setEntries)
+                    .finally(() => setEntriesLoading(false));
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Edit Form in Header */}
+        {editMode && (
           <form
             onSubmit={async e => {
               e.preventDefault();
@@ -209,89 +423,90 @@ export const TimelineViewPage: React.FC = () => {
                 setEditLoading(false);
               }
             }}
-            style={{ marginBottom: 24 }}
+            style={{ marginTop: 24, background: 'rgba(255,255,255,0.95)', padding: 20, borderRadius: 12 }}
           >
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontWeight: 500 }}>Title</label>
+              <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Title</label>
               <input
+                type="text"
                 value={editTitle}
                 onChange={e => setEditTitle(e.target.value)}
                 required
-                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
-              />
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>Description</label>
-              <ReactQuill
-                value={editDescription}
-                onChange={setEditDescription}
-                theme="snow"
-                style={{ background: '#fff', borderRadius: 6 }}
-                modules={{
-                  toolbar: [
-                    [{ header: [1, 2, false] }],
-                    ['bold', 'italic', 'underline', 'strike'],
-                    [{ list: 'ordered' }, { list: 'bullet' }],
-                    ['link', 'clean']
-                  ]
+                style={{
+                  width: '100%',
+                  padding: 8,
+                  border: '1px solid #ddd',
+                  borderRadius: 4,
+                  boxSizing: 'border-box'
                 }}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontWeight: 500 }}>Sort Order</label>
+              <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Description</label>
+              <textarea
+                value={editDescription}
+                onChange={e => setEditDescription(e.target.value)}
+                rows={3}
+                style={{
+                  width: '100%',
+                  padding: 8,
+                  border: '1px solid #ddd',
+                  borderRadius: 4,
+                  resize: 'vertical',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Sort Order</label>
               <select
                 value={editSortOrder}
                 onChange={e => setEditSortOrder(e.target.value as 'chronological' | 'release')}
-                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+                style={{
+                  width: '100%',
+                  padding: 8,
+                  border: '1px solid #ddd',
+                  borderRadius: 4,
+                  boxSizing: 'border-box'
+                }}
               >
-                <option value="chronological">Chronological Order</option>
+                <option value="chronological">Chronological</option>
                 <option value="release">Release Order</option>
               </select>
             </div>
-            {editError && <div style={{ color: '#dc3545', marginBottom: 8 }}>{editError}</div>}
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button type="submit" disabled={editLoading} style={{ background: '#2a4d8f', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 20px', fontWeight: 600, fontSize: 16, cursor: editLoading ? 'not-allowed' : 'pointer' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="submit" disabled={editLoading} style={{
+                background: '#007bff',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                padding: '8px 16px',
+                cursor: editLoading ? 'not-allowed' : 'pointer',
+                opacity: editLoading ? 0.6 : 1
+              }}>
                 {editLoading ? 'Saving...' : 'Save'}
               </button>
-              <button type="button" onClick={() => setEditMode(false)} style={{ background: '#ccc', color: '#333', border: 'none', borderRadius: 6, padding: '8px 20px', fontWeight: 600, fontSize: 16, cursor: 'pointer' }}>Cancel</button>
+              <button type="button" onClick={() => setEditMode(false)} style={{
+                background: '#6c757d',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                padding: '8px 16px',
+                cursor: 'pointer'
+              }}>
+                Cancel
+              </button>
             </div>
-          </form>
-        ) : (
-          <>
-            <h1 style={{ marginBottom: 16, color: '#2a4d8f' }}>{timeline.displayName}</h1>
-            {timeline.description && (
-              <div style={{ color: '#666', marginBottom: 24, lineHeight: 1.6, fontSize: 16 }}>
-                <div
-                  dangerouslySetInnerHTML={{
-                    __html: DOMPurify.sanitize(
-                      showFullDescription || timeline.description.length <= 600
-                        ? timeline.description
-                        : timeline.description.slice(0, 600) + '...'
-                    )
-                  }}
-                />
-                {timeline.description.length > 300 && (
-                  <button
-                    onClick={() => setShowFullDescription(v => !v)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#2a4d8f',
-                      cursor: 'pointer',
-                      fontWeight: 500,
-                      marginTop: 4,
-                      padding: 0,
-                      fontSize: 15
-                    }}
-                  >
-                    {showFullDescription ? 'Show less' : 'Show more'}
-                  </button>
-                )}
+            {editError && (
+              <div style={{ color: '#dc3545', fontSize: 14, marginTop: 8 }}>
+                {editError}
               </div>
             )}
-          </>
+          </form>
         )}
-        <div style={{ display: 'flex', gap: 24, marginBottom: 32, fontSize: 14, color: '#888' }}>
+
+        {/* Timeline Metadata in Header */}
+        <div style={{ marginTop: 24, display: 'flex', gap: 24, fontSize: 14, color: 'rgba(255,255,255,0.9)' }}>
           <div>
             <strong>Sort Order:</strong> {timeline.sort_order === 'chronological' ? 'Chronological' : 'Release Order'}
           </div>
@@ -301,255 +516,463 @@ export const TimelineViewPage: React.FC = () => {
             </div>
           )}
         </div>
-        {oidcUser && (
-          <div style={{ marginBottom: 24, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => setEditMode(m => !m)}
-              style={{ 
-                background: '#007bff', 
-                color: '#fff', 
-                border: 'none', 
-                borderRadius: 6, 
-                padding: '8px 16px', 
-                fontWeight: 500, 
-                fontSize: 16, 
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8
-              }}
-            >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              {editMode ? 'Cancel' : 'Edit'}
-            </button>
-            <Link 
-              to={`/timelines/${timelineName}/add-entry`} 
-              style={{ 
-                background: '#2a4d8f', 
-                color: '#fff', 
-                padding: '8px 16px', 
-                borderRadius: 6, 
-                textDecoration: 'none', 
-                fontWeight: 500, 
+      </PageHeader>
+
+      {/* Main Content */}
+      <div style={{ 
+        maxWidth: 1200, 
+        margin: '0 auto', 
+        padding: '0 20px 24px 20px'
+      }}>
+        {/* Debug Info */}
+        <div className='hidden' style={{ background: '#f8f9fa', padding: 12, marginBottom: 16, fontSize: 12, fontFamily: 'monospace' }}>
+          <strong>Debug:</strong> timelineName={timelineName}, timeline.name={timeline?.name}, entries.length={entries.length}, entriesLoading={entriesLoading.toString()}, error={error}
+        </div>
+        {/* Navigation */}
+        <div>
+          <Link 
+            to="/timelines" 
+            style={{ 
+              color: '#007bff', 
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 14
+            }}
+          >
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to Timelines
+          </Link>
+        </div>
+
+        {/* Timeline Description */}
+        {timeline?.description && !editMode && (
+        (() => {
+          // Create a temporary element to count lines
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = timeline.description;
+          tempDiv.style.position = 'absolute';
+          tempDiv.style.visibility = 'hidden';
+          tempDiv.style.fontSize = '16px';
+          tempDiv.style.lineHeight = '1.6';
+          tempDiv.style.width = '900px';
+          document.body.appendChild(tempDiv);
+          const lineHeight = parseFloat(getComputedStyle(tempDiv).lineHeight);
+          const totalHeight = tempDiv.offsetHeight;
+          const numLines = Math.round(totalHeight / lineHeight);
+          document.body.removeChild(tempDiv);
+          const isDescriptionLong = numLines > DESCRIPTION_ROW_LIMIT;
+          return (
+            <div style={{
+              // maxWidth: '900px',
+              margin: '0 auto 32px auto',
+              padding: '0'
+            }}>
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.95)',
+                border: '1px solid rgba(0, 0, 0, 0.1)',
+                borderRadius: 12,
+                padding: 24,
                 fontSize: 16,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8
-              }}
-            >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Entry
-            </Link>
-            <button
-              onClick={toggleReorderMode}
-              style={{
-                background: reorderMode ? '#28a745' : '#ffc107',
-                color: reorderMode ? '#fff' : '#333',
-                padding: '8px 16px',
-                borderRadius: 6,
-                border: 'none',
-                fontWeight: 500,
-                fontSize: 16,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8
-              }}
-            >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-              </svg>
-              {reorderMode ? 'Save Order' : 'Reorder'}
-            </button>
-            <button
-              onClick={() => setShowBulkUpdateDialog(true)}
-              style={{
-                background: '#17a2b8',
-                color: '#fff',
-                padding: '8px 16px',
-                borderRadius: 6,
-                border: 'none',
-                fontWeight: 500,
-                fontSize: 16,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8
-              }}
-            >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Update Media
-            </button>
-            <TraktImportDialog
-              timelineName={timeline.name}
-              onImportComplete={() => {
-                setEntriesLoading(true);
-                TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
-                  .then(setEntries)
-                  .finally(() => setEntriesLoading(false));
-              }}
-            />
-            <button
-              onClick={async () => {
-                if (!timelineName) return;
-                if (window.confirm('Are you sure you want to delete this timeline? This action cannot be undone.')) {
-                  try {
-                    await deleteTimeline(timelineName);
-                    window.location.href = '/timelines';
-                  } catch {
-                    alert('Failed to delete timeline. Please try again.');
+                lineHeight: 1.6,
+                color: '#374151',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                backdropFilter: 'blur(10px)'
+              }}>
+                <div style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: '#6b7280',
+                  marginBottom: 8,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Description
+                </div>
+                <div
+                  style={
+                    showFullDescription || !isDescriptionLong
+                      ? {}
+                      : {
+                          display: '-webkit-box',
+                          WebkitLineClamp: DESCRIPTION_ROW_LIMIT,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }
                   }
-                }
-              }}
-              style={{ 
-                background: '#dc3545', 
-                color: '#fff', 
-                border: 'none', 
-                borderRadius: 6, 
-                padding: '8px 16px', 
-                fontWeight: 500, 
-                fontSize: 16, 
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8
-              }}
-            >
-              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              Delete
-            </button>
+                  dangerouslySetInnerHTML={{ __html: timeline.description }}
+                />
+                {isDescriptionLong && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFullDescription(v => !v)}
+                    style={{
+                      marginTop: 12,
+                      background: '#e5e7eb',
+                      color: '#374151',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '6px 16px',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: 500
+                    }}
+                  >
+                    {showFullDescription ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()
+        )}
+
+        {reorderMode && (
+          <div style={{
+            background: '#fff3cd',
+            border: '1px solid #ffeaa7',
+            borderRadius: 8,
+            padding: 16,
+            marginBottom: 24,
+            fontSize: 14
+          }}>
+            <strong>Reorder Mode:</strong> Drag and drop entries to reorder them, then click "Save New Order" in the header.
           </div>
         )}
-        <h3 style={{ marginBottom: 16 }}>Timeline Entries</h3>
+
+        {/* Timeline Entries */}
         {entriesLoading ? (
-          <div>Loading entries...</div>
+          <div style={{ textAlign: 'center', padding: 32, color: '#666' }}>
+            Loading timeline entries...
+          </div>
+        ) : entriesError ? (
+          <div style={{ textAlign: 'center', padding: 32, color: '#dc3545' }}>
+            {entriesError}
+          </div>
         ) : entries.length === 0 ? (
-          <div style={{ color: '#888', fontStyle: 'italic' }}>No entries yet.</div>
+          <div style={{ textAlign: 'center', padding: 32, color: '#666' }}>
+            <p style={{ marginBottom: 16 }}>No entries in this timeline yet.</p>
+            {oidcUser && (
+              <Link 
+                to={`/timelines/${timelineName}/add-entry`}
+                style={{
+                  background: '#007bff',
+                  color: '#fff',
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  textDecoration: 'none',
+                  display: 'inline-block'
+                }}
+              >
+                Add First Entry
+              </Link>
+            )}
+          </div>
         ) : reorderMode && pendingOrder ? (
           <DragDropContext onDragEnd={onDragEnd}>
             <Droppable droppableId="timeline-entries">
               {(provided: DroppableProvided) => (
-                <table
+                <div
                   ref={provided.innerRef}
                   {...provided.droppableProps}
-                  style={{ width: '100%', borderCollapse: 'collapse', background: '#f8f9fa', borderRadius: 8 }}
+                  style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                    gap: 16,
+                    maxWidth: '1200px',
+                    margin: '0 auto',
+                    padding: '0'
+                  }}
                 >
-                  <thead>
-                    <tr style={{ background: '#e9ecef' }}>
-                      <th style={{ padding: 8, textAlign: 'left' }}>#</th>
-                      <th style={{ padding: 8, textAlign: 'left' }}>Media</th>
-                      <th style={{ padding: 8, textAlign: 'left' }}>Title</th>
-                      <th style={{ padding: 8, textAlign: 'left' }}>Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pendingOrder.map((entry, idx) => {
-                      const media = entry.mediaItem;
-                      const isBroken = !media || !media.Id;
-                      const displayName = entry?.displayName || 'Unknown';
-                      const coverUrl = !isBroken ? (media?.CoverImageUrl || '') : '';
-                      return (
-                        <Draggable key={entry.id} draggableId={entry.id} index={idx}>
-                          {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
-                            <tr
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              style={{
-                                borderBottom: '1px solid #e9ecef',
-                                background: snapshot.isDragging ? '#d1ecf1' : isBroken ? '#fff3cd' : undefined,
-                                ...provided.draggableProps.style
-                              }}
-                            >
-                              <td style={{ padding: 8 }}>{idx + 1}</td>
-                              <td style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                                {isBroken ? (
-                                  <div style={{ width: 48, height: 72, background: '#f8d7da', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#721c24', fontWeight: 600, fontSize: 12, border: '1px solid #f5c6cb' }}>
-                                    !
-                                  </div>
-                                ) : coverUrl ? (
+                  {pendingOrder.map((entry, idx) => {
+                    return (
+                      <Draggable key={entry.id} draggableId={entry.id} index={idx}>
+                        {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            {...provided.dragHandleProps}
+                            style={{
+                              background: snapshot.isDragging ? 'rgba(229, 246, 253, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                              borderRadius: 12,
+                              border: `2px solid ${snapshot.isDragging ? '#3b82f6' : 'rgba(0, 0, 0, 0.1)'}`,
+                              boxShadow: snapshot.isDragging ? '0 8px 24px rgba(59, 130, 246, 0.25)' : '0 1px 3px rgba(0, 0, 0, 0.1)',
+                              cursor: 'grab',
+                              transition: 'all 0.2s ease',
+                              overflow: 'hidden',
+                              backdropFilter: 'blur(10px)',
+                              position: 'relative',
+                              ...(provided.draggableProps.style as React.CSSProperties || {})
+                            }}
+                          >
+                            {/* Drag Handle */}
+                            <div style={{
+                              position: 'absolute',
+                              top: 12,
+                              right: 12,
+                              background: snapshot.isDragging ? '#3b82f6' : '#9ca3af',
+                              color: '#fff',
+                              borderRadius: 6,
+                              padding: '4px 8px',
+                              fontSize: 16,
+                              zIndex: 1,
+                              cursor: 'grab'
+                            }}>
+                              ⋮⋮
+                            </div>
+
+                            {/* Position Badge */}
+                            <div style={{
+                              position: 'absolute',
+                              top: 12,
+                              left: 12,
+                              background: 'linear-gradient(135deg, #3b82f6, #1e40af)',
+                              color: '#fff',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              padding: '4px 8px',
+                              borderRadius: 6,
+                              minWidth: 24,
+                              textAlign: 'center',
+                              zIndex: 1,
+                              boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)'
+                            }}>
+                              {idx + 1}
+                            </div>
+
+                            {/* Cover Image */}
+                            <div style={{
+                              height: 160,
+                              position: 'relative',
+                              overflow: 'hidden'
+                            }}>
+                              {entry.mediaItem?.CoverImageUrl ? (
+                                <Link
+                                  to={`/media-library/${entry.mediaItem.Name}`}
+                                  style={{ display: 'block', width: '100%', height: '100%' }}
+                                  title={entry.mediaItem.DisplayName}
+                                >
                                   <img
-                                    src={coverUrl}
-                                    alt={displayName}
-                                    style={{ width: 48, height: 72, objectFit: 'cover', borderRadius: 4, boxShadow: '0 1px 4px #0002' }}
+                                    src={entry.mediaItem.CoverImageUrl}
+                                    alt={entry.mediaItem.DisplayName}
+                                    style={{ 
+                                      width: '100%',
+                                      height: '100%',
+                                      objectFit: 'cover'
+                                    }}
                                   />
-                                ) : (
-                                  <div style={{ width: 48, height: 72, background: '#ddd', borderRadius: 4 }} />
-                                )}
-                              </td>
-                              <td style={{ padding: 8 }}>
-                                <span style={{ fontWeight: 500, color: isBroken ? '#b94a48' : undefined }}>
-                                  {displayName}
-                                </span>
-                              </td>
-                              <td style={{ padding: 8 }}>{entry.notes || ''}</td>
-                            </tr>
-                          )}
-                        </Draggable>
-                      );
-                    })}
-                    {provided.placeholder}
-                  </tbody>
-                </table>
+                                </Link>
+                              ) : (
+                                <div style={{ 
+                                  width: '100%',
+                                  height: '100%',
+                                  background: 'linear-gradient(135deg, #f3f4f6, #e5e7eb)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: '#9ca3af'
+                                }}>
+                                  <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Content */}
+                            <div style={{ padding: 16 }}>
+                              <h4 style={{ 
+                                fontSize: 16, 
+                                fontWeight: 600, 
+                                color: '#1f2937',
+                                margin: '0 0 8px 0',
+                                lineHeight: '1.4',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden'
+                              }}>
+                                {entry.mediaItem ? (
+                                  <Link
+                                    to={`/media-library/${entry.mediaItem.Name}`}
+                                    style={{ color: '#1f2937', textDecoration: 'none' }}
+                                    title={entry.mediaItem.DisplayName}
+                                  >
+                                    {entry.mediaItem.DisplayName}
+                                  </Link>
+                                ) : 'Unknown Media'}
+                              </h4>
+                              {entry.notes && (
+                                <p style={{ 
+                                  color: '#6b7280', 
+                                  margin: 0, 
+                                  fontSize: 14,
+                                  lineHeight: 1.5,
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden'
+                                }}>
+                                  {entry.notes}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </Draggable>
+                    );
+                  })}
+                  {provided.placeholder}
+                </div>
               )}
             </Droppable>
           </DragDropContext>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', background: '#f8f9fa', borderRadius: 8 }}>
-            <thead>
-              <tr style={{ background: '#e9ecef' }}>
-                <th style={{ padding: 8, textAlign: 'left' }}>#</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Media</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Title</th>
-                <th style={{ padding: 8, textAlign: 'left' }}>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => {
-                const media = entry.mediaItem;
-                const isBroken = !media || !media.Id;
-                const displayName = entry?.displayName || 'Unknown';
-                const coverUrl = !isBroken ? (media?.CoverImageUrl || '') : '';
-                return (
-                  <tr
-                    key={entry.id}
-                    style={{ borderBottom: '1px solid #e9ecef', background: isBroken ? '#fff3cd' : undefined }}
-                  >
-                    <td style={{ padding: 8 }}>{entry.position}</td>
-                    <td style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {isBroken ? (
-                        <div style={{ width: 48, height: 72, background: '#f8d7da', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#721c24', fontWeight: 600, fontSize: 12, border: '1px solid #f5c6cb' }}>
-                          !
-                        </div>
-                      ) : coverUrl ? (
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: 16,
+            maxWidth: '1200px',
+            margin: '0 auto',
+            padding: '0'
+          }}>
+            {entries.map((entry) => {
+              return (
+                <div
+                  key={entry.id}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    borderRadius: 12,
+                    border: '1px solid rgba(0, 0, 0, 0.1)',
+                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                    transition: 'all 0.2s ease',
+                    overflow: 'hidden',
+                    backdropFilter: 'blur(10px)',
+                    position: 'relative'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+                    e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.1)';
+                    e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                  }}
+                >
+                  {/* Position Badge */}
+                  <div style={{
+                    position: 'absolute',
+                    top: 12,
+                    left: 12,
+                    background: 'linear-gradient(135deg, #3b82f6, #1e40af)',
+                    color: '#fff',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    minWidth: 24,
+                    textAlign: 'center',
+                    zIndex: 1,
+                    boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)'
+                  }}>
+                    {entry.position}
+                  </div>
+
+                  {/* Cover Image */}
+                  <div style={{
+                    height: 200,
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}>
+                    {entry.mediaItem?.CoverImageUrl ? (
+                      <Link
+                        to={`/media-library/${entry.mediaItem.Name}`}
+                        style={{ display: 'block', width: '100%', height: '100%' }}
+                        title={entry.mediaItem.DisplayName}
+                      >
                         <img
-                          src={coverUrl}
-                          alt={displayName}
-                          style={{ width: 48, height: 72, objectFit: 'cover', borderRadius: 4, boxShadow: '0 1px 4px #0002' }}
+                          src={entry.mediaItem.CoverImageUrl}
+                          alt={entry.mediaItem.DisplayName}
+                          style={{ 
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.3s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'scale(1.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
                         />
-                      ) : (
-                        <div style={{ width: 48, height: 72, background: '#ddd', borderRadius: 4 }} />
-                      )}
-                    </td>
-                    <td style={{ padding: 8 }}>
-                      <span style={{ fontWeight: 500, color: isBroken ? '#b94a48' : undefined }}>
-                        {displayName}
-                      </span>
-                    </td>
-                    <td style={{ padding: 8 }}>{entry.notes || ''}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </Link>
+                    ) : (
+                      <div style={{ 
+                        width: '100%',
+                        height: '100%',
+                        background: 'linear-gradient(135deg, #f3f4f6, #e5e7eb)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#9ca3af'
+                      }}>
+                        <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div style={{ padding: 16 }}>
+                    <h3 style={{ 
+                      fontSize: 16, 
+                      fontWeight: 600, 
+                      color: '#1f2937',
+                      margin: '0 0 8px 0',
+                      lineHeight: '1.4',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden'
+                    }}>
+                      {entry.mediaItem ? (
+                        <Link
+                          to={`/media-library/${entry.mediaItem.Name}`}
+                          style={{ color: '#1f2937', textDecoration: 'none' }}
+                          title={entry.mediaItem.DisplayName}
+                        >
+                          {entry.mediaItem.DisplayName}
+                        </Link>
+                      ) : 'Unknown Media'}
+                    </h3>
+                    
+                    {entry.notes && (
+                      <p style={{ 
+                        color: '#6b7280', 
+                        margin: 0, 
+                        fontSize: 14,
+                        lineHeight: 1.5,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden'
+                      }}>
+                        {entry.notes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -560,7 +983,8 @@ export const TimelineViewPage: React.FC = () => {
           .filter((item): item is NonNullable<typeof item> => item !== null)
           .map(ref => ({
             Id: ref.Id,
-            DisplayName: ref.DisplayName || ref.Name,
+            Name: ref.Name || '',
+            DisplayName: ref.DisplayName || ref.Name || '',
             Description: '',
             MediaType: '',
             CoverImageUrl: ref.CoverImageUrl,
@@ -573,12 +997,14 @@ export const TimelineViewPage: React.FC = () => {
           // Reload entries after update
           if (updatedCount > 0) {
             setEntriesLoading(true);
-            TimelineEntryService.listTimelineEntries(Number(timeline?.id), `${timelinesPath}/${timeline?.name}`)
-              .then(setEntries)
-              .finally(() => setEntriesLoading(false));
+            if (timeline) {
+              TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
+                .then(setEntries)
+                .finally(() => setEntriesLoading(false));
+            }
           }
         }}
       />
-    </div>
+    </>
   );
 };

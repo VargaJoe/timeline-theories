@@ -64,7 +64,7 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add delete feature for timelines on entries page (with robust path handling in deleteTimeline)
 
 
-### Story 17 - Create Timeline by Trakt List ✅ COMPLETED
+### Story 17 - Create Timeline by my Trakt List
 - [x] Add "Import from Trakt List" option to Timeline Create Page.
 - [x] Allow user to enter a Trakt list URL or select from their lists.
 - [x] Fetch list items via Trakt API.
@@ -81,14 +81,14 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] **FIX: Consistent media item naming using 'title (year)' format for deduplication**
 - [x] **FIX: Correct timeline path usage for consistent content creation**
 
-### Technical Task - Robust Scroll Restoration for SPA ✅ COMPLETED
+### Technical Task - Robust Scroll Restoration for SPA
 - [x] Integrate delayed-scroll-restoration-polyfill via CDN in index.html
 - [x] Set window.history.scrollRestoration = 'manual' in App.tsx
 - [x] Confirm robust scroll restoration on browser navigation (back/forward)
 - [x] Ensure scroll position resets to top on new page navigation (except for back/forward)
 - [x] Commit working solution and update project memory
 
-### Technical Task - Fix Trakt Import Issues ✅ COMPLETED
+### Technical Task - Fix Trakt Import Issues
 - [x] **FIX: Duplicate import buttons** - Removed duplicate import logic from TimelineCreateForm
 - [x] **FIX: Duplicate timeline creation** - TraktImportDialog + TimelineCreateForm both creating timelines
 - [x] **FIX: Missing review functionality** - Users couldn't examine/edit items before import
@@ -98,10 +98,7 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] Add fetchOnly mode to TraktImportDialog for fetch-then-review workflow
 - [x] Consistent button text and UX for different import modes
 
-
-## In Progress Stories
-
-### Story 22 - Bulk Update Media Details for Timeline Entries ✅ COMPLETED
+### Story 22 - Bulk Update Media Details for Timeline Entries
 - [x] Create BulkUpdateDialog component for update options and preview
 - [x] Add "Update Media Data" button to TimelineViewPage next to Import button
 - [x] Implement MediaUpdateService for fetching updated data from multiple sources
@@ -118,7 +115,7 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [x] **FIXED: || vs !== undefined logic preventing falsy value updates**
 - [x] Comprehensive logging and debugging for troubleshooting update issues
 - [x] Test bulk update functionality with real timeline data and verify changes persist
-- [x] **✅ IMPLEMENTED: Comprehensive API rate limiting protection with graceful fallback**
+- [x] **IMPLEMENTED: Comprehensive API rate limiting protection with graceful fallback**
   - [x] Added RateLimitInfo and ApiError interfaces for proper error categorization
   - [x] Implemented exponential backoff retry logic (1s, 2s, 4s, 8s delays)
   - [x] Enhanced all API methods with rate limit detection and handling
@@ -127,6 +124,58 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
   - [x] Production-ready system that handles API limitations without complete failure
   - [x] Handles OMDb daily limits, TMDb 429 errors, and Trakt rate limits properly
 
+
+### Technical Task - Various Fixes
+- [x] import tv shows elements missing data
+- [x] **FIX: Robust genre filter and display in MediaLibraryPage.tsx** - Added normalizeGenre function to handle both array and string values for item.Genre, mirroring MediaType handling. Prevents crash when filtering or displaying genre if data shape varies.
+
+### Technical Task - Fix TV Show Import Naming
+- [x] Fix TV show import to handle different media types properly
+- [x] For whole shows: use format "show title (year)" (e.g., "Breaking Bad (2008)")
+- [x] For seasons: use format "show title (year) Season X" (e.g., "Breaking Bad (2008) Season 5")
+- [x] For episodes: use format "show title (year) SXXeXX" (e.g., ":DRYVRS (2015) S01E05")
+- [x] Update TraktService to extract show information from season/episode objects
+- [x] Update TraktImportDialog to use appropriate naming conventions
+- [x] Test with real Trakt data containing shows, seasons, and episodes
+
+---
+
+## In Progress Stories
+
+### Story 14 - UI/Design improvements inspired by Trakt
+- [x] Design and implement a top navigation bar with menu and user login/profile
+- [x] Add a banner/header row with site name and optional banner image
+- [x] Redesign timelines page:
+    - [x] Add controls row (Add Timeline/List, Reorder, etc.)
+    - [x] Display timelines as cards with cover images, title, short description, and action buttons
+- [x] Apply consistent styling to match Trakt's clean, modern look (spacing, card layout, icons, etc.)
+- [x] Enhanced TopNavigationBar component with user profile and modern navigation
+- [x] Created PageHeader component for consistent page banners
+- [x] Implemented card-based grid layout with hover effects and improved typography
+- [x] Added cover image placeholders and visual hierarchy improvements
+- [ ] Redesign timeline entries page:
+    - [ ] Add timeline-specific banner (title, description, cover image)
+    - [ ] Add controls row (Edit, Reorder, Share, etc.)
+    - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
+- [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
+
+### Story 23 - UI/UX Improvements for Timeline Action Buttons
+- [x] **UI Consistency**: Move "Import from Trakt" button to be grouped with other timeline action buttons
+- [x] **Icon-Based Design**: All admin buttons now use intuitive icons with consistent styling
+- [x] Enhanced TraktImportDialog with modern dropdown design and better positioning
+- [x] Improved button text clarity and visual consistency
+- [x] Maintained accessibility with proper icon usage and responsive design
+- [ ] **Icon-Based Design**: Replace verbose text buttons with intuitive icons to reduce visual clutter:
+  - [ ] Edit Timeline: ✏️ or 🔧 icon
+  - [ ] Add Media Entry: ➕ icon 
+  - [ ] Import from Trakt: 📥 or 🔗 icon
+  - [ ] Reorder Entries: ↕️ or 🔀 icon
+  - [ ] Update Media Data: 🔄 or ⬆️ icon
+  - [ ] Delete Timeline: 🗑️ icon
+- [ ] Add tooltips to explain each icon's function
+- [ ] Maintain accessibility with proper ARIA labels
+- [ ] Design consistent button group styling
+- [ ] Test usability and ensure icons are intuitive
 
 ---
 
@@ -171,17 +220,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Match these with existing timelines in the app.
 - [ ] Display suggested timelines on the main page, highlighting those related to trending media.
 
-### Story 14 - UI/Design improvements inspired by Trakt
-- [ ] Design and implement a top navigation bar with menu and user login/profile
-- [ ] Add a banner/header row with site name and optional banner image
-- [ ] Redesign timelines page:
-    - [ ] Add controls row (Add Timeline/List, Reorder, etc.)
-    - [ ] Display timelines as cards with cover images, title, short description, and action buttons
-- [ ] Redesign timeline entries page:
-    - [ ] Add timeline-specific banner (title, description, cover image)
-    - [ ] Add controls row (Edit, Reorder, Share, etc.)
-    - [ ] Display entries as cards with cover image, title, year/type, truncated description, and action buttons
-- [ ] Apply consistent styling to match Trakt’s clean, modern look (spacing, card layout, icons, etc.)
 
 ### Story 07 - View and Share Timeline
 - [ ] Create timeline display component
@@ -265,20 +303,6 @@ Timeline Theories is an application for creating, organizing, and sharing timeli
 - [ ] Implement migration tool for at least one source (API or HTML)
 - [ ] Add UI for importing timelines/lists from other apps
 - [ ] Test migration with real-world data
-
-### Story 23 - UI/UX Improvements for Timeline Action Buttons
-- [ ] **UI Consistency**: Move "Import from Trakt" button to be grouped with other timeline action buttons (Edit, Add Media Entry, Reorder Entries, Update Media Data, Delete)
-- [ ] **Icon-Based Design**: Replace verbose text buttons with intuitive icons to reduce visual clutter:
-  - [ ] Edit Timeline: ✏️ or 🔧 icon
-  - [ ] Add Media Entry: ➕ icon 
-  - [ ] Import from Trakt: 📥 or 🔗 icon
-  - [ ] Reorder Entries: ↕️ or 🔀 icon
-  - [ ] Update Media Data: 🔄 or ⬆️ icon
-  - [ ] Delete Timeline: 🗑️ icon
-- [ ] Add tooltips to explain each icon's function
-- [ ] Maintain accessibility with proper ARIA labels
-- [ ] Design consistent button group styling
-- [ ] Test usability and ensure icons are intuitive
 
 ### Story 24 - Enhanced Multi-Source Data Merging
 - [ ] Add "Smart Merge" option for bulk updates that combines data from multiple sources

@@ -21,3 +21,33 @@ export const setRepositoryAccessToken = (token: string) => {
     console.log('[sensenet] Repository authentication set with token');
   }
 };
+
+export const loadBackgroundImage = async (imagePath: string): Promise<string | null> => {
+  try {
+    const content = await repository.load({
+      idOrPath: imagePath,
+      oDataOptions: {
+        select: ['Binary']
+      }
+    });
+    
+    // Extract the binary streaming URL from SenseNet content
+    const binaryUrl = content.d?.Binary?.__mediaresource?.media_src;
+    
+    if (binaryUrl) {
+      // Create full URL if the binary URL is relative
+      const fullUrl = binaryUrl.startsWith('http') 
+        ? binaryUrl 
+        : `${repositoryUrl.replace('/odata.svc', '')}${binaryUrl}`;
+      
+      console.log('[sensenet] Background image URL:', fullUrl);
+      return fullUrl;
+    } else {
+      console.warn('[sensenet] No binary URL found for image:', imagePath);
+      return null;
+    }
+  } catch (error) {
+    console.error('[sensenet] Failed to load background image:', error);
+    return null;
+  }
+};

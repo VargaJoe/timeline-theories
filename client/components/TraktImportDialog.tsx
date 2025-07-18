@@ -81,8 +81,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         let found: MediaItem | undefined = undefined;
         try {
           const allMedia = await MediaLibraryService.getMediaItems();
-          // Use 'title (year)' format for matching if year is present
-          const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+          // Use the properly formatted title from TraktService
+          const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
           found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
         } catch (err) {
           console.error('Error searching media items:', err);
@@ -94,7 +94,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             mediaItem = found;
             reused++;
           } else {
-            const displayName = item.year ? `${item.title} (${item.year})` : item.title;
+            const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
             const req = {
               DisplayName: displayName,
               Description: '',
@@ -143,7 +143,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   };
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ display: 'inline-block' }}>
       <button 
         onClick={() => setShow(s => !s)} 
         disabled={disabled} 
@@ -151,38 +151,89 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           background: '#6f42c1', 
           color: '#fff', 
           border: 'none', 
-          borderRadius: 6, 
-          padding: '8px 16px', 
-          fontWeight: 500, 
-          fontSize: 16, 
-          cursor: 'pointer',
+          borderRadius: 8, 
+          padding: '12px', 
+          cursor: disabled ? 'not-allowed' : 'pointer',
           display: 'flex',
           alignItems: 'center',
-          gap: 8
+          justifyContent: 'center',
+          transition: 'all 0.2s ease',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          opacity: disabled ? 0.6 : 1
+        }}
+        onMouseEnter={(e) => {
+          if (!disabled) {
+            e.currentTarget.style.transform = 'translateY(-1px)';
+            e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
         }}
       >
-        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
         </svg>
-        {show ? 'Cancel' : fetchOnly ? 'Import Trakt' : 'Import Trakt'}
       </button>
       {show && (
-        <div style={{ marginTop: 16, background: '#f8f9fa', borderRadius: 8, padding: 16, boxShadow: '0 1px 4px #0001' }}>
-          <div style={{ marginBottom: 8 }}>
+        <div style={{ 
+          position: 'absolute', 
+          zIndex: 1000, 
+          marginTop: 8, 
+          background: '#fff', 
+          borderRadius: 8, 
+          padding: 16, 
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+          border: '1px solid #ddd',
+          minWidth: 320
+        }}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Trakt List URL:</label>
             <input
               type="text"
-              placeholder="Paste Trakt list URL"
+              placeholder="https://trakt.tv/users/username/lists/listname"
               value={traktUrl}
               onChange={e => setTraktUrl(e.target.value)}
-              style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc', fontSize: 16 }}
               disabled={importing}
             />
           </div>
-          <button onClick={handleImport} disabled={importing || !traktUrl.trim()} style={{ background: '#007bff', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 500, fontSize: 16, cursor: importing ? 'not-allowed' : 'pointer' }}>
-            {importing ? (fetchOnly ? 'Fetching...' : 'Importing...') : (fetchOnly ? 'Fetch Items' : 'Import')}
-          </button>
-          {error && <div style={{ color: '#dc3545', marginTop: 8 }}>{error}</div>}
-          {summary && <div style={{ color: '#155724', marginTop: 8 }}>{summary}</div>}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button 
+              onClick={() => setShow(false)} 
+              style={{ 
+                background: '#6c757d', 
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: 6, 
+                padding: '8px 16px', 
+                fontWeight: 500, 
+                fontSize: 14, 
+                cursor: 'pointer' 
+              }}
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={handleImport} 
+              disabled={importing || !traktUrl.trim()} 
+              style={{ 
+                background: importing || !traktUrl.trim() ? '#ccc' : '#007bff', 
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: 6, 
+                padding: '8px 16px', 
+                fontWeight: 500, 
+                fontSize: 14, 
+                cursor: importing || !traktUrl.trim() ? 'not-allowed' : 'pointer' 
+              }}
+            >
+              {importing ? (fetchOnly ? 'Fetching...' : 'Importing...') : (fetchOnly ? 'Fetch Items' : 'Import')}
+            </button>
+          </div>
+          {error && <div style={{ color: '#dc3545', marginTop: 12, fontSize: 14 }}>{error}</div>}
+          {summary && <div style={{ color: '#155724', marginTop: 12, fontSize: 14 }}>{summary}</div>}
         </div>
       )}
     </div>
