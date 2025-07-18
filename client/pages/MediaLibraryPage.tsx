@@ -6,7 +6,18 @@ import { PageHeader } from '../components/PageHeader';
 import { siteConfig } from '../configuration';
 import { loadBackgroundImage } from '../services/sensenet';
 
-const MEDIA_TYPES = ['Film', 'TV Series', 'TV Episode', 'Book', 'Comic', 'Video Game', 'Podcast', 'Other'];
+// Media types from MediaItem content type definition (see deployment/contenttypes/MediaItem.xml)
+const MEDIA_TYPES = [
+  { value: 'movie', label: 'Movie' },
+  { value: 'tvepisode', label: 'TV Episode' },
+  { value: 'tvseries', label: 'TV Series' },
+  { value: 'book', label: 'Book' },
+  { value: 'comic', label: 'Comic' },
+  { value: 'videogame', label: 'Video Game' },
+  { value: 'podcast', label: 'Podcast' },
+  { value: 'documentary', label: 'Documentary' },
+  { value: 'other', label: 'Other' },
+];
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
 
 export default function MediaLibraryPage() {
@@ -60,6 +71,20 @@ export default function MediaLibraryPage() {
   };
 
   // Filtered media items based on search and filters
+  // Normalize MediaType to string for filtering and display
+  function normalizeMediaType(val: unknown): string {
+    if (Array.isArray(val)) return val[0] || '';
+    if (typeof val === 'string') return val;
+    return '';
+  }
+
+  // Normalize Genre to string for filtering
+  function normalizeGenre(val: unknown): string {
+    if (Array.isArray(val)) return val[0] || '';
+    if (typeof val === 'string') return val;
+    return '';
+  }
+
   const getFilteredMediaItems = () => {
     return mediaItems.filter((item) => {
       // Search by title or description (case-insensitive)
@@ -68,10 +93,14 @@ export default function MediaLibraryPage() {
         !query ||
         (item.DisplayName && item.DisplayName.toLowerCase().includes(query)) ||
         (item.Description && item.Description.toLowerCase().includes(query));
-      // Filter by type
-      const matchesType = !selectedType || item.MediaType === selectedType;
-      // Filter by genre
-      const matchesGenre = !selectedGenre || item.Genre === selectedGenre;
+      // Filter by type (normalize both sides)
+      const itemType = normalizeMediaType(item.MediaType).toLowerCase();
+      const filterType = (selectedType || '').toLowerCase();
+      const matchesType = !filterType || itemType === filterType;
+      // Filter by genre (case-insensitive, normalize both sides)
+      const itemGenre = normalizeGenre(item.Genre).toLowerCase();
+      const filterGenre = (selectedGenre || '').toLowerCase();
+      const matchesGenre = !filterGenre || itemGenre === filterGenre;
       return matchesQuery && matchesType && matchesGenre;
     });
   };
@@ -199,7 +228,7 @@ export default function MediaLibraryPage() {
             >
               <option value="">All Types</option>
               {MEDIA_TYPES.map(type => (
-                <option key={type} value={type}>{type}</option>
+                <option key={type.value} value={type.value}>{type.label}</option>
               ))}
             </select>
           </div>
@@ -224,22 +253,6 @@ export default function MediaLibraryPage() {
             </select>
           </div>
           <div style={{ display: 'flex', alignItems: 'end', gap: 8 }}>
-            <button
-              onClick={handleSearch}
-              disabled={loading}
-              style={{
-                background: loading ? '#94a3b8' : '#2a4d8f',
-                color: 'white',
-                border: 'none',
-                borderRadius: 6,
-                padding: '8px 16px',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                fontSize: 14,
-                fontWeight: 500
-              }}
-            >
-              Search
-            </button>
             <button
               onClick={clearFilters}
               disabled={loading}
@@ -363,7 +376,11 @@ export default function MediaLibraryPage() {
                       fontSize: 12,
                       fontWeight: 500
                     }}>
-                      {item.MediaType}
+                      {(() => {
+                        const mt = normalizeMediaType(item.MediaType);
+                        const found = MEDIA_TYPES.find(t => t.value === mt.toLowerCase());
+                        return found ? found.label : mt;
+                      })()}
                     </span>
                     {item.Genre && (
                       <span style={{
@@ -374,7 +391,7 @@ export default function MediaLibraryPage() {
                         fontSize: 12,
                         fontWeight: 500
                       }}>
-                        {item.Genre}
+                        {normalizeGenre(item.Genre)}
                       </span>
                     )}
                   </div>
