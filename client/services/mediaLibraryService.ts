@@ -317,7 +317,7 @@ export class MediaLibraryService {
   static async getMediaItemByName(name: string): Promise<MediaItem> {
     try {
       // Use a query to find by Name, supporting subfolders
-      const query = `TypeIs:'${MEDIA_ITEM_CONTENT_TYPE}' and Name:'${name}'`;
+      const query = `+Name:'${name}' +TypeIs:'${MEDIA_ITEM_CONTENT_TYPE}'`;
       const response = await repository.loadCollection({
         path: mediaLibraryPath,
         oDataOptions: {

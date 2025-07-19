@@ -41,7 +41,8 @@ export class TimelineEntryService {
         select: [
           'Id',
           'DisplayName',
-          'MediaItem',
+          // 'MediaItem',
+          'MediaItem/Id',
           'MediaItem/Name',
           'MediaItem/DisplayName',
           'MediaItem/CoverImageUrl',

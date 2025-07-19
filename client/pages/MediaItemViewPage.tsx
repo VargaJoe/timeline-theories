@@ -5,6 +5,7 @@ import { loadBackgroundImage } from '../services/sensenet';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import type { MediaItem } from '../services/mediaLibraryService';
 import { MediaLibraryService } from '../services/mediaLibraryService';
+import { LazyImage } from '../components/LazyImage';
 
 export const MediaItemViewPage: React.FC = () => {
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
@@ -251,9 +252,9 @@ export const MediaItemViewPage: React.FC = () => {
             overflow: 'hidden',
           }}>
             {MediaLibraryService.getCoverImageUrl(mediaItem) ? (
-              <img
+              <LazyImage
                 src={MediaLibraryService.getCoverImageUrl(mediaItem)!}
-                alt={mediaItem.DisplayName}
+                alt={mediaItem.DisplayName || 'Media cover'}
                 style={{
                   width: '100%',
                   height: '100%',

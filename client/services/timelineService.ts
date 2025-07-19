@@ -34,9 +34,10 @@ function getCoverImageUrl(mediaItem: {
   };
 }): string | null {
   // If URL is set, use it
-  if (mediaItem.CoverImageUrl) {
-    return mediaItem.CoverImageUrl;
-  }
+  // Temporary off to avoid use images from other sites
+  // if (mediaItem.CoverImageUrl) {
+  //   return mediaItem.CoverImageUrl;
+  // }
   
   // Otherwise, check if we have a binary image
   if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
@@ -146,7 +147,7 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
       path: timelinePath,
       oDataOptions: {
         query: `+TypeIs:TimelineEntry +Hidden:0`,
-        select: ['MediaItem', 'MediaItem/CoverImageUrl', 'MediaItem/CoverImageBin'],
+        select: ['MediaItem/CoverImageUrl', 'MediaItem/CoverImageBin'], //'MediaItem', 
         expand: ['MediaItem'],
         orderby: ['Position'],
         top: 50, // Get more entries to have a good pool for random selection

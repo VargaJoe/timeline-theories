@@ -3,6 +3,7 @@ import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 import { PageHeader } from '../components/PageHeader';
+import { LazyImage } from '../components/LazyImage';
 import { siteConfig } from '../configuration';
 import { loadBackgroundImage } from '../services/sensenet';
 
@@ -342,7 +343,7 @@ export default function MediaLibraryPage() {
               >
                 {/* Cover image left-aligned */}
                 {MediaLibraryService.getCoverImageUrl(item) && (
-                  <img
+                  <LazyImage
                     src={MediaLibraryService.getCoverImageUrl(item)!}
                     alt={item.DisplayName + ' cover'}
                     style={{

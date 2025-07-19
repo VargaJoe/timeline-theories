@@ -6,6 +6,7 @@ import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
+import { LazyImage } from '../components/LazyImage';
 import { timelinesPath } from '../projectPaths';
 import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
@@ -17,9 +18,10 @@ import type { TimelineEntry, MediaItemRef } from '../services/timelineEntryServi
 // Helper function to get cover image URL from MediaItemRef
 function getCoverImageUrl(mediaItem: MediaItemRef): string | null {
   // If URL is set, use it
-  if (mediaItem.CoverImageUrl) {
-    return mediaItem.CoverImageUrl;
-  }
+  // Temporary off to avoid use images from other sites
+  // if (mediaItem.CoverImageUrl) {
+  //   return mediaItem.CoverImageUrl;
+  // }
   
   // Otherwise, check if we have a binary image
   if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
@@ -772,9 +774,9 @@ export const TimelineViewPage: React.FC = () => {
                                   style={{ display: 'block', width: '100%', height: '100%' }}
                                   title={entry.mediaItem.DisplayName}
                                 >
-                                  <img
+                                  <LazyImage
                                     src={getCoverImageUrl(entry.mediaItem)!}
-                                    alt={entry.mediaItem.DisplayName}
+                                    alt={entry.mediaItem.DisplayName || 'Media cover'}
                                     style={{ 
                                       width: '100%',
                                       height: '100%',
@@ -912,7 +914,7 @@ export const TimelineViewPage: React.FC = () => {
                         style={{ display: 'block', width: '100%', height: '100%' }}
                         title={entry.mediaItem.DisplayName}
                       >
-                        <img
+                        <LazyImage
                           src={getCoverImageUrl(entry.mediaItem)!}
                           alt={entry.mediaItem.DisplayName}
                           style={{ 

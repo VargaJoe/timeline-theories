@@ -1,4 +1,5 @@
 import React from 'react';
+import { LazyImage } from './LazyImage';
 
 interface MediaCoverMontageProps {
   coverUrls: string[];
@@ -25,8 +26,8 @@ export const MediaCoverMontage: React.FC<MediaCoverMontageProps> = ({ coverUrls,
         overflow: 'hidden',
         border: '2px solid rgba(255,255,255,0.3)'
       }}>
-        <img 
-          src={coverUrls[0]} 
+        <LazyImage
+          src={coverUrls[0]}
           alt={`${timelineName} media`}
           style={{
             width: '100%',
@@ -113,8 +114,8 @@ export const MediaCoverMontage: React.FC<MediaCoverMontageProps> = ({ coverUrls,
             }
           }}
         >
-          <img 
-            src={coverUrl} 
+          <LazyImage
+            src={coverUrl}
             alt={`${timelineName} media ${index + 1}`}
             style={{
               width: '100%',
