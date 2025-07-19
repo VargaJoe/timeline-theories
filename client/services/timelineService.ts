@@ -95,7 +95,7 @@ export async function getTimelines(): Promise<Timeline[]> {
     const result = await repository.loadCollection({
       path: timelinesPath,
       oDataOptions: {
-        query: `TypeIs:${TIMELINE_CONTENT_TYPE}`,
+        query: `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`,
         select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl'],
         orderby: ['DisplayName'],
       },
@@ -145,7 +145,7 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
     const result = await repository.loadCollection({
       path: timelinePath,
       oDataOptions: {
-        query: `TypeIs:TimelineEntry`,
+        query: `+TypeIs:TimelineEntry +Hidden:0`,
         select: ['MediaItem', 'MediaItem/CoverImageUrl', 'MediaItem/CoverImageBin'],
         expand: ['MediaItem'],
         orderby: ['Position'],

@@ -273,7 +273,7 @@ export class MediaLibraryService {
       const response = await repository.loadCollection({
         path: this.MEDIA_LIBRARY_PATH,
         oDataOptions: {
-          query: `TypeIs:${MEDIA_ITEM_CONTENT_TYPE}`,
+          query: `+TypeIs:${MEDIA_ITEM_CONTENT_TYPE} +Hidden:0`,
           select: ['Id', 'ParentId', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy'],
           orderby: ['CreationDate desc']

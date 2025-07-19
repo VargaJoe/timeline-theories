@@ -37,7 +37,7 @@ export class TimelineEntryService {
     const result = await repository.loadCollection({
       path: parentPath,
       oDataOptions: {
-        query: `TypeIs:TimelineEntry`,
+        query: `+TypeIs:TimelineEntry +Hidden:0`,
         select: [
           'Id',
           'DisplayName',
