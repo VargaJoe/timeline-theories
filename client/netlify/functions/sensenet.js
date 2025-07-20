@@ -4,7 +4,12 @@ const fetch = globalThis.fetch || require('node-fetch');
 async function loadApiKey(serviceKeyPath, repositoryUrl, bearerToken) {
   if (!serviceKeyPath || !repositoryUrl) return null;
   try {
-    const url = `${repositoryUrl}/OData.svc${serviceKeyPath}?$select=ApiKey&metadata=none`;
+    const pathParts = serviceKeyPath.split('/');
+    const itemName = pathParts.pop(); // Get the last part (item name)
+    const containerPath = pathParts.join('/'); // Get the container path
+    const itemPath = `${containerPath}/('${itemName}')`;
+    
+    const url = `${repositoryUrl}/OData.svc${itemPath}?$select=ApiKey&metadata=no`;
     const headers = {};
     if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`;
     const res = await fetch(url, { headers });

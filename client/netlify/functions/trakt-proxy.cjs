@@ -11,7 +11,10 @@ exports.handler = async function(event, context) {
       };
     }
 
-    // Load Trakt API key from SenseNet ECM with user authentication
+    // Load Trakt API key - try SenseNet first, fallback to environment variable
+    let apiKey = null;
+    
+    // Try loading from SenseNet ECM first (preferred method)
     const { loadApiKey } = require('./sensenet');
     const repositoryUrl = process.env.VITE_SENSENET_REPO_URL;
     const projectRoot = process.env.VITE_PROJECT_ROOT_PATH || '/Root/Content';
@@ -23,11 +26,28 @@ exports.handler = async function(event, context) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       bearerToken = authHeader.substring(7);
     }
-    const apiKey = await loadApiKey(traktKeyFullPath, repositoryUrl, bearerToken);
+    
+    if (repositoryUrl && traktKeyFullPath && bearerToken) {
+      apiKey = await loadApiKey(traktKeyFullPath, repositoryUrl, bearerToken);
+    }
+    
+    // Fallback to Netlify environment variable (server-side only, not exposed to client)
+    if (!apiKey) {
+      apiKey = process.env.TRAKT_API_KEY;
+    }
+    
     if (!apiKey) {
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: 'Trakt API key not found in SenseNet', details: { repositoryUrl, traktKeyFullPath, usedAuth: !!bearerToken } })
+        body: JSON.stringify({ 
+          error: 'Trakt API key not found', 
+          details: { 
+            repositoryUrl, 
+            traktKeyFullPath, 
+            usedAuth: !!bearerToken,
+            hasEnvFallback: !!process.env.TRAKT_API_KEY 
+          } 
+        })
       };
     }
 
