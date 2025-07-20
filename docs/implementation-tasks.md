@@ -1,4 +1,4 @@
-Timeline Theories is an application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order.
+Timeline Theories is a personal application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order, based on personal research and opinions.
 
 ## Completed Stories
 
