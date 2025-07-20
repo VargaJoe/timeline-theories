@@ -11,17 +11,23 @@ exports.handler = async function(event, context) {
       };
     }
 
-    // Load Trakt API key from SenseNet ECM
+    // Load Trakt API key from SenseNet ECM with user authentication
     const { loadApiKey } = require('./sensenet');
     const repositoryUrl = process.env.VITE_SENSENET_REPO_URL;
     const projectRoot = process.env.VITE_PROJECT_ROOT_PATH || '/Root/Content';
     const traktKeyPath = process.env.VITE_TRAKT_KEY_PATH;
     const traktKeyFullPath = `${projectRoot}${traktKeyPath}`;
-    const apiKey = await loadApiKey(traktKeyFullPath, repositoryUrl);
+    // Extract Bearer token from Authorization header (if present)
+    let bearerToken = null;
+    const authHeader = event.headers && (event.headers.authorization || event.headers.Authorization);
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      bearerToken = authHeader.substring(7);
+    }
+    const apiKey = await loadApiKey(traktKeyFullPath, repositoryUrl, bearerToken);
     if (!apiKey) {
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: 'Trakt API key not found in SenseNet', details: { repositoryUrl, traktKeyFullPath } })
+        body: JSON.stringify({ error: 'Trakt API key not found in SenseNet', details: { repositoryUrl, traktKeyFullPath, usedAuth: !!bearerToken } })
       };
     }
 
