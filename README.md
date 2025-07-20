@@ -2,7 +2,7 @@
 
 > **Create, organize, and share timeline lists for stories or universes of different media in chronological order.**
 
-Timeline Theories is a modern web application designed for fans and creators who want to organize complex multi-media storylines into coherent, chronological timelines. Perfect for franchises like Star Wars, Marvel, Doctor Who, and more.
+Timeline Theories is a personal web application I created to organize complex multi-media storylines into coherent, chronological timelines. Perfect for franchises like Star Wars, Marvel, Doctor Who, and more. The timeline lists reflect my research and personal opinions about chronological order.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](#)
@@ -30,11 +30,11 @@ Timeline Theories is a modern web application designed for fans and creators who
 - Timeline entry grouping and arcs
 - Advanced search and filtering capabilities
 
-### 👥 **Sharing & Collaboration**
+### 👥 **Sharing & Personal Collections**
 - Public timeline sharing
 - Timeline cloning and forking
 - User authentication with OIDC
-- Community-driven content
+- Personal timeline collections
 
 ---
 
@@ -192,23 +192,31 @@ const timeline = await createTimeline({
 
 ---
 
-## 🤝 Contributing
+## 🤝 Feedback & Suggestions
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+This project is maintained by VargaJoe as a personal tool for organizing timeline theories and research. While this is primarily a personal project, feedback and suggestions are welcome through GitHub issues.
 
-### Development Workflow
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+**Note**: This project reflects my personal research and opinions about media chronologies. Feature requests and pull requests may not be accepted unless they align with my specific needs and interests for this personal timeline site.
 
-### Code Standards
-- TypeScript strict mode enabled
-- ESLint configuration enforced
-- Consistent code formatting with Prettier
-- Component-based architecture
-- Comprehensive error handling
+### If You Want to Contribute
+1. Check existing issues for known bugs or requested features
+2. Open an issue to discuss your idea before submitting a PR
+3. Keep in mind this is optimized for my personal use case
+4. Fork the project if you need different functionality
+
+---
+
+## 🎯 Project Philosophy
+
+Timeline Theories is a **personal project** created and maintained by VargaJoe. It serves as my digital tool for researching and organizing complex media franchises into coherent chronological orders.
+
+**Key Points:**
+- **Personal Research**: All timeline orderings reflect my personal research and opinions
+- **Single Maintainer**: This project is maintained by one person (VargaJoe) for their own use
+- **Opinion-Based**: Timeline theories presented here are subjective interpretations, not community consensus
+- **Personal Tool**: Primary focus is on my specific needs for timeline organization and research
+
+While the code is open source and others may find it useful, please understand that this is fundamentally a personal project built to support my timeline research interests.
 
 ---
 
@@ -235,4 +243,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-*Built with ❤️ for media enthusiasts and timeline organizers everywhere.*
+*Built with ❤️ by VargaJoe for personal timeline research and organization.*
