@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { TraktListItem } from '../services/traktService';
 import { fetchTraktList } from '../services/traktService';
+import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import MediaLibraryService from '../services/mediaLibraryService';
 import type { MediaItem } from '../services/mediaLibraryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
@@ -30,6 +31,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   const [error, setError] = useState('');
   const [summary, setSummary] = useState<string|null>(null);
 
+  const { oidcUser } = useOidcAuthentication();
+
   const parseTraktUrl = (url: string) => {
     try {
       const m = url.match(/trakt.tv\/users\/([^/]+)\/lists\/([^/?#]+)/i);
@@ -49,7 +52,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     setImporting(true);
     try {
       // Always use fetchTraktList for consistent mapping
-      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list);
+      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list, oidcUser?.access_token);
       
       // If fetchOnly mode, just return the items for review
       if (fetchOnly) {
