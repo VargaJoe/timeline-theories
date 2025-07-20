@@ -850,39 +850,18 @@ export const TimelineViewPage: React.FC = () => {
             </Droppable>
           </DragDropContext>
         ) : (
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-            gap: 16,
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+            gap: 20,
             maxWidth: '1200px',
             margin: '0 auto',
-            padding: '0'
+            padding: 0
           }}>
-            {entries.map((entry) => {
-              return (
-                <div
-                  key={entry.id}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.95)',
-                    borderRadius: 12,
-                    border: '1px solid rgba(0, 0, 0, 0.1)',
-                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-                    transition: 'all 0.2s ease',
-                    overflow: 'hidden',
-                    backdropFilter: 'blur(10px)',
-                    position: 'relative'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-                    e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.3)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.1)';
-                    e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.1)';
-                  }}
-                >
+            {entries.map((entry) => (
+              // MagicUI card effect placeholder (replace with real import/use)
+              <div key={entry.id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
+                <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
                   {/* Position Badge */}
                   <div style={{
                     position: 'absolute',
@@ -901,13 +880,8 @@ export const TimelineViewPage: React.FC = () => {
                   }}>
                     {entry.position}
                   </div>
-
-                  {/* Cover Image */}
-                  <div style={{
-                    height: 200,
-                    position: 'relative',
-                    overflow: 'hidden'
-                  }}>
+                  {/* Cover image top, portrait aspect ratio */}
+                  <div style={{ width: 120, height: 180, position: 'relative', overflow: 'hidden', margin: '24px auto 0 auto', borderRadius: 12, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', background: '#f8f9fa' }}>
                     {entry.mediaItem && getCoverImageUrl(entry.mediaItem) ? (
                       <Link
                         to={`/media-library/${entry.mediaItem.Name}`}
@@ -917,10 +891,11 @@ export const TimelineViewPage: React.FC = () => {
                         <LazyImage
                           src={getCoverImageUrl(entry.mediaItem)!}
                           alt={entry.mediaItem.DisplayName}
-                          style={{ 
+                          style={{
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover',
+                            borderRadius: 12,
                             transition: 'transform 0.3s ease'
                           }}
                           onMouseEnter={(e) => {
@@ -932,14 +907,15 @@ export const TimelineViewPage: React.FC = () => {
                         />
                       </Link>
                     ) : (
-                      <div style={{ 
+                      <div style={{
                         width: '100%',
                         height: '100%',
                         background: 'linear-gradient(135deg, #f3f4f6, #e5e7eb)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: '#9ca3af'
+                        color: '#9ca3af',
+                        borderRadius: 12
                       }}>
                         <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -947,49 +923,37 @@ export const TimelineViewPage: React.FC = () => {
                       </div>
                     )}
                   </div>
-
-                  {/* Content */}
-                  <div style={{ padding: 16 }}>
-                    <h3 style={{ 
-                      fontSize: 16, 
-                      fontWeight: 600, 
-                      color: '#1f2937',
-                      margin: '0 0 8px 0',
-                      lineHeight: '1.4',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden'
+                  {/* Content below image */}
+                  <div style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+                    <h3 style={{
+                      marginBottom: 6,
+                      color: '#2a4d8f',
+                      fontSize: 16,
+                      fontWeight: 700,
+                      textAlign: 'center',
+                      marginTop: 0,
+                      wordBreak: 'break-word',
+                      lineHeight: 1.2
                     }}>
                       {entry.mediaItem ? (
                         <Link
                           to={`/media-library/${entry.mediaItem.Name}`}
-                          style={{ color: '#1f2937', textDecoration: 'none' }}
+                          style={{ color: '#2a4d8f', textDecoration: 'none' }}
                           title={entry.mediaItem.DisplayName}
                         >
                           {entry.mediaItem.DisplayName}
                         </Link>
                       ) : 'Unknown Media'}
                     </h3>
-                    
                     {entry.notes && (
-                      <p style={{ 
-                        color: '#6b7280', 
-                        margin: 0, 
-                        fontSize: 14,
-                        lineHeight: 1.5,
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden'
-                      }}>
+                      <div style={{ fontSize: 13, color: '#444', marginBottom: 8, textAlign: 'center', maxHeight: 48, overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.3 }}>
                         {entry.notes}
-                      </p>
+                      </div>
                     )}
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
       </div>

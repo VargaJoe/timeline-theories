@@ -321,111 +321,110 @@ export default function MediaLibraryPage() {
           )}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
           {getFilteredMediaItems().map((item) => {
             const externalLinks = getExternalLinks(item.ExternalLinks);
             return (
-              <div key={item.Id} style={{
-                background: '#fff',
-                border: '1px solid #e9ecef',
-                borderRadius: 12,
-                padding: 20,
-                boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                transition: 'transform 0.2s, box-shadow 0.2s',
-                cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'flex-start',
-                minHeight: 180,
-                gap: 20,
-              }}
-                onClick={() => navigate(`/media-library/${item.Name}`)}
-              >
-                {/* Cover image left-aligned */}
-                {MediaLibraryService.getCoverImageUrl(item) && (
-                  <LazyImage
-                    src={MediaLibraryService.getCoverImageUrl(item)!}
-                    alt={item.DisplayName + ' cover'}
-                    style={{
-                      width: 90,
-                      height: 120,
-                      objectFit: 'cover',
-                      borderRadius: 8,
-                      boxShadow: '0 2px 8px rgba(42,77,143,0.10)',
-                      flexShrink: 0,
-                    }}
-                    onError={e => (e.currentTarget.style.display = 'none')}
-                  />
-                )}
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  <h3 style={{
-                    marginBottom: 4,
-                    color: '#2a4d8f',
-                    fontSize: 18,
-                    fontWeight: 600,
-                    textAlign: 'left',
-                    marginTop: 0,
-                  }}>
-                    {item.DisplayName}
-                  </h3>
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                    <span style={{
-                      background: '#e3f2fd',
-                      color: '#1976d2',
-                      padding: '2px 8px',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 500
+              // MagicUI card effect placeholder (replace with real import/use)
+              <div key={item.Id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }} onClick={() => navigate(`/media-library/${item.Name}`)}>
+                <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
+                  {/* Cover image top, portrait aspect ratio */}
+                  {MediaLibraryService.getCoverImageUrl(item) && (
+                    <LazyImage
+                      src={MediaLibraryService.getCoverImageUrl(item)!}
+                      alt={item.DisplayName + ' cover'}
+                      style={{
+                        width: 120,
+                        height: 180,
+                        objectFit: 'cover',
+                        borderTopLeftRadius: 16,
+                        borderTopRightRadius: 16,
+                        borderBottomLeftRadius: 0,
+                        borderBottomRightRadius: 0,
+                        boxShadow: '0 2px 8px rgba(42,77,143,0.10)',
+                        background: '#f8f9fa',
+                        marginBottom: 0
+                      }}
+                      onError={e => (e.currentTarget.style.display = 'none')}
+                    />
+                  )}
+                  <div style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+                    <h3 style={{
+                      marginBottom: 6,
+                      color: '#2a4d8f',
+                      fontSize: 16,
+                      fontWeight: 700,
+                      textAlign: 'center',
+                      marginTop: 0,
+                      wordBreak: 'break-word',
+                      lineHeight: 1.2
                     }}>
-                      {(() => {
-                        const mt = normalizeMediaType(item.MediaType);
-                        const found = MEDIA_TYPES.find(t => t.value === mt.toLowerCase());
-                        return found ? found.label : mt;
-                      })()}
-                    </span>
-                    {item.Genre && (
+                      {item.DisplayName}
+                    </h3>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                       <span style={{
-                        background: '#f3e5f5',
-                        color: '#7b1fa2',
+                        background: '#e3f2fd',
+                        color: '#1976d2',
                         padding: '2px 8px',
                         borderRadius: 4,
                         fontSize: 12,
                         fontWeight: 500
                       }}>
-                        {normalizeGenre(item.Genre)}
+                        {(() => {
+                          const mt = normalizeMediaType(item.MediaType);
+                          const found = MEDIA_TYPES.find(t => t.value === mt.toLowerCase());
+                          return found ? found.label : mt;
+                        })()}
                       </span>
-                    )}
-                  </div>
-                  {/* Description omitted for cleaner card UI */}
-                  {/* External Links */}
-                  {Object.keys(externalLinks).length > 0 && (
-                    <div style={{ marginBottom: 12, width: '100%' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {Object.entries(externalLinks).slice(0, 2).map(([key, url]) => (
-                          <a
-                            key={key}
-                            href={url as string}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              color: '#2a4d8f',
-                              fontSize: 12,
-                              textDecoration: 'none',
-                              background: '#f8f9fa',
-                              padding: '2px 6px',
-                              borderRadius: 3,
-                              border: '1px solid #e9ecef'
-                            }}
-                          >
-                            {key === 'url' ? 'Link' : key}
-                          </a>
-                        ))}
-                      </div>
+                      {item.Genre && (
+                        <span style={{
+                          background: '#f3e5f5',
+                          color: '#7b1fa2',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: 12,
+                          fontWeight: 500
+                        }}>
+                          {normalizeGenre(item.Genre)}
+                        </span>
+                      )}
                     </div>
-                  )}
-                  <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'left' }}>
-                    Added {formatDate(item.CreationDate)}
+                    {/* Description, if present, below title */}
+                    {item.Description && (
+                      <div style={{ fontSize: 13, color: '#444', marginBottom: 8, textAlign: 'center', maxHeight: 48, overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.3 }}>
+                        {item.Description}
+                      </div>
+                    )}
+                    {/* External Links */}
+                    {Object.keys(externalLinks).length > 0 && (
+                      <div style={{ marginBottom: 8, width: '100%' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'center' }}>
+                          {Object.entries(externalLinks).slice(0, 2).map(([key, url]) => (
+                            <a
+                              key={key}
+                              href={url as string}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                color: '#2a4d8f',
+                                fontSize: 12,
+                                textDecoration: 'none',
+                                background: '#f8f9fa',
+                                padding: '2px 6px',
+                                borderRadius: 3,
+                                border: '1px solid #e9ecef'
+                              }}
+                            >
+                              {key === 'url' ? 'Link' : key}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'center' }}>
+                      Added {formatDate(item.CreationDate)}
+                    </div>
                   </div>
                 </div>
               </div>
