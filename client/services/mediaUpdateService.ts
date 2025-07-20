@@ -1,4 +1,6 @@
 import { MediaLibraryService, resizeImageToDefault, uploadCoverImageBinary } from './mediaLibraryService';
+import { loadApiKey } from './sensenet';
+import { omdbKeyFullPath, tmdbKeyFullPath } from '../projectPaths';
 import type { MediaItem } from './mediaLibraryService';
 
 // Rate limiting interfaces
@@ -314,26 +316,22 @@ export class MediaUpdateService {
    * Fetch from OMDb API using IMDb ID with rate limit handling
    */
   private static async fetchFromOMDb(imdbId: string): Promise<MediaUpdateData | null> {
-    const apiKey = import.meta.env.VITE_OMDB_API_KEY;
+    const apiKey = await loadApiKey(omdbKeyFullPath);
     if (!apiKey) {
-      console.warn('OMDb API key not configured');
+      console.warn('OMDb API key not configured in SenseNet');
       return null;
     }
 
     return this.retryWithBackoff(async () => {
       // Ensure IMDb ID has proper format
       const formattedId = imdbId.startsWith('tt') ? imdbId : `tt${imdbId}`;
-      
       const response = await fetch(`https://www.omdbapi.com/?i=${formattedId}&apikey=${apiKey}&plot=full`);
-      
       if (!response.ok) {
         const error: ApiError = new Error(`OMDb API error: ${response.status}`);
         error.status = response.status;
         throw error;
       }
-      
       const data = await response.json();
-
       if (data.Response === 'False') {
         if (data.Error?.includes('daily limit exceeded')) {
           const error: ApiError = new Error('OMDb daily limit exceeded');
@@ -342,7 +340,6 @@ export class MediaUpdateService {
         }
         return null; // Not found, but not an error
       }
-
       if (data.Response === 'True') {
         return {
           title: data.Title,
@@ -353,7 +350,6 @@ export class MediaUpdateService {
           genres: data.Genre !== 'N/A' ? data.Genre.split(', ') : undefined
         };
       }
-
       return null;
     }, DataSource.OMDB);
   }
@@ -363,16 +359,14 @@ export class MediaUpdateService {
    */
   private static async searchOMDbByTitle(title: string, mediaType?: string): Promise<MediaUpdateData | null> {
     try {
-      const apiKey = import.meta.env.VITE_OMDB_API_KEY;
+      const apiKey = await loadApiKey(omdbKeyFullPath);
       if (!apiKey) return null;
 
       // Clean title (remove year if present)
       const cleanTitle = title.replace(/\s*\(\d{4}\)$/, '');
-      
       // Extract year if present
       const yearMatch = title.match(/\((\d{4})\)$/);
       const year = yearMatch ? yearMatch[1] : '';
-
       // Map media type
       let type = '';
       if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
@@ -380,11 +374,9 @@ export class MediaUpdateService {
       } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
         type = '&type=series';
       }
-
       const url = `https://www.omdbapi.com/?t=${encodeURIComponent(cleanTitle)}${year ? `&y=${year}` : ''}${type}&apikey=${apiKey}&plot=full`;
       const response = await fetch(url);
       const data = await response.json();
-
       if (data.Response === 'True') {
         return {
           title: data.Title,
@@ -395,7 +387,6 @@ export class MediaUpdateService {
           genres: data.Genre !== 'N/A' ? data.Genre.split(', ') : undefined
         };
       }
-
       return null;
     } catch (error) {
       console.error('Error searching OMDb by title:', error);
@@ -407,18 +398,16 @@ export class MediaUpdateService {
    * Fetch from TMDB API with rate limit handling
    */
   private static async fetchFromTMDB(tmdbId: string, mediaType?: string): Promise<MediaUpdateData | null> {
-    const apiKey = import.meta.env.VITE_TMDB_API_KEY;
+    const apiKey = await loadApiKey(tmdbKeyFullPath);
     if (!apiKey) {
-      console.warn('TMDB API key not configured');
+      console.warn('TMDB API key not configured in SenseNet');
       return null;
     }
 
     return this.retryWithBackoff(async () => {
       console.log(`Attempting to fetch TMDB ID: ${tmdbId} with mediaType: ${mediaType}`);
-
       // Try different content types based on media type or try both
       const typesToTry = [];
-      
       if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
         typesToTry.push('movie');
       } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series') || mediaType?.toLowerCase().includes('episode')) {
@@ -427,31 +416,24 @@ export class MediaUpdateService {
         // Unknown type, try both
         typesToTry.push('movie', 'tv');
       }
-
       for (const type of typesToTry) {
         console.log(`Trying TMDB ${type} endpoint for ID: ${tmdbId}`);
-        
         const response = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${apiKey}`);
-        
         if (!response.ok) {
           // If it's the last type to try, throw the error
           if (type === typesToTry[typesToTry.length - 1]) {
             const error: ApiError = new Error(`TMDB API error: ${response.status}`);
             error.status = response.status;
-            
             if (response.status === 429) {
               error.message = 'TMDB rate limit exceeded';
             }
-            
             throw error;
           }
           // Otherwise continue to next type
           console.log(`TMDB ${type} endpoint returned ${response.status} for ID: ${tmdbId}`);
           continue;
         }
-        
         const data = await response.json();
-        
         if (data.id) {
           console.log(`Successfully fetched from TMDB ${type}:`, data.title || data.name);
           return {
@@ -464,7 +446,6 @@ export class MediaUpdateService {
           };
         }
       }
-
       console.log(`No data found on TMDB for ID: ${tmdbId}`);
       return null;
     }, DataSource.TMDB);
@@ -475,21 +456,18 @@ export class MediaUpdateService {
    */
   private static async searchTMDBByTitle(title: string): Promise<MediaUpdateData | null> {
     try {
-      const apiKey = import.meta.env.VITE_TMDB_API_KEY;
+      const apiKey = await loadApiKey(tmdbKeyFullPath);
       if (!apiKey) return null;
 
       // Clean title (remove year if present)
       const cleanTitle = title.replace(/\s*\(\d{4}\)$/, '');
-      
       // Extract year if present
       const yearMatch = title.match(/\((\d{4})\)$/);
       const year = yearMatch ? yearMatch[1] : '';
-
       // Try movie search first, then TV if no results
       const movieUrl = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(cleanTitle)}${year ? `&year=${year}` : ''}`;
       const movieResponse = await fetch(movieUrl);
       const movieData = await movieResponse.json();
-
       if (movieData.results && movieData.results.length > 0) {
         const movie = movieData.results[0];
         return {
@@ -500,12 +478,10 @@ export class MediaUpdateService {
           genres: [] // Would need additional API call for full genre names
         };
       }
-
       // Try TV search if movie search failed
       const tvUrl = `https://api.themoviedb.org/3/search/tv?api_key=${apiKey}&query=${encodeURIComponent(cleanTitle)}${year ? `&first_air_date_year=${year}` : ''}`;
       const tvResponse = await fetch(tvUrl);
       const tvData = await tvResponse.json();
-
       if (tvData.results && tvData.results.length > 0) {
         const show = tvData.results[0];
         return {
@@ -516,7 +492,6 @@ export class MediaUpdateService {
           genres: [] // Would need additional API call for full genre names
         };
       }
-
       return null;
     } catch (error) {
       console.error('Error searching TMDB by title:', error);
