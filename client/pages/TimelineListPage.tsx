@@ -126,7 +126,7 @@ export const TimelineListPage: React.FC = () => {
     <>
       <PageHeader 
         title="Timeline Library" 
-        subtitle="Discover community-created chronological timelines for your favorite universes"
+        subtitle="Discover chronological timelines for your favorite universes"
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
       >
@@ -191,7 +191,7 @@ export const TimelineListPage: React.FC = () => {
           }}>
             <h3 style={{ marginBottom: 16, color: '#495057', fontSize: 24 }}>No timelines found</h3>
             <p style={{ color: '#6c757d', marginBottom: 32, fontSize: 16 }}>
-              Be the first to create a timeline for the community!
+              It looks like there are no timelines available yet. 
             </p>
             {oidcUser && (
               <Link 
