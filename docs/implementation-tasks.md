@@ -1,5 +1,32 @@
-
 Timeline Theories is a personal application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order, based on personal research and opinions.
+
+## Current Bugs & UX Issues
+
+- [ ] **Trakt Import: Series Episode Titles Missing**
+    - When importing from Trakt, episode titles are not brought over for series.
+- [ ] **DisplayName/Title/Year Handling**
+    - DisplayName is not sufficient for titles. Name can use the current logic (title + year + season/episode info), but we need to separate year from title in a dedicated field.
+    - Add a `title` field for all media contents.
+    - Consider adding a `subtitle` or `episodeTitle` field for episodes or installments (subtitle is more general for movies, books, audio, etc).
+- [ ] **Trakt Import: Media Library Subfolder Selection**
+    - Imported media items always go under the main media library. There should be a select/create subfolder input in the import UI.
+- [ ] **Performance: Resource Loading on Navigation**
+    - Navigating away from a page (e.g., media library) while it is still loading causes slowness, likely due to unfinished resource downloads. Find a solution to cancel or deprioritize unnecessary requests.
+- [ ] **Mobile: Header Too Wide**
+    - On mobile, the header is too wide and breaks the design.
+- [ ] **Mobile: Media Item Layout**
+    - On mobile, media item display is ugly. Media info should be placed under the cover image at mobile resolutions.
+- [ ] **Bulk Update: Redundant API Requests**
+    - When previewing changes in bulk update, if the user goes back and re-previews without changing options, the app calls the API again. Should cache and reuse previous responses if options are unchanged.
+- [ ] **Media Cover: Upload Default**
+    - Upload media should be the default selection for cover image, not external URL (to avoid using external resources).
+- [ ] **Timeline Entry: Delete Option Missing**
+    - There should be an option to delete a timeline entry from the timeline page when an administrator is logged in.
+- [ ] **Timeline: Delete Icon Missing**
+    - The delete timeline icon has disappeared from the timeline page; it was present before.
+- [ ] **Timeline Description: HTML Support Lost**
+    - HTML support for the timeline description editor has disappeared; it was previously available.
+
 
 ## Completed Stories
 
