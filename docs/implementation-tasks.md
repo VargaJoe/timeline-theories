@@ -1,3 +1,4 @@
+
 Timeline Theories is a personal application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order, based on personal research and opinions.
 
 ## Completed Stories
@@ -138,10 +139,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] Update TraktImportDialog to use appropriate naming conventions
 - [x] Test with real Trakt data containing shows, seasons, and episodes
 
----
-
-## In Progress Stories
-
 ### Story 14 - UI/Design improvements inspired by Trakt
 - [x] Design and implement a top navigation bar with menu and user login/profile
 - [x] Add a banner/header row with site name and optional banner image
@@ -176,6 +173,12 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Maintain accessibility with proper ARIA labels
 - [ ] Design consistent button group styling
 - [ ] Test usability and ensure icons are intuitive
+
+---
+
+## In Progress Stories
+
+-- no stories in progress yet --
 
 ---
 
@@ -311,3 +314,25 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Create preview showing which fields come from which sources
 - [ ] Allow users to override automatic field selection choices
 - [ ] Add conflict resolution when sources provide different data for same field
+
+### Story 25 - Timeline Entry Cross-References (Multi-Timeline Linking)
+- [ ] Add multi-reference field to TimelineEntry model
+- [ ] Update TimelineEntry creation/edit UI to support cross-references
+- [ ] Display cross-reference links in timeline entry view
+- [ ] Implement navigation between cross-referenced entries
+- [ ] Ensure bidirectional reference visibility
+- [ ] Test cross-reference creation and navigation
+
+### Story 26 - Timeline Entry Tagging for Loops, Universes, and Parallel Events
+- [ ] Extend tag system to support timeline entry tags (not just media items)
+- [ ] Update TimelineEntry model and UI for tag assignment
+- [ ] Implement tag-based filtering and grouping in timeline view
+- [ ] Add rendering logic for different tag-based views (universe order, binge order, etc.)
+- [ ] Test tag assignment and filtering/grouping
+
+### Story 27 - Multi-Timeline Rendering and Viewing Modes
+- [ ] Implement rendering logic for each mode (universe order, universe date order, binge order)
+- [ ] Update timeline view UI to allow mode selection
+- [ ] Combine entries from multiple timelines as needed
+- [ ] Respect tags and cross-references in rendering
+- [ ] Test all rendering modes for correctness
