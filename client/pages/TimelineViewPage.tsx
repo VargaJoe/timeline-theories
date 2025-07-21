@@ -316,6 +316,45 @@ export const TimelineViewPage: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
             </button>
+            <button
+              onClick={async () => {
+                if (window.confirm('Are you sure you want to delete this timeline? This action cannot be undone.')) {
+                  try {
+                    await import('../services/timelineService').then(({ deleteTimeline }) => deleteTimeline(timeline.id));
+                    window.location.href = '/timelines';
+                  } catch (err) {
+                    alert('Failed to delete timeline.');
+                  }
+                }
+              }}
+              title="Delete Timeline"
+              style={{
+                background: '#dc3545',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M6 6v12a2 2 0 002 2h8a2 2 0 002-2V6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10v6m6-6v6" />
+              </svg>
+            </button>
             <Link 
               to={`/timelines/${timelineName}/add-entry`} 
               title="Add Timeline Entry"
@@ -460,19 +499,23 @@ export const TimelineViewPage: React.FC = () => {
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Description</label>
-              <textarea
-                value={editDescription}
-                onChange={e => setEditDescription(e.target.value)}
-                rows={3}
+              <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Description (HTML supported)</label>
+              <div
+                contentEditable
+                suppressContentEditableWarning
                 style={{
                   width: '100%',
+                  minHeight: 80,
                   padding: 8,
                   border: '1px solid #ddd',
                   borderRadius: 4,
                   resize: 'vertical',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  background: '#fff',
+                  marginBottom: 8
                 }}
+                onInput={e => setEditDescription((e.target as HTMLDivElement).innerHTML)}
+                dangerouslySetInnerHTML={{ __html: editDescription }}
               />
             </div>
             <div style={{ marginBottom: 16 }}>
@@ -859,9 +902,43 @@ export const TimelineViewPage: React.FC = () => {
             padding: 0
           }}>
             {entries.map((entry) => (
-              // MagicUI card effect placeholder (replace with real import/use)
               <div key={entry.id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
                 <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
+                  {/* Delete Entry Button (admin only) */}
+                  {oidcUser && (
+                    <button
+                      title="Delete Entry"
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        right: 12,
+                        background: '#dc3545',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '6px 10px',
+                        cursor: 'pointer',
+                        zIndex: 2,
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.12)'
+                      }}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (window.confirm('Delete this timeline entry? This cannot be undone.')) {
+                          try {
+                            await import('../services/timelineEntryService').then(({ TimelineEntryService }) => TimelineEntryService.deleteTimelineEntry(entry.id));
+                            window.location.reload();
+                          } catch (err) {
+                            alert('Failed to delete entry.');
+                          }
+                        }
+                      }}
+                    >
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M6 6v12a2 2 0 002 2h8a2 2 0 002-2V6" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10v6m6-6v6" />
+                      </svg>
+                    </button>
+                  )}
                   {/* Position Badge */}
                   <div style={{
                     position: 'absolute',

@@ -204,21 +204,23 @@ export const TimelineCreateForm: React.FC = () => {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Description</label>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Describe your timeline..."
-              rows={3}
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Description (HTML supported)</label>
+            <div
+              contentEditable
+              suppressContentEditableWarning
               style={{
                 width: '100%',
+                minHeight: 80,
                 padding: '12px 14px',
                 borderRadius: 6,
                 border: '1px solid #ccc',
                 fontSize: 16,
-                resize: 'vertical',
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                background: '#fff',
+                marginBottom: 8
               }}
+              onInput={e => setDescription((e.target as HTMLDivElement).innerHTML)}
+              dangerouslySetInnerHTML={{ __html: description }}
             />
           </div>
           <div>

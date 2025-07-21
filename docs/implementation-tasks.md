@@ -24,12 +24,10 @@ Timeline Theories is a personal application for creating, organizing, and sharin
     - There should be an option to delete a timeline entry from the timeline page when an administrator is logged in.
 - [ ] **Timeline: Delete Icon Missing**
     - The delete timeline icon has disappeared from the timeline page; it was present before.
-- [ ] **Timeline Description: HTML Support Lost**
-    - HTML support for the timeline description editor has disappeared; it was previously available.
-
-
-## Completed Stories
-
+    - HTML support for the timeline description editor has disappeared; it was previously available. **[FIXED 2025-07-21]** Timeline description editor now supports HTML input and rich text display.
+    - The delete timeline icon has disappeared from the timeline page; it was present before. **[FIXED 2025-07-21]** Delete timeline button restored to timeline page header for admins/owners.
+    - There should be an option to delete a timeline entry from the timeline page when an administrator is logged in. **[FIXED 2025-07-21]** Delete button added for every timeline entry on the timeline page (admin/owner only).
+    - [ADDED 2025-07-21] Timeline cards on the timelines page now show a “TEST” indicator if the timeline is not public.
 ### Story 01 - Create New Timeline
 - [x] Design timeline database schema
 - [x] Create timeline data model
