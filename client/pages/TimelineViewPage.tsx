@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TraktImportDialog } from '../components/TraktImportDialog';
 import { PageHeader } from '../components/PageHeader';
@@ -500,22 +502,20 @@ export const TimelineViewPage: React.FC = () => {
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Description (HTML supported)</label>
-              <div
-                contentEditable
-                suppressContentEditableWarning
+              <ReactQuill
+                value={editDescription}
+                onChange={setEditDescription}
+                theme="snow"
                 style={{
                   width: '100%',
                   minHeight: 80,
-                  padding: 8,
-                  border: '1px solid #ddd',
-                  borderRadius: 4,
-                  resize: 'vertical',
-                  boxSizing: 'border-box',
+                  marginBottom: 8,
                   background: '#fff',
-                  marginBottom: 8
+                  borderRadius: 4,
+                  border: '1px solid #ddd',
+                  color: '#222',
                 }}
-                onInput={e => setEditDescription((e.target as HTMLDivElement).innerHTML)}
-                dangerouslySetInnerHTML={{ __html: editDescription }}
+                className="quill-editor-dark"
               />
             </div>
             <div style={{ marginBottom: 16 }}>
