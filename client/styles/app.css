@@ -1,4 +1,7 @@
 /* Basic production-ready skin for Timeline Theories */
+.timeline-description-content p { margin: 0; }
+.timeline-description-content ul, .timeline-description-content ol { margin: 0; padding-left: 1.5em; }
+.timeline-description-content li { margin: 0; }
 
 .hidden {
   display: none;
