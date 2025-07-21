@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 import { TraktImportDialog } from './TraktImportDialog';
 // import { fetchTraktList } from '../services/traktService';
 import type { TraktListItem } from '../services/traktService';
@@ -205,22 +207,22 @@ export const TimelineCreateForm: React.FC = () => {
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Description (HTML supported)</label>
-            <div
-              contentEditable
-              suppressContentEditableWarning
+            <ReactQuill
+              value={description}
+              onChange={setDescription}
+              theme="snow"
               style={{
                 width: '100%',
                 minHeight: 80,
-                padding: '12px 14px',
+                marginBottom: 8,
+                background: '#fff',
                 borderRadius: 6,
                 border: '1px solid #ccc',
                 fontSize: 16,
                 boxSizing: 'border-box',
-                background: '#fff',
-                marginBottom: 8
+                color: '#222',
               }}
-              onInput={e => setDescription((e.target as HTMLDivElement).innerHTML)}
-              dangerouslySetInnerHTML={{ __html: description }}
+              className="quill-editor-dark"
             />
           </div>
           <div>
