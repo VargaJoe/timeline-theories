@@ -612,7 +612,6 @@ export const TimelineViewPage: React.FC = () => {
         {/* Timeline Description */}
         {timeline?.description && !editMode && (
         (() => {
-          // Create a temporary element to count lines
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = timeline.description;
           tempDiv.style.position = 'absolute';
@@ -627,11 +626,7 @@ export const TimelineViewPage: React.FC = () => {
           document.body.removeChild(tempDiv);
           const isDescriptionLong = numLines > DESCRIPTION_ROW_LIMIT;
           return (
-            <div style={{
-              // maxWidth: '900px',
-              margin: '0 auto 32px auto',
-              padding: '0'
-            }}>
+            <div style={{ margin: '0 auto 32px auto', padding: '0' }}>
               <div style={{
                 background: 'rgba(255, 255, 255, 0.95)',
                 border: '1px solid rgba(0, 0, 0, 0.1)',
@@ -654,6 +649,7 @@ export const TimelineViewPage: React.FC = () => {
                   Description
                 </div>
                 <div
+                  className="timeline-description-content"
                   style={
                     showFullDescription || !isDescriptionLong
                       ? {}
