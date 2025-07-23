@@ -1,4 +1,5 @@
 import React from 'react';
+import { siteConfig } from '../configuration';
 
 interface PageHeaderProps {
   title: string;
@@ -6,6 +7,7 @@ interface PageHeaderProps {
   backgroundImage?: string;
   overlayOpacity?: number; // 0.0 to 1.0, default 0.4
   children?: React.ReactNode;
+  showSiteTitle?: boolean; // Whether to show site title above page title
 }
 
 export const PageHeader: React.FC<PageHeaderProps> = ({ 
@@ -13,12 +15,16 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   subtitle, 
   backgroundImage,
   overlayOpacity = 0.4,
-  children 
+  children,
+  showSiteTitle = false
 }) => {
   // Debug logging for background image
   React.useEffect(() => {
     console.log('[PageHeader] Background image prop:', backgroundImage);
   }, [backgroundImage]);
+
+  // Get site title from configuration
+  const siteTitle = siteConfig.siteTitle;
 
   const backgroundStyle = backgroundImage 
     ? `linear-gradient(rgba(42, 77, 143, ${overlayOpacity}), rgba(42, 77, 143, ${overlayOpacity})), url(${backgroundImage})` 
@@ -27,44 +33,67 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   console.log('[PageHeader] Background style:', backgroundStyle);
 
   return (
-    <div style={{
-      backgroundImage: backgroundStyle,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
-      color: '#fff',
-      padding: '48px 24px',
-      minHeight: '220px',
-      marginBottom: '32px',
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center'
-    }}>
+    <div 
+      className="page-header"
+      style={{
+        backgroundImage: backgroundStyle,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        color: '#fff',
+        padding: '48px 24px',
+        minHeight: '220px',
+        marginBottom: '32px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center'
+      }}
+    >
       <div style={{
-        width: '1200px',
-        marginLeft: 'auto',
+        maxWidth: '1200px',
+        margin: '0 auto',
         padding: '0 20px',
-        marginRight: 'auto',
-        textAlign: 'left'
+        textAlign: 'left',
+        width: '100%'
       }}>
+        {showSiteTitle && (
+          <div style={{
+            fontSize: '14px',
+            fontWeight: 500,
+            color: 'rgba(255, 255, 255, 0.8)',
+            marginBottom: '8px',
+            textTransform: 'uppercase',
+            letterSpacing: '1px'
+          }}>
+            {siteTitle}
+          </div>
+        )}
+        
         <h1 style={{
-          fontSize: '36px',
+          fontSize: '3.5rem',
           fontWeight: 'bold',
-          margin: '0 0 8px 0',
-          textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+          margin: '0 0 12px 0',
+          lineHeight: '1.1',
+          textShadow: '0 2px 4px rgba(0,0,0,0.3)',
+          wordWrap: 'break-word',
+          hyphens: 'auto'
         }}>
           {title}
         </h1>
         
         {subtitle && (
-          <p style={{
-            fontSize: '18px',
+          <h2 style={{
+            fontSize: '1.25rem',
+            fontWeight: 400,
             margin: '0 0 24px 0',
-            opacity: 0.9,
-            textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+            color: 'rgba(255, 255, 255, 0.9)',
+            lineHeight: '1.4',
+            textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+            wordWrap: 'break-word',
+            hyphens: 'auto'
           }}>
             {subtitle}
-          </p>
+          </h2>
         )}
         
         {children && (

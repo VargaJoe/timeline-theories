@@ -107,3 +107,130 @@
   box-shadow: 0 0 32px #7bb27499, 0 2px 16px #b7d3b7;
   border-color: #234d32;
 }
+/* Responsive styles for mobile */
+@media (max-width: 768px) {
+  /* Navigation bar responsive behavior */
+  .desktop-nav {
+    display: none !important;
+  }
+  
+  .mobile-menu-button {
+    display: block !important;
+  }
+  
+  .mobile-menu {
+    display: block !important;
+  }
+
+  /* Top navigation improvements */
+  nav {
+    padding: 0 12px !important;
+  }
+  
+  nav > div {
+    height: auto !important;
+    min-height: 60px;
+    align-items: center !important;
+  }
+
+  /* Page header improvements */
+  .page-header {
+    padding: 24px 12px !important;
+    min-height: 180px !important;
+    text-align: center !important;
+  }
+  
+  .page-header h1 {
+    font-size: 1.8rem !important;
+    line-height: 1.3 !important;
+    word-break: break-word;
+    margin-bottom: 8px !important;
+  }
+  
+  .page-header h2 {
+    font-size: 1.1rem !important;
+    line-height: 1.4 !important;
+    word-break: break-word;
+  }
+
+  /* Main content mobile improvements */
+  .main-content {
+    max-width: 100vw !important;
+    padding: 0 12px 24px 12px !important;
+    margin: 0 !important;
+  }
+
+  /* Timeline and media cards mobile layout */
+  .timeline-list-grid, .media-list-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 16px !important;
+    grid-template-columns: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Timeline cards mobile improvements */
+  .timeline-list-grid > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* Entry cards mobile improvements */
+  .entry-card {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 auto !important;
+  }
+
+  .entry-card-image {
+    width: 100% !important;
+    max-width: 200px !important;
+    height: auto !important;
+    margin: 12px auto !important;
+    aspect-ratio: 2/3;
+  }
+
+  .entry-card-info {
+    padding: 12px !important;
+    text-align: center !important;
+  }
+
+  /* Typography improvements for mobile */
+  .timeline-card h3,
+  .media-card h3,
+  .entry-card h3,
+  .entry-card h4 {
+    font-size: 1rem !important;
+    line-height: 1.3 !important;
+    word-break: break-word;
+    hyphens: auto;
+  }
+
+  .timeline-description-content,
+  .entry-card p {
+    font-size: 0.9rem !important;
+    line-height: 1.4 !important;
+    word-break: break-word;
+    hyphens: auto;
+  }
+
+  /* Button improvements for mobile */
+  button, .button, a[role="button"] {
+    min-height: 44px !important;
+    padding: 8px 12px !important;
+    font-size: 0.9rem !important;
+  }
+
+  /* Form improvements for mobile */
+  input, textarea, select {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+    padding: 12px !important;
+  }
+
+  /* Hide debug info on mobile */
+  .hidden {
+    display: none !important;
+  }
+}

@@ -285,6 +285,7 @@ export const TimelineViewPage: React.FC = () => {
         subtitle="Timeline Entries"
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
+        showSiteTitle={false}
       >
         {/* Header Actions */}
         {oidcUser && (
@@ -580,7 +581,7 @@ export const TimelineViewPage: React.FC = () => {
       </PageHeader>
 
       {/* Main Content */}
-      <div style={{ 
+      <div className="main-content" style={{ 
         maxWidth: 1200, 
         margin: '0 auto', 
         padding: '0 20px 24px 20px'
@@ -736,6 +737,7 @@ export const TimelineViewPage: React.FC = () => {
                 <div
                   ref={provided.innerRef}
                   {...provided.droppableProps}
+                  className="timeline-list-grid"
                   style={{ 
                     display: 'grid', 
                     gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
@@ -753,6 +755,7 @@ export const TimelineViewPage: React.FC = () => {
                             ref={provided.innerRef}
                             {...provided.draggableProps}
                             {...provided.dragHandleProps}
+                            className="entry-card"
                             style={{
                               background: snapshot.isDragging ? 'rgba(229, 246, 253, 0.95)' : 'rgba(255, 255, 255, 0.95)',
                               borderRadius: 12,
@@ -802,7 +805,7 @@ export const TimelineViewPage: React.FC = () => {
                             </div>
 
                             {/* Cover Image */}
-                            <div style={{
+                            <div className="entry-card-image" style={{
                               height: 160,
                               position: 'relative',
                               overflow: 'hidden'
@@ -841,7 +844,7 @@ export const TimelineViewPage: React.FC = () => {
                             </div>
 
                             {/* Content */}
-                            <div style={{ padding: 16 }}>
+                            <div className="entry-card-info" style={{ padding: 16 }}>
                               <h4 style={{ 
                                 fontSize: 16, 
                                 fontWeight: 600, 
@@ -889,7 +892,7 @@ export const TimelineViewPage: React.FC = () => {
             </Droppable>
           </DragDropContext>
         ) : (
-          <div style={{
+          <div className="timeline-list-grid" style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
             gap: 20,
@@ -898,7 +901,7 @@ export const TimelineViewPage: React.FC = () => {
             padding: 0
           }}>
             {entries.map((entry) => (
-              <div key={entry.id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
+              <div key={entry.id} className="entry-card" style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
                 <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
                   {/* Delete Entry Button (admin only) */}
                   {oidcUser && (
@@ -954,7 +957,7 @@ export const TimelineViewPage: React.FC = () => {
                     {entry.position}
                   </div>
                   {/* Cover image top, portrait aspect ratio */}
-                  <div style={{ width: 120, height: 180, position: 'relative', overflow: 'hidden', margin: '24px auto 0 auto', borderRadius: 12, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', background: '#f8f9fa' }}>
+                  <div className="entry-card-image" style={{ width: 120, height: 180, position: 'relative', overflow: 'hidden', margin: '24px auto 0 auto', borderRadius: 12, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', background: '#f8f9fa' }}>
                     {entry.mediaItem && getCoverImageUrl(entry.mediaItem) ? (
                       <Link
                         to={`/media-library/${entry.mediaItem.Name}`}
@@ -997,7 +1000,7 @@ export const TimelineViewPage: React.FC = () => {
                     )}
                   </div>
                   {/* Content below image */}
-                  <div style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+                  <div className="entry-card-info" style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
                     <h3 style={{
                       marginBottom: 6,
                       color: '#2a4d8f',

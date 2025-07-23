@@ -129,6 +129,7 @@ export const TimelineListPage: React.FC = () => {
         subtitle="Discover chronological timelines for your favorite universes"
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
+        showSiteTitle={false}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -218,11 +219,15 @@ export const TimelineListPage: React.FC = () => {
             )}
           </div>
         ) : (
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', 
-            gap: 24 
-          }}>
+          <div 
+            className="timeline-list-grid"
+            style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
+              gap: 24,
+              maxWidth: '100%'
+            }}
+          >
             {timelines
               .slice()
               .sort((a, b) => {

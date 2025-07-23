@@ -9,6 +9,9 @@ export const contentPaths = {
 
 // Site configuration
 export const siteConfig = {
+  // Site branding
+  siteTitle: import.meta.env.VITE_SITE_TITLE || 'Timeline Theories',
+  
   // Background image: base path + relative path
   headerBackgroundImagePath: `${contentPaths.assets}/${import.meta.env.VITE_HEADER_BACKGROUND_IMAGE || 'background.webp'}`,
   headerBackgroundFallback: null, // Use gradient fallback instead of external image

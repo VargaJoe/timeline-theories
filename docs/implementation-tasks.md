@@ -2,6 +2,14 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ## Current Bugs & UX Issues
 
+- [x] **Mobile: Timeline Cards Width Issue**
+    - Timeline cards were wider than the header/page container causing horizontal overflow on mobile.
+    - Fixed by reducing grid minmax from 340px to 300px and adding mobile CSS constraints.
+    - Added timeline-list-grid CSS class for better mobile responsive targeting.
+- [x] **Mobile: Header Structure Improvement**
+    - Moved site title display to TopNavigationBar for consistent branding.
+    - Set showSiteTitle={false} on all PageHeader instances to avoid redundant titles.
+    - PageHeader now shows only page-specific titles and content under the main navigation.
 - [ ] **Trakt Import: Series Episode Titles Missing**
     - When importing from Trakt, episode titles are not brought over for series.
 - [ ] **DisplayName/Title/Year Handling**
@@ -12,8 +20,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
     - Imported media items always go under the main media library. There should be a select/create subfolder input in the import UI.
 - [ ] **Performance: Resource Loading on Navigation**
     - Navigating away from a page (e.g., media library) while it is still loading causes slowness, likely due to unfinished resource downloads. Find a solution to cancel or deprioritize unnecessary requests.
-- [ ] **Mobile: Header Too Wide**
-    - On mobile, the header is too wide and breaks the design.
 - [ ] **Mobile: Media Item Layout**
     - On mobile, media item display is ugly. Media info should be placed under the cover image at mobile resolutions.
 - [ ] **Bulk Update: Redundant API Requests**
