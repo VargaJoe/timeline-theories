@@ -2,6 +2,14 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ## Current Bugs & UX Issues
 
+- [x] **Mobile: Timeline Cards Width Issue**
+    - Timeline cards were wider than the header/page container causing horizontal overflow on mobile.
+    - Fixed by reducing grid minmax from 340px to 300px and adding mobile CSS constraints.
+    - Added timeline-list-grid CSS class for better mobile responsive targeting.
+- [x] **Mobile: Header Structure Improvement**
+    - Moved site title display to TopNavigationBar for consistent branding.
+    - Set showSiteTitle={false} on all PageHeader instances to avoid redundant titles.
+    - PageHeader now shows only page-specific titles and content under the main navigation.
 - [ ] **Trakt Import: Series Episode Titles Missing**
     - When importing from Trakt, episode titles are not brought over for series.
 - [ ] **DisplayName/Title/Year Handling**
@@ -12,21 +20,14 @@ Timeline Theories is a personal application for creating, organizing, and sharin
     - Imported media items always go under the main media library. There should be a select/create subfolder input in the import UI.
 - [ ] **Performance: Resource Loading on Navigation**
     - Navigating away from a page (e.g., media library) while it is still loading causes slowness, likely due to unfinished resource downloads. Find a solution to cancel or deprioritize unnecessary requests.
-- [ ] **Mobile: Header Too Wide**
-    - On mobile, the header is too wide and breaks the design.
 - [ ] **Mobile: Media Item Layout**
     - On mobile, media item display is ugly. Media info should be placed under the cover image at mobile resolutions.
 - [ ] **Bulk Update: Redundant API Requests**
     - When previewing changes in bulk update, if the user goes back and re-previews without changing options, the app calls the API again. Should cache and reuse previous responses if options are unchanged.
 - [ ] **Media Cover: Upload Default**
     - Upload media should be the default selection for cover image, not external URL (to avoid using external resources).
-- [ ] **Timeline Entry: Delete Option Missing**
-    - There should be an option to delete a timeline entry from the timeline page when an administrator is logged in.
-- [ ] **Timeline: Delete Icon Missing**
-    - The delete timeline icon has disappeared from the timeline page; it was present before.
-- [ ] **Timeline Description: HTML Support Lost**
-    - HTML support for the timeline description editor has disappeared; it was previously available.
 
+---
 
 ## Completed Stories
 
@@ -91,7 +92,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] Add edit feature for timelines on entries page
 - [x] Add delete feature for timelines on entries page (with robust path handling in deleteTimeline)
 
-
 ### Story 17 - Create Timeline by my Trakt List
 - [x] Add "Import from Trakt List" option to Timeline Create Page.
 - [x] Allow user to enter a Trakt list URL or select from their lists.
@@ -152,7 +152,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
   - [x] Production-ready system that handles API limitations without complete failure
   - [x] Handles OMDb daily limits, TMDb 429 errors, and Trakt rate limits properly
 
-
 ### Technical Task - Various Fixes
 - [x] import tv shows elements missing data
 - [x] **FIX: Robust genre filter and display in MediaLibraryPage.tsx** - Added normalizeGenre function to handle both array and string values for item.Genre, mirroring MediaType handling. Prevents crash when filtering or displaying genre if data shape varies.
@@ -201,6 +200,13 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Design consistent button group styling
 - [ ] Test usability and ensure icons are intuitive
 
+### Technical Task - Timeline Fixes
+
+- [x] There should be an option to delete a timeline entry from the timeline page when an administrator is logged in.
+- [x] The delete timeline icon has disappeared from the timeline page; it was present before.
+- [x] HTML support for the timeline description editor has disappeared; it was previously available. 
+- [x] Timeline cards on the timelines page now show a “TEST” indicator if the timeline is not public.
+  
 ---
 
 ## In Progress Stories

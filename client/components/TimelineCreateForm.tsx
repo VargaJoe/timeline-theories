@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 import { TraktImportDialog } from './TraktImportDialog';
 // import { fetchTraktList } from '../services/traktService';
 import type { TraktListItem } from '../services/traktService';
@@ -204,21 +206,23 @@ export const TimelineCreateForm: React.FC = () => {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Description</label>
-            <textarea
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Description (HTML supported)</label>
+            <ReactQuill
               value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Describe your timeline..."
-              rows={3}
+              onChange={setDescription}
+              theme="snow"
               style={{
                 width: '100%',
-                padding: '12px 14px',
+                minHeight: 80,
+                marginBottom: 8,
+                background: '#fff',
                 borderRadius: 6,
                 border: '1px solid #ccc',
                 fontSize: 16,
-                resize: 'vertical',
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                color: '#222',
               }}
+              className="quill-editor-dark"
             />
           </div>
           <div>

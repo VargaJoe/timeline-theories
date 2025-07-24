@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TraktImportDialog } from '../components/TraktImportDialog';
 import { PageHeader } from '../components/PageHeader';
@@ -283,6 +285,7 @@ export const TimelineViewPage: React.FC = () => {
         subtitle="Timeline Entries"
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
+        showSiteTitle={false}
       >
         {/* Header Actions */}
         {oidcUser && (
@@ -314,6 +317,45 @@ export const TimelineViewPage: React.FC = () => {
             >
               <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+            <button
+              onClick={async () => {
+                if (window.confirm('Are you sure you want to delete this timeline? This action cannot be undone.')) {
+                  try {
+                    await import('../services/timelineService').then(({ deleteTimeline }) => deleteTimeline(timeline.id));
+                    window.location.href = '/timelines';
+                  } catch (err) {
+                    alert('Failed to delete timeline.');
+                  }
+                }
+              }}
+              title="Delete Timeline"
+              style={{
+                background: '#dc3545',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M6 6v12a2 2 0 002 2h8a2 2 0 002-2V6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10v6m6-6v6" />
               </svg>
             </button>
             <Link 
@@ -460,19 +502,21 @@ export const TimelineViewPage: React.FC = () => {
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Description</label>
-              <textarea
+              <label style={{ fontWeight: 500, color: '#333', display: 'block', marginBottom: 4 }}>Description (HTML supported)</label>
+              <ReactQuill
                 value={editDescription}
-                onChange={e => setEditDescription(e.target.value)}
-                rows={3}
+                onChange={setEditDescription}
+                theme="snow"
                 style={{
                   width: '100%',
-                  padding: 8,
-                  border: '1px solid #ddd',
+                  minHeight: 80,
+                  marginBottom: 8,
+                  background: '#fff',
                   borderRadius: 4,
-                  resize: 'vertical',
-                  boxSizing: 'border-box'
+                  border: '1px solid #ddd',
+                  color: '#222',
                 }}
+                className="quill-editor-dark"
               />
             </div>
             <div style={{ marginBottom: 16 }}>
@@ -537,7 +581,7 @@ export const TimelineViewPage: React.FC = () => {
       </PageHeader>
 
       {/* Main Content */}
-      <div style={{ 
+      <div className="main-content" style={{ 
         maxWidth: 1200, 
         margin: '0 auto', 
         padding: '0 20px 24px 20px'
@@ -569,7 +613,6 @@ export const TimelineViewPage: React.FC = () => {
         {/* Timeline Description */}
         {timeline?.description && !editMode && (
         (() => {
-          // Create a temporary element to count lines
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = timeline.description;
           tempDiv.style.position = 'absolute';
@@ -584,11 +627,7 @@ export const TimelineViewPage: React.FC = () => {
           document.body.removeChild(tempDiv);
           const isDescriptionLong = numLines > DESCRIPTION_ROW_LIMIT;
           return (
-            <div style={{
-              // maxWidth: '900px',
-              margin: '0 auto 32px auto',
-              padding: '0'
-            }}>
+            <div style={{ margin: '0 auto 32px auto', padding: '0' }}>
               <div style={{
                 background: 'rgba(255, 255, 255, 0.95)',
                 border: '1px solid rgba(0, 0, 0, 0.1)',
@@ -611,6 +650,7 @@ export const TimelineViewPage: React.FC = () => {
                   Description
                 </div>
                 <div
+                  className="timeline-description-content"
                   style={
                     showFullDescription || !isDescriptionLong
                       ? {}
@@ -697,6 +737,7 @@ export const TimelineViewPage: React.FC = () => {
                 <div
                   ref={provided.innerRef}
                   {...provided.droppableProps}
+                  className="timeline-list-grid"
                   style={{ 
                     display: 'grid', 
                     gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
@@ -714,6 +755,7 @@ export const TimelineViewPage: React.FC = () => {
                             ref={provided.innerRef}
                             {...provided.draggableProps}
                             {...provided.dragHandleProps}
+                            className="entry-card"
                             style={{
                               background: snapshot.isDragging ? 'rgba(229, 246, 253, 0.95)' : 'rgba(255, 255, 255, 0.95)',
                               borderRadius: 12,
@@ -763,7 +805,7 @@ export const TimelineViewPage: React.FC = () => {
                             </div>
 
                             {/* Cover Image */}
-                            <div style={{
+                            <div className="entry-card-image" style={{
                               height: 160,
                               position: 'relative',
                               overflow: 'hidden'
@@ -802,7 +844,7 @@ export const TimelineViewPage: React.FC = () => {
                             </div>
 
                             {/* Content */}
-                            <div style={{ padding: 16 }}>
+                            <div className="entry-card-info" style={{ padding: 16 }}>
                               <h4 style={{ 
                                 fontSize: 16, 
                                 fontWeight: 600, 
@@ -850,7 +892,7 @@ export const TimelineViewPage: React.FC = () => {
             </Droppable>
           </DragDropContext>
         ) : (
-          <div style={{
+          <div className="timeline-list-grid" style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
             gap: 20,
@@ -859,9 +901,43 @@ export const TimelineViewPage: React.FC = () => {
             padding: 0
           }}>
             {entries.map((entry) => (
-              // MagicUI card effect placeholder (replace with real import/use)
-              <div key={entry.id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
+              <div key={entry.id} className="entry-card" style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
                 <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
+                  {/* Delete Entry Button (admin only) */}
+                  {oidcUser && (
+                    <button
+                      title="Delete Entry"
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        right: 12,
+                        background: '#dc3545',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '6px 10px',
+                        cursor: 'pointer',
+                        zIndex: 2,
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.12)'
+                      }}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (window.confirm('Delete this timeline entry? This cannot be undone.')) {
+                          try {
+                            await import('../services/timelineEntryService').then(({ TimelineEntryService }) => TimelineEntryService.deleteTimelineEntry(entry.id));
+                            window.location.reload();
+                          } catch (err) {
+                            alert('Failed to delete entry.');
+                          }
+                        }
+                      }}
+                    >
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M6 6v12a2 2 0 002 2h8a2 2 0 002-2V6" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10v6m6-6v6" />
+                      </svg>
+                    </button>
+                  )}
                   {/* Position Badge */}
                   <div style={{
                     position: 'absolute',
@@ -881,7 +957,7 @@ export const TimelineViewPage: React.FC = () => {
                     {entry.position}
                   </div>
                   {/* Cover image top, portrait aspect ratio */}
-                  <div style={{ width: 120, height: 180, position: 'relative', overflow: 'hidden', margin: '24px auto 0 auto', borderRadius: 12, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', background: '#f8f9fa' }}>
+                  <div className="entry-card-image" style={{ width: 120, height: 180, position: 'relative', overflow: 'hidden', margin: '24px auto 0 auto', borderRadius: 12, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', background: '#f8f9fa' }}>
                     {entry.mediaItem && getCoverImageUrl(entry.mediaItem) ? (
                       <Link
                         to={`/media-library/${entry.mediaItem.Name}`}
@@ -924,7 +1000,7 @@ export const TimelineViewPage: React.FC = () => {
                     )}
                   </div>
                   {/* Content below image */}
-                  <div style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+                  <div className="entry-card-info" style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
                     <h3 style={{
                       marginBottom: 6,
                       color: '#2a4d8f',

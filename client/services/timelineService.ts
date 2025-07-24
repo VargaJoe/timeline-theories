@@ -57,6 +57,7 @@ export interface Timeline {
   sort_order?: string;
   created_at?: string;
   coverImageUrl?: string;
+  isPublic?: boolean;
 }
 
 export async function createTimeline(data: { name: string; displayName?: string; description?: string; sortOrder?: string }): Promise<Timeline> {
@@ -66,7 +67,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
       parentPath: timelinesPath,
       contentType: TIMELINE_CONTENT_TYPE,
       oDataOptions: {
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic'],
       },
       content: {
         Name: data.name,
@@ -83,6 +84,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
       description: result.d.Description || data.description,
       sort_order: result.d.SortOrder || data.sortOrder,
       created_at: result.d.CreationDate,
+      isPublic: typeof result.d.IsPublic === 'boolean' ? result.d.IsPublic : false,
     };
   } catch (error) {
     console.error('Failed to create timeline:', error);
@@ -97,7 +99,7 @@ export async function getTimelines(): Promise<Timeline[]> {
       path: timelinesPath,
       oDataOptions: {
         query: `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`,
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl'],
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsPublic'],
         orderby: ['DisplayName'],
       },
     });
@@ -110,6 +112,7 @@ export async function getTimelines(): Promise<Timeline[]> {
       SortOrder?: string | string[];
       CreationDate: string;
       CoverImageUrl?: string;
+      IsPublic?: boolean;
     }) => {
       // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
       let sortOrder = 'chronological';
@@ -127,6 +130,7 @@ export async function getTimelines(): Promise<Timeline[]> {
         sort_order: sortOrder,
         created_at: item.CreationDate,
         coverImageUrl: item.CoverImageUrl,
+        isPublic: typeof item.IsPublic === 'boolean' ? item.IsPublic : false,
       };
     });
   } catch (error) {

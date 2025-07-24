@@ -32,6 +32,15 @@ export interface TimelineEntry {
 
 // Service methods for TimelineEntry CRUD
 export class TimelineEntryService {
+  // Delete a timeline entry by id
+  static async deleteTimelineEntry(entryId: string | number): Promise<void> {
+    try {
+      await repository.delete({ idOrPath: entryId });
+    } catch (error) {
+      console.error('Failed to delete timeline entry:', error);
+      throw new Error('Failed to delete timeline entry.');
+    }
+  }
   // List all entries for a given timeline
   static async listTimelineEntries(timelineId: number, parentPath: string): Promise<TimelineEntry[]> {
     const result = await repository.loadCollection({

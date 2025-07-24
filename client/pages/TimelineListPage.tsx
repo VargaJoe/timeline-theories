@@ -129,6 +129,7 @@ export const TimelineListPage: React.FC = () => {
         subtitle="Discover chronological timelines for your favorite universes"
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
+        showSiteTitle={false}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -218,11 +219,15 @@ export const TimelineListPage: React.FC = () => {
             )}
           </div>
         ) : (
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', 
-            gap: 24 
-          }}>
+          <div 
+            className="timeline-list-grid"
+            style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
+              gap: 24,
+              maxWidth: '100%'
+            }}
+          >
             {timelines
               .slice()
               .sort((a, b) => {
@@ -244,7 +249,8 @@ export const TimelineListPage: React.FC = () => {
                     transition: 'transform 0.2s, box-shadow 0.2s',
                     height: 420, // Fixed height for consistent layout
                     display: 'flex',
-                    flexDirection: 'column'
+                    flexDirection: 'column',
+                    position: 'relative'
                   }}>
                     <Link 
                       to={`/timelines/${pathSegment}`} 
@@ -264,6 +270,24 @@ export const TimelineListPage: React.FC = () => {
                         e.currentTarget.parentElement!.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
                       }}
                     >
+                    {/* TEST indicator if not public */}
+                    {timeline.isPublic === false && (
+                      <div style={{
+                        position: 'absolute',
+                        top: 12,
+                        left: 12,
+                        background: '#ffc107',
+                        color: '#212529',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+                        zIndex: 2
+                      }}>
+                        TEST
+                      </div>
+                    )}
                       {/* Cover Image */}
                       <div style={{
                         height: 200,
