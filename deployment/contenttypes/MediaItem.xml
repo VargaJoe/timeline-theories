@@ -29,6 +29,7 @@
         <Options>
           <Option value="movie">Movie</Option>
           <Option value="tvepisode">TVEpisode</Option>
+          <Option value="tvseason">TVSeason</Option>
           <Option value="tvseries">TVSeries</Option>
           <Option value="book">Book</Option>
           <Option value="comic">Comic</Option>

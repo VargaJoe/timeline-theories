@@ -98,8 +98,18 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             reused++;
           } else {
             const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
+            // Extract plain title for Title field (remove year and extra info)
+            let plainTitle = displayName;
+            // Remove year in parentheses and anything after (for movies/shows)
+            const match = plainTitle.match(/^(.*?)( \(\d{4}\))?(.*)?$/);
+            if (match) {
+              plainTitle = match[1].trim();
+            }
+            // For seasons/episodes, also remove trailing season/episode info
+            plainTitle = plainTitle.replace(/ Season \d+$/, '').replace(/ S\d{2}E\d{2}$/i, '').trim();
             const req = {
               DisplayName: displayName,
+              Title: plainTitle,
               Description: '',
               MediaType: item.type,
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,

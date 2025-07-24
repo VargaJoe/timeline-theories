@@ -163,6 +163,7 @@ interface SenseNetContent {
 
 export interface CreateMediaItemRequest {
   DisplayName: string;
+  Title?: string;
   Description: string;
   MediaType: string;
   ReleaseDate?: string;
@@ -237,11 +238,12 @@ export class MediaLibraryService {
         parentPath: this.MEDIA_LIBRARY_PATH,
         contentType: MEDIA_ITEM_CONTENT_TYPE,
         oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Description', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         },
         content: {
           DisplayName: data.DisplayName,
+          Title: data.Title,
           Description: data.Description,
           MediaType: mappedMediaType,
           ReleaseDate: releaseDateIso,
