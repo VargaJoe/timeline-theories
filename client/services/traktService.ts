@@ -9,10 +9,12 @@ export interface TraktListItem {
     tmdb?: number;
     tvdb?: number;
   };
-  title: string;
+  title: string; // Plain title, no year/season/episode info
+  displayTitle: string; // Combined display title (with year/season/episode info)
   year?: number;
   season?: number;  // For season and episode types
   episode?: number; // For episode type
+  seriesTitle?: string; // For seasons/episodes, the base series title
 }
 
 // Raw Trakt API response types
@@ -110,44 +112,57 @@ type TraktRawItem = TraktMovieItem | TraktShowItem | TraktSeasonItem | TraktEpis
 
 function mapTraktItem(item: TraktRawItem): TraktListItem {
   switch (item.type) {
-    case 'movie':
+    case 'movie': {
+      const plainTitle = item.movie.title;
+      const displayTitle = `${item.movie.title} (${item.movie.year})`;
       return {
         type: 'movie',
         ids: item.movie.ids,
-        title: `${item.movie.title} (${item.movie.year})`, // Keep movies as "title (year)"
+        title: plainTitle,
+        displayTitle,
         year: item.movie.year
       };
-    
-    case 'show':
+    }
+    case 'show': {
+      const plainTitle = item.show.title;
+      const displayTitle = `${item.show.title} (${item.show.year})`;
       return {
         type: 'show',
         ids: item.show.ids,
-        title: `${item.show.title} (${item.show.year})`, // Shows as "title (year)"
+        title: plainTitle,
+        displayTitle,
         year: item.show.year
       };
-    
-    case 'season':
+    }
+    case 'season': {
+      const plainTitle = item.show.title;
+      const displayTitle = `${item.show.title} (${item.show.year}) Season ${item.season.number}`;
       return {
         type: 'season',
-        ids: item.show.ids, // Use show IDs for seasons
-        title: `${item.show.title} (${item.show.year}) Season ${item.season.number}`, // "title (year) Season X"
+        ids: item.show.ids,
+        title: plainTitle,
+        displayTitle,
         year: item.show.year,
-        season: item.season.number
-      };
-    
-    case 'episode': {
-      const seasonNum = item.episode.season.toString().padStart(2, '0');
-      const episodeNum = item.episode.number.toString().padStart(2, '0');
-      return {
-        type: 'episode',
-        ids: item.show.ids, // Use show IDs for episodes  
-        title: `${item.show.title} (${item.show.year}) S${seasonNum}E${episodeNum}`, // "title (year) SXXeXX"
-        year: item.show.year,
-        season: item.episode.season,
-        episode: item.episode.number
+        season: item.season.number,
+        seriesTitle: item.show.title
       };
     }
-    
+    case 'episode': {
+      const plainTitle = item.show.title;
+      const seasonNum = item.episode.season.toString().padStart(2, '0');
+      const episodeNum = item.episode.number.toString().padStart(2, '0');
+      const displayTitle = `${item.show.title} (${item.show.year}) S${seasonNum}E${episodeNum}`;
+      return {
+        type: 'episode',
+        ids: item.show.ids,
+        title: plainTitle,
+        displayTitle,
+        year: item.show.year,
+        season: item.episode.season,
+        episode: item.episode.number,
+        seriesTitle: item.show.title
+      };
+    }
     default:
       throw new Error(`Unknown Trakt item type: ${(item as TraktRawItem).type}`);
   }
