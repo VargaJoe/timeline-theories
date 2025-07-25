@@ -325,7 +325,7 @@ export const TimelineViewPage: React.FC = () => {
                   try {
                     await import('../services/timelineService').then(({ deleteTimeline }) => deleteTimeline(timeline.id));
                     window.location.href = '/timelines';
-                  } catch (err) {
+                  } catch {
                     alert('Failed to delete timeline.');
                   }
                 }
@@ -926,7 +926,7 @@ export const TimelineViewPage: React.FC = () => {
                           try {
                             await import('../services/timelineEntryService').then(({ TimelineEntryService }) => TimelineEntryService.deleteTimelineEntry(entry.id));
                             window.location.reload();
-                          } catch (err) {
+                          } catch {
                             alert('Failed to delete entry.');
                           }
                         }
@@ -1043,8 +1043,10 @@ export const TimelineViewPage: React.FC = () => {
             Id: ref.Id,
             Name: ref.Name || '',
             DisplayName: ref.DisplayName || ref.Name || '',
+            Title: ref.Title,
+            Subtitle: ref.Subtitle,
             Description: '',
-            MediaType: '',
+            MediaType: ref.MediaType || '',
             CoverImageUrl: ref.CoverImageUrl,
             CreationDate: '',
             CreatedBy: { DisplayName: '' }

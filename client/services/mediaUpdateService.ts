@@ -87,6 +87,12 @@ export class MediaUpdateService {
   static async fetchUpdateData(mediaItem: MediaItem, options?: UpdateOptions): Promise<MediaUpdateData | null> {
     try {
       console.log('Fetching update data for:', mediaItem.DisplayName);
+      console.log('MediaItem fields:', {
+        Title: mediaItem.Title,
+        Subtitle: mediaItem.Subtitle,
+        MediaType: mediaItem.MediaType,
+        DisplayName: mediaItem.DisplayName
+      });
       
       // Parse external links if available
       const externalLinks = this.parseExternalLinks(mediaItem.ExternalLinks);
