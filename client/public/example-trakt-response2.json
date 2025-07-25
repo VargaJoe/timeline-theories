@@ -1,0 +1,257 @@
+[
+    {
+        "rank": 1,
+        "id": 207739716,
+        "listed_at": "2017-05-19T16:55:30.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X-Men: First Class",
+            "year": 2011,
+            "ids": {
+                "trakt": 34517,
+                "slug": "x-men-first-class-2011",
+                "imdb": "tt1270798",
+                "tmdb": 49538
+            }
+        }
+    },
+    {
+        "rank": 2,
+        "id": 207739725,
+        "listed_at": "2017-05-19T16:55:37.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X-Men Origins: Wolverine",
+            "year": 2009,
+            "ids": {
+                "trakt": 1430,
+                "slug": "x-men-origins-wolverine-2009",
+                "imdb": "tt0458525",
+                "tmdb": 2080
+            }
+        }
+    },
+    {
+        "rank": 3,
+        "id": 207739664,
+        "listed_at": "2017-05-19T16:54:45.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X-Men",
+            "year": 2000,
+            "ids": {
+                "trakt": 23299,
+                "slug": "x-men-2000",
+                "imdb": "tt0120903",
+                "tmdb": 36657
+            }
+        }
+    },
+    {
+        "rank": 4,
+        "id": 207740050,
+        "listed_at": "2017-05-19T17:02:43.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X-Men: The Mutant Watch",
+            "year": 2000,
+            "ids": {
+                "trakt": 293982,
+                "slug": "x-men-the-mutant-watch-2000",
+                "imdb": "tt0285761",
+                "tmdb": 447399
+            }
+        }
+    },
+    {
+        "rank": 5,
+        "id": 207739778,
+        "listed_at": "2017-05-19T16:56:40.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X2",
+            "year": 2003,
+            "ids": {
+                "trakt": 23300,
+                "slug": "x2-2003",
+                "imdb": "tt0290334",
+                "tmdb": 36658
+            }
+        }
+    },
+    {
+        "rank": 6,
+        "id": 207739737,
+        "listed_at": "2017-05-19T16:55:48.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X-Men: The Last Stand",
+            "year": 2006,
+            "ids": {
+                "trakt": 23308,
+                "slug": "x-men-the-last-stand-2006",
+                "imdb": "tt0376994",
+                "tmdb": 36668
+            }
+        }
+    },
+    {
+        "rank": 7,
+        "id": 207739810,
+        "listed_at": "2017-05-19T16:57:22.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "The Wolverine",
+            "year": 2013,
+            "ids": {
+                "trakt": 56230,
+                "slug": "the-wolverine-2013",
+                "imdb": "tt1430132",
+                "tmdb": 76170
+            }
+        }
+    },
+    {
+        "rank": 8,
+        "id": 207739707,
+        "listed_at": "2017-05-19T16:55:18.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X-Men: Days of Future Past",
+            "year": 2014,
+            "ids": {
+                "trakt": 87348,
+                "slug": "x-men-days-of-future-past-2014",
+                "imdb": "tt1877832",
+                "tmdb": 127585
+            }
+        }
+    },
+    {
+        "rank": 9,
+        "id": 207739654,
+        "listed_at": "2017-05-19T16:54:27.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "X-Men: Apocalypse",
+            "year": 2016,
+            "ids": {
+                "trakt": 149999,
+                "slug": "x-men-apocalypse-2016",
+                "imdb": "tt3385516",
+                "tmdb": 246655
+            }
+        }
+    },
+    {
+        "rank": 10,
+        "id": 207740031,
+        "listed_at": "2017-05-19T17:02:21.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "Dark Phoenix",
+            "year": 2019,
+            "ids": {
+                "trakt": 200946,
+                "slug": "dark-phoenix-2019",
+                "imdb": "tt6565702",
+                "tmdb": 320288
+            }
+        }
+    },
+    {
+        "rank": 11,
+        "id": 207739758,
+        "listed_at": "2017-05-19T16:56:22.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "Deadpool",
+            "year": 2016,
+            "ids": {
+                "trakt": 190430,
+                "slug": "deadpool-2016",
+                "imdb": "tt1431045",
+                "tmdb": 293660
+            }
+        }
+    },
+    {
+        "rank": 12,
+        "id": 656100809,
+        "listed_at": "2022-01-24T19:02:34.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "Deadpool: No Good Deed",
+            "year": 2017,
+            "ids": {
+                "trakt": 344723,
+                "slug": "deadpool-no-good-deed-2017",
+                "imdb": "tt6612630",
+                "tmdb": 558144
+            }
+        }
+    },
+    {
+        "rank": 13,
+        "id": 656099460,
+        "listed_at": "2022-01-24T18:57:19.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "Deadpool 2",
+            "year": 2018,
+            "ids": {
+                "trakt": 226108,
+                "slug": "deadpool-2-2018",
+                "imdb": "tt5463162",
+                "tmdb": 383498
+            }
+        }
+    },
+    {
+        "rank": 14,
+        "id": 656099519,
+        "listed_at": "2022-01-24T18:58:06.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "The New Mutants",
+            "year": 2020,
+            "ids": {
+                "trakt": 233766,
+                "slug": "the-new-mutants-2020",
+                "imdb": "tt4682266",
+                "tmdb": 340102
+            }
+        }
+    },
+    {
+        "rank": 15,
+        "id": 207743948,
+        "listed_at": "2017-05-19T18:05:47.000Z",
+        "notes": null,
+        "type": "movie",
+        "movie": {
+            "title": "Logan",
+            "year": 2017,
+            "ids": {
+                "trakt": 161972,
+                "slug": "logan-2017",
+                "imdb": "tt3315342",
+                "tmdb": 263115
+            }
+        }
+    }
+]
