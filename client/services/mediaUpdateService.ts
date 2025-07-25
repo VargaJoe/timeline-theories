@@ -662,11 +662,15 @@ export class MediaUpdateService {
     
     // Try Subtitle field first (clean structured data)
     if (mediaItem?.Subtitle) {
+      // Check if Subtitle contains episode numbers (S01E01 format)
       const subMatch = mediaItem.Subtitle.match(/S(\d{1,2})E(\d{1,2})/i);
       if (subMatch) {
         seasonNumber = parseInt(subMatch[1], 10);
         episodeNumber = parseInt(subMatch[2], 10);
         console.log(`Extracted from Subtitle field: Season ${seasonNumber}, Episode ${episodeNumber}`);
+      } else {
+        // Subtitle contains episode title, need to extract numbers from DisplayName
+        console.log(`Subtitle contains episode title: "${mediaItem.Subtitle}", checking DisplayName for episode numbers`);
       }
     }
     

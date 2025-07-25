@@ -42,57 +42,28 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   };
 
   const extractTitleAndSubtitle = (item: TraktListItem) => {
-    // Extract clean title from TraktListItem structure
-    // Instead of parsing the formatted title, use the raw data from Trakt
+    // No more parsing! Use the clean data directly from TraktService
+    const cleanTitle = item.title; // Clean show/movie title 
+    const displayName = item.formattedTitle;   // Formatted title for display
     
-    let cleanTitle = '';
     let subtitle = '';
-    let displayName = item.title; // Keep the formatted version for display
     
-    if (item.type === 'movie') {
-      // For movies: clean title without year
-      const match = item.title.match(/^(.+?)\s+\((\d{4})\)$/);
-      if (match) {
-        cleanTitle = match[1].trim();
-        displayName = item.title; // "Movie Title (2020)"
-      } else {
-        cleanTitle = item.title;
-      }
-    } else if (item.type === 'show') {
-      // For shows: clean title without year
-      const match = item.title.match(/^(.+?)\s+\((\d{4})\)$/);
-      if (match) {
-        cleanTitle = match[1].trim();
-        displayName = item.title; // "Show Title (2020)"
-      } else {
-        cleanTitle = item.title;
-      }
-    } else if (item.type === 'season') {
-      // For seasons: extract show title and season info
-      const match = item.title.match(/^(.+?)\s+\((\d{4})\)\s+(Season\s+\d+)$/);
-      if (match) {
-        cleanTitle = match[1].trim();
-        subtitle = match[3].trim(); // "Season 1"
-        displayName = item.title; // "Show Title (2020) Season 1"
-      } else {
-        cleanTitle = item.title;
-      }
+    if (item.type === 'season') {
+      subtitle = `Season ${item.season}`;
     } else if (item.type === 'episode') {
-      // For episodes: extract show title and episode info
-      const match = item.title.match(/^(.+?)\s+\((\d{4})\)\s+(S\d{2}E\d{2})$/);
-      if (match) {
-        cleanTitle = match[1].trim();
-        subtitle = match[3].trim(); // "S01E01"
-        displayName = item.title; // "Show Title (2020) S01E01"
+      // Prioritize episode title over episode number for better UX
+      if (item.episodeTitle) {
+        subtitle = item.episodeTitle; // Use meaningful episode title like "Pilot" or "The One Where..."
       } else {
-        cleanTitle = item.title;
+        // Fallback to episode number if no title available
+        const seasonNum = item.season!.toString().padStart(2, '0');
+        const episodeNum = item.episode!.toString().padStart(2, '0');
+        subtitle = `S${seasonNum}E${episodeNum}`;
       }
-    } else {
-      cleanTitle = item.title;
     }
     
     return { 
-      title: cleanTitle || undefined, 
+      title: cleanTitle,
       subtitle: subtitle || undefined,
       displayName 
     };
