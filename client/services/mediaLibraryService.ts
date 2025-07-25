@@ -98,6 +98,8 @@ export interface MediaItem {
   ParentId?: number; 
   Name: string;
   DisplayName: string;
+  Title?: string;
+  Subtitle?: string;
   Description: string;
   MediaType: string;
   ReleaseDate?: string;
@@ -137,6 +139,8 @@ interface SenseNetContent {
   Id: number;
   Name: string;
   DisplayName: string;
+  Title?: string;
+  Subtitle?: string;
   Description: string;
   SortOrder?: string;
   CreationDate: string;
@@ -163,6 +167,8 @@ interface SenseNetContent {
 
 export interface CreateMediaItemRequest {
   DisplayName: string;
+  Title?: string;
+  Subtitle?: string;
   Description: string;
   MediaType: string;
   ReleaseDate?: string;
@@ -242,6 +248,8 @@ export class MediaLibraryService {
         },
         content: {
           DisplayName: data.DisplayName,
+          Title: data.Title,
+          Subtitle: data.Subtitle,
           Description: data.Description,
           MediaType: mappedMediaType,
           ReleaseDate: releaseDateIso,
@@ -274,7 +282,7 @@ export class MediaLibraryService {
         path: this.MEDIA_LIBRARY_PATH,
         oDataOptions: {
           query: `+TypeIs:${MEDIA_ITEM_CONTENT_TYPE} +Hidden:0`,
-          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy'],
           orderby: ['CreationDate desc']
         }
@@ -298,7 +306,7 @@ export class MediaLibraryService {
       const response = await repository.load({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         }
       });
@@ -322,7 +330,7 @@ export class MediaLibraryService {
         path: mediaLibraryPath,
         oDataOptions: {
           query,
-          select: ['Id', 'ParentId', 'Name', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'Name', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         }
       });
@@ -386,6 +394,8 @@ export class MediaLibraryService {
       // Build update content with only provided fields
       const updateContent: Record<string, string | number | undefined> = {};
       if (data.DisplayName !== undefined) updateContent.DisplayName = data.DisplayName;
+      if (data.Title !== undefined) updateContent.Title = data.Title;
+      if (data.Subtitle !== undefined) updateContent.Subtitle = data.Subtitle;
       if (data.Description !== undefined) updateContent.Description = data.Description;
       if (mappedMediaType !== undefined) updateContent.MediaType = mappedMediaType;
       if (data.ReleaseDate !== undefined) updateContent.ReleaseDate = toIsoDateString(data.ReleaseDate);
@@ -402,7 +412,7 @@ export class MediaLibraryService {
       const response = await repository.patch({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
           expand: ['CreatedBy']
         },
         content: updateContent
@@ -487,6 +497,8 @@ export class MediaLibraryService {
       Id: memo.Id,
       Name: memo.Name,
       DisplayName: memo.DisplayName,
+      Title: memo.Title,
+      Subtitle: memo.Subtitle,
       Description: memo.Description,
       MediaType: memo.MediaType || 'Other',
       ReleaseDate: memo.ReleaseDate,

@@ -41,6 +41,50 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     } catch { return null; }
   };
 
+  const extractTitleAndSubtitle = (item: TraktListItem) => {
+    // Extract clean title from formatted display name
+    // Examples:
+    // "Movie Title (2020)" -> Title: "Movie Title", Subtitle: undefined
+    // "Show Title (2020) Season 1" -> Title: "Show Title", Subtitle: "Season 1"
+    // "Show Title (2020) S01E01" -> Title: "Show Title", Subtitle: "S01E01"
+    
+    const displayName = item.title;
+    let title = '';
+    let subtitle = '';
+    
+    if (item.type === 'movie' || item.type === 'show') {
+      // For movies and shows: "Title (Year)"
+      const match = displayName.match(/^(.+?)\s+\((\d{4})\)$/);
+      if (match) {
+        title = match[1].trim();
+      } else {
+        title = displayName;
+      }
+    } else if (item.type === 'season') {
+      // For seasons: "Show Title (Year) Season X"
+      const match = displayName.match(/^(.+?)\s+\((\d{4})\)\s+(Season\s+\d+)$/);
+      if (match) {
+        title = match[1].trim();
+        subtitle = match[3].trim();
+      } else {
+        title = displayName;
+      }
+    } else if (item.type === 'episode') {
+      // For episodes: "Show Title (Year) SXXEXX"
+      const match = displayName.match(/^(.+?)\s+\((\d{4})\)\s+(S\d{2}E\d{2})$/);
+      if (match) {
+        title = match[1].trim();
+        subtitle = match[3].trim();
+      } else {
+        title = displayName;
+      }
+    } else {
+      title = displayName;
+    }
+    
+    return { title, subtitle: subtitle || undefined };
+  };
+
   const handleImport = async () => {
     setError('');
     setSummary(null);
@@ -98,8 +142,11 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             reused++;
           } else {
             const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
+            const { title, subtitle } = extractTitleAndSubtitle(item);
             const req = {
               DisplayName: displayName,
+              Title: title,
+              Subtitle: subtitle,
               Description: '',
               MediaType: item.type,
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
