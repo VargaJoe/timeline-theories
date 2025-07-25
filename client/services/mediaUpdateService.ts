@@ -258,7 +258,7 @@ export class MediaUpdateService {
         data = await this.fetchFromOMDb(identifier);
         break;
       case DataSource.TMDB:
-        data = await this.fetchFromTMDB(identifier, mediaItem.MediaType);
+        data = await this.fetchFromTMDB(identifier, mediaItem.MediaType, mediaItem);
         break;
       case DataSource.TRAKT:
         data = await this.fetchFromTrakt(identifier);
@@ -367,13 +367,16 @@ export class MediaUpdateService {
       // Extract year if present
       const yearMatch = title.match(/\((\d{4})\)$/);
       const year = yearMatch ? yearMatch[1] : '';
-      // Map media type
+      
+      // Map media type to OMDb types
       let type = '';
       if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
         type = '&type=movie';
-      } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
+      } else if (mediaType === 'show' || mediaType === 'season' || mediaType === 'episode' || 
+                 mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
         type = '&type=series';
       }
+      
       const url = `https://www.omdbapi.com/?t=${encodeURIComponent(cleanTitle)}${year ? `&y=${year}` : ''}${type}&apikey=${apiKey}&plot=full`;
       const response = await fetch(url);
       const data = await response.json();
@@ -397,7 +400,7 @@ export class MediaUpdateService {
   /**
    * Fetch from TMDB API with rate limit handling
    */
-  private static async fetchFromTMDB(tmdbId: string, mediaType?: string): Promise<MediaUpdateData | null> {
+  private static async fetchFromTMDB(tmdbId: string, mediaType?: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
     const apiKey = await loadApiKey(tmdbKeyFullPath);
     if (!apiKey) {
       console.warn('TMDB API key not configured in SenseNet');
@@ -406,49 +409,180 @@ export class MediaUpdateService {
 
     return this.retryWithBackoff(async () => {
       console.log(`Attempting to fetch TMDB ID: ${tmdbId} with mediaType: ${mediaType}`);
-      // Try different content types based on media type or try both
-      const typesToTry = [];
+      
+      // Handle different media types with appropriate endpoints
       if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
-        typesToTry.push('movie');
-      } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series') || mediaType?.toLowerCase().includes('episode')) {
-        typesToTry.push('tv');
+        // Movie endpoint
+        return await this.fetchTMDBMovie(tmdbId, apiKey);
+      } else if (mediaType === 'show' || mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
+        // TV Series endpoint
+        return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+      } else if (mediaType === 'season') {
+        // Season endpoint - requires show ID and season number
+        return await this.fetchTMDBSeason(tmdbId, apiKey, mediaItem);
+      } else if (mediaType === 'episode') {
+        // Episode endpoint - requires show ID, season and episode numbers
+        return await this.fetchTMDBEpisode(tmdbId, apiKey, mediaItem);
       } else {
-        // Unknown type, try both
-        typesToTry.push('movie', 'tv');
+        // Unknown type, try both movie and TV series
+        console.log(`Unknown media type: ${mediaType}, trying both movie and TV endpoints`);
+        const movieResult = await this.fetchTMDBMovie(tmdbId, apiKey);
+        if (movieResult) return movieResult;
+        
+        const tvResult = await this.fetchTMDBTVSeries(tmdbId, apiKey);
+        if (tvResult) return tvResult;
+        
+        console.log(`No data found on TMDB for ID: ${tmdbId}`);
+        return null;
       }
-      for (const type of typesToTry) {
-        console.log(`Trying TMDB ${type} endpoint for ID: ${tmdbId}`);
-        const response = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${apiKey}`);
-        if (!response.ok) {
-          // If it's the last type to try, throw the error
-          if (type === typesToTry[typesToTry.length - 1]) {
-            const error: ApiError = new Error(`TMDB API error: ${response.status}`);
-            error.status = response.status;
-            if (response.status === 429) {
-              error.message = 'TMDB rate limit exceeded';
-            }
-            throw error;
-          }
-          // Otherwise continue to next type
-          console.log(`TMDB ${type} endpoint returned ${response.status} for ID: ${tmdbId}`);
-          continue;
-        }
-        const data = await response.json();
-        if (data.id) {
-          console.log(`Successfully fetched from TMDB ${type}:`, data.title || data.name);
-          return {
-            title: data.title || data.name,
-            description: data.overview,
-            coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
-            releaseDate: data.release_date || data.first_air_date,
-            runtime: data.runtime || data.episode_run_time?.[0],
-            genres: data.genres?.map((g: { name: string }) => g.name)
-          };
-        }
-      }
-      console.log(`No data found on TMDB for ID: ${tmdbId}`);
-      return null;
     }, DataSource.TMDB);
+  }
+
+  /**
+   * Fetch movie data from TMDB
+   */
+  private static async fetchTMDBMovie(tmdbId: string, apiKey: string): Promise<MediaUpdateData | null> {
+    console.log(`Trying TMDB movie endpoint for ID: ${tmdbId}`);
+    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB movie endpoint returned ${response.status} for ID: ${tmdbId}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB movie:`, data.title);
+      return {
+        title: data.title,
+        description: data.overview,
+        coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+        releaseDate: data.release_date,
+        runtime: data.runtime,
+        genres: data.genres?.map((g: { name: string }) => g.name)
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Fetch TV series data from TMDB
+   */
+  private static async fetchTMDBTVSeries(tmdbId: string, apiKey: string): Promise<MediaUpdateData | null> {
+    console.log(`Trying TMDB TV series endpoint for ID: ${tmdbId}`);
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB TV series endpoint returned ${response.status} for ID: ${tmdbId}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB TV series:`, data.name);
+      return {
+        title: data.name,
+        description: data.overview,
+        coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+        releaseDate: data.first_air_date,
+        runtime: data.episode_run_time?.[0],
+        genres: data.genres?.map((g: { name: string }) => g.name)
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Fetch season data from TMDB using series ID and season number
+   */
+  private static async fetchTMDBSeason(tmdbId: string, apiKey: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
+    // Extract season number from display name (e.g., "Breaking Bad (2008) Season 5")
+    const seasonMatch = mediaItem?.DisplayName?.match(/Season (\d+)/i);
+    if (!seasonMatch) {
+      console.warn('Could not extract season number from display name:', mediaItem?.DisplayName);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    
+    const seasonNumber = seasonMatch[1];
+    console.log(`Trying TMDB season endpoint for series ID: ${tmdbId}, season: ${seasonNumber}`);
+    
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB season endpoint returned ${response.status} for series ID: ${tmdbId}, season: ${seasonNumber}`);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB season:`, data.name);
+      return {
+        title: data.name,
+        description: data.overview,
+        coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+        releaseDate: data.air_date,
+        runtime: undefined, // Seasons don't have runtime
+        genres: [] // Season data doesn't include genres
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Fetch episode data from TMDB using series ID, season and episode numbers
+   */
+  private static async fetchTMDBEpisode(tmdbId: string, apiKey: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
+    // Extract season and episode numbers from display name (e.g., "Breaking Bad (2008) S05E08")
+    const episodeMatch = mediaItem?.DisplayName?.match(/S(\d{2})E(\d{2})/i);
+    if (!episodeMatch) {
+      console.warn('Could not extract season/episode numbers from display name:', mediaItem?.DisplayName);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    
+    const seasonNumber = parseInt(episodeMatch[1], 10);
+    const episodeNumber = parseInt(episodeMatch[2], 10);
+    console.log(`Trying TMDB episode endpoint for series ID: ${tmdbId}, season: ${seasonNumber}, episode: ${episodeNumber}`);
+    
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}/episode/${episodeNumber}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB episode endpoint returned ${response.status} for series ID: ${tmdbId}, season: ${seasonNumber}, episode: ${episodeNumber}`);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB episode:`, data.name);
+      return {
+        title: data.name,
+        description: data.overview,
+        coverImageUrl: data.still_path ? `https://image.tmdb.org/t/p/w500${data.still_path}` : undefined,
+        releaseDate: data.air_date,
+        runtime: data.runtime,
+        genres: [] // Episode data doesn't include genres
+      };
+    }
+    return null;
   }
 
   /**
