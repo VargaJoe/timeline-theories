@@ -42,47 +42,60 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   };
 
   const extractTitleAndSubtitle = (item: TraktListItem) => {
-    // Extract clean title from formatted display name
-    // Examples:
-    // "Movie Title (2020)" -> Title: "Movie Title", Subtitle: undefined
-    // "Show Title (2020) Season 1" -> Title: "Show Title", Subtitle: "Season 1"
-    // "Show Title (2020) S01E01" -> Title: "Show Title", Subtitle: "S01E01"
+    // Extract clean title from TraktListItem structure
+    // Instead of parsing the formatted title, use the raw data from Trakt
     
-    const displayName = item.title;
-    let title = '';
+    let cleanTitle = '';
     let subtitle = '';
+    let displayName = item.title; // Keep the formatted version for display
     
-    if (item.type === 'movie' || item.type === 'show') {
-      // For movies and shows: "Title (Year)"
-      const match = displayName.match(/^(.+?)\s+\((\d{4})\)$/);
+    if (item.type === 'movie') {
+      // For movies: clean title without year
+      const match = item.title.match(/^(.+?)\s+\((\d{4})\)$/);
       if (match) {
-        title = match[1].trim();
+        cleanTitle = match[1].trim();
+        displayName = item.title; // "Movie Title (2020)"
       } else {
-        title = displayName;
+        cleanTitle = item.title;
+      }
+    } else if (item.type === 'show') {
+      // For shows: clean title without year
+      const match = item.title.match(/^(.+?)\s+\((\d{4})\)$/);
+      if (match) {
+        cleanTitle = match[1].trim();
+        displayName = item.title; // "Show Title (2020)"
+      } else {
+        cleanTitle = item.title;
       }
     } else if (item.type === 'season') {
-      // For seasons: "Show Title (Year) Season X"
-      const match = displayName.match(/^(.+?)\s+\((\d{4})\)\s+(Season\s+\d+)$/);
+      // For seasons: extract show title and season info
+      const match = item.title.match(/^(.+?)\s+\((\d{4})\)\s+(Season\s+\d+)$/);
       if (match) {
-        title = match[1].trim();
-        subtitle = match[3].trim();
+        cleanTitle = match[1].trim();
+        subtitle = match[3].trim(); // "Season 1"
+        displayName = item.title; // "Show Title (2020) Season 1"
       } else {
-        title = displayName;
+        cleanTitle = item.title;
       }
     } else if (item.type === 'episode') {
-      // For episodes: "Show Title (Year) SXXEXX"
-      const match = displayName.match(/^(.+?)\s+\((\d{4})\)\s+(S\d{2}E\d{2})$/);
+      // For episodes: extract show title and episode info
+      const match = item.title.match(/^(.+?)\s+\((\d{4})\)\s+(S\d{2}E\d{2})$/);
       if (match) {
-        title = match[1].trim();
-        subtitle = match[3].trim();
+        cleanTitle = match[1].trim();
+        subtitle = match[3].trim(); // "S01E01"
+        displayName = item.title; // "Show Title (2020) S01E01"
       } else {
-        title = displayName;
+        cleanTitle = item.title;
       }
     } else {
-      title = displayName;
+      cleanTitle = item.title;
     }
     
-    return { title, subtitle: subtitle || undefined };
+    return { 
+      title: cleanTitle || undefined, 
+      subtitle: subtitle || undefined,
+      displayName 
+    };
   };
 
   const handleImport = async () => {
@@ -141,12 +154,11 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             mediaItem = found;
             reused++;
           } else {
-            const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
-            const { title, subtitle } = extractTitleAndSubtitle(item);
+            const { title, subtitle, displayName } = extractTitleAndSubtitle(item);
             const req = {
-              DisplayName: displayName,
-              Title: title,
-              Subtitle: subtitle,
+              DisplayName: displayName, // Formatted for display: "Show Title (2020) S01E01"
+              Title: title,             // Clean title for API searches: "Show Title"  
+              Subtitle: subtitle,       // Episode/season info: "S01E01" or "Season 1"
               Description: '',
               MediaType: item.type,
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,

@@ -193,29 +193,15 @@ export class MediaUpdateService {
    */
   private static async handleTVSeasonOrEpisode(mediaItem: MediaItem, preferredSources: DataSourceType[]): Promise<MediaUpdateData | null> {
     const displayName = mediaItem.DisplayName;
-    const searchTitle = mediaItem.Title || displayName;
     
-    if (!searchTitle) return null;
+    // With the new data structure, Title should contain the clean show name
+    // Examples: Title: "9-1-1: Lone Star", Subtitle: "S02E01" 
+    //          Title: "Breaking Bad", Subtitle: "Season 5"
+    const baseShowName = mediaItem.Title || displayName;
     
-    // Extract base show name from title
-    // Examples: "9-1-1" (from Title field) -> "9-1-1"
-    //          "9-1-1: Lone Star" (from Title field) -> "9-1-1: Lone Star"
-    // If no Title field, fall back to DisplayName parsing:
-    //          "9-1-1 (2018) Season 1" -> "9-1-1 (2018)"
-    //          "9-1-1: Lone Star (2020) S02E01" -> "9-1-1: Lone Star (2020)"
+    if (!baseShowName) return null;
     
-    let baseShowName = searchTitle;
-    
-    // If we're using DisplayName (no Title field), we need to clean it up
-    if (!mediaItem.Title && displayName) {
-      baseShowName = displayName;
-      // Remove season info
-      baseShowName = baseShowName.replace(/ Season \d+$/i, '');
-      // Remove episode info
-      baseShowName = baseShowName.replace(/ S\d{2}E\d{2}$/i, '');
-    }
-    
-    console.log(`Using base show name: "${baseShowName}" (from ${mediaItem.Title ? 'Title field' : 'DisplayName'}) for "${displayName}"`);
+    console.log(`Using clean show title: "${baseShowName}" for "${displayName}"`);
     
     // Try to find the base show on TMDB first
     if (preferredSources.includes(DataSource.TMDB)) {
@@ -225,7 +211,6 @@ export class MediaUpdateService {
           console.log(`Found base show on TMDB: ${showResult.title}`);
           
           // Now we need to get the TMDB ID for this show
-          // We'll need to do another search to get the actual ID
           const showId = await this.getTMDBShowId(baseShowName);
           if (showId) {
             console.log(`Got TMDB show ID: ${showId} for "${baseShowName}"`);
@@ -607,23 +592,25 @@ export class MediaUpdateService {
    * Fetch season data from TMDB using series ID and season number
    */
   private static async fetchTMDBSeason(tmdbId: string, apiKey: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
-    // Extract season number from subtitle or display name
-    // Subtitle might be "Season 1" or "S01" or DisplayName might be "Breaking Bad (2008) Season 5"
+    // Extract season number from subtitle (clean data) or display name (fallback)
+    // With new structure: Subtitle should be "Season 1", DisplayName might be "Show (2020) Season 1"
     let seasonNumber: string | null = null;
     
-    // Try Subtitle field first (cleaner data)
+    // Try Subtitle field first (clean structured data)
     if (mediaItem?.Subtitle) {
-      const subMatch = mediaItem.Subtitle.match(/Season (\d+)|S(\d{2})/i);
+      const subMatch = mediaItem.Subtitle.match(/Season (\d+)/i);
       if (subMatch) {
-        seasonNumber = subMatch[1] || subMatch[2];
+        seasonNumber = subMatch[1];
+        console.log(`Extracted season from Subtitle field: ${seasonNumber}`);
       }
     }
     
-    // Fallback to DisplayName
+    // Fallback to DisplayName parsing for legacy data
     if (!seasonNumber && mediaItem?.DisplayName) {
-      const seasonMatch = mediaItem.DisplayName.match(/Season (\d+)|S(\d{2})/i);
+      const seasonMatch = mediaItem.DisplayName.match(/Season (\d+)|S(\d{1,2})/i);
       if (seasonMatch) {
         seasonNumber = seasonMatch[1] || seasonMatch[2];
+        console.log(`Extracted season from DisplayName: ${seasonNumber}`);
       }
     }
     
@@ -668,26 +655,28 @@ export class MediaUpdateService {
    * Fetch episode data from TMDB using series ID, season and episode numbers
    */
   private static async fetchTMDBEpisode(tmdbId: string, apiKey: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
-    // Extract season and episode numbers from subtitle or display name
-    // Subtitle might be "S01E01" or DisplayName might be "Breaking Bad (2008) S05E08"
+    // Extract season and episode numbers from subtitle (clean data) or display name (fallback)
+    // With new structure: Subtitle should be "S01E01", DisplayName might be "Show (2020) S01E01"
     let seasonNumber: number | null = null;
     let episodeNumber: number | null = null;
     
-    // Try Subtitle field first (cleaner data)
+    // Try Subtitle field first (clean structured data)
     if (mediaItem?.Subtitle) {
-      const subMatch = mediaItem.Subtitle.match(/S(\d{2})E(\d{2})/i);
+      const subMatch = mediaItem.Subtitle.match(/S(\d{1,2})E(\d{1,2})/i);
       if (subMatch) {
         seasonNumber = parseInt(subMatch[1], 10);
         episodeNumber = parseInt(subMatch[2], 10);
+        console.log(`Extracted from Subtitle field: Season ${seasonNumber}, Episode ${episodeNumber}`);
       }
     }
     
-    // Fallback to DisplayName
+    // Fallback to DisplayName parsing for legacy data
     if ((seasonNumber === null || episodeNumber === null) && mediaItem?.DisplayName) {
       const episodeMatch = mediaItem.DisplayName.match(/S(\d{2})E(\d{2})/i);
       if (episodeMatch) {
         seasonNumber = parseInt(episodeMatch[1], 10);
         episodeNumber = parseInt(episodeMatch[2], 10);
+        console.log(`Extracted from DisplayName: Season ${seasonNumber}, Episode ${episodeNumber}`);
       }
     }
     
