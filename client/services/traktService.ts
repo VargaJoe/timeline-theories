@@ -161,31 +161,48 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
 }
 
 export async function fetchTraktList(username: string, listSlug: string, accessToken?: string): Promise<TraktListItem[]> {
-  // Temporarily disable test file logic to debug production issue
-  // if (import.meta.env.DEV) {
-  //   try {
-  //     const res = await fetch('/example-trakt-response.json');
-  //     if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
-  //       const data: TraktRawItem[] = await res.json();
-  //       console.log('Using local test data from example-trakt-response.json');
-  //       return data.map(mapTraktItem);
-  //     }
-  //   } catch (error) {
-  //     console.log('Test file not found or invalid, proceeding with API call:', error);
-  //     // Ignore if test file not found or invalid
-  //   }
-  // }
+  // Re-enable test file logic with better debugging
+  if (import.meta.env.DEV) {
+    try {
+      console.log('[TraktService] Development mode - checking for test file...');
+      const res = await fetch('/example-trakt-response.json');
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+        const data: TraktRawItem[] = await res.json();
+        console.log('[TraktService] Using local test data from example-trakt-response.json');
+        return data.map(mapTraktItem);
+      }
+    } catch (error) {
+      console.log('[TraktService] Test file not found or invalid, proceeding with API call:', error);
+      // Ignore if test file not found or invalid
+    }
+  }
   
   // Always use Netlify proxy to avoid CORS issues
   const url = `/.netlify/functions/trakt-proxy?username=${encodeURIComponent(username)}&list=${encodeURIComponent(listSlug)}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
-  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  
+  console.log('[TraktService] Making API call with:', { url, hasAccessToken: !!accessToken, accessTokenLength: accessToken?.length });
+  
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+    console.log('[TraktService] Added Authorization header with Bearer token');
+  } else {
+    console.warn('[TraktService] No access token provided!');
+  }
   
   const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error('Failed to fetch Trakt list');
+  console.log('[TraktService] API response status:', res.status);
+  
+  if (!res.ok) {
+    console.error('[TraktService] API call failed:', res.status, res.statusText);
+    const errorText = await res.text();
+    console.error('[TraktService] Error response body:', errorText);
+    throw new Error(`Failed to fetch Trakt list: ${res.status} ${res.statusText}`);
+  }
   
   const data: TraktRawItem[] = await res.json();
+  console.log('[TraktService] Successfully fetched', data.length, 'items');
   return data.map(mapTraktItem);
 }

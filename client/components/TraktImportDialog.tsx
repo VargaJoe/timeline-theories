@@ -79,6 +79,14 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     }
     setImporting(true);
     try {
+      console.log('[TraktImportDialog] Starting import with:', { 
+        username: parsed.username, 
+        list: parsed.list, 
+        hasAccessToken: !!oidcUser?.access_token,
+        accessTokenLength: oidcUser?.access_token?.length,
+        oidcUserKeys: oidcUser ? Object.keys(oidcUser) : 'no oidcUser'
+      });
+      
       // Always use fetchTraktList for consistent mapping
       const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list, oidcUser?.access_token);
       
