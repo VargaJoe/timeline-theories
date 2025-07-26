@@ -161,20 +161,20 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
 }
 
 export async function fetchTraktList(username: string, listSlug: string, accessToken?: string): Promise<TraktListItem[]> {
-  // Use real Trakt-format test JSON if present (for local dev)
-  if (import.meta.env.DEV) {
-    try {
-      const res = await fetch('/example-trakt-response.json');
-      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
-        const data: TraktRawItem[] = await res.json();
-        console.log('Using local test data from example-trakt-response.json');
-        return data.map(mapTraktItem);
-      }
-    } catch (error) {
-      console.log('Test file not found or invalid, proceeding with API call:', error);
-      // Ignore if test file not found or invalid
-    }
-  }
+  // Temporarily disable test file logic to debug production issue
+  // if (import.meta.env.DEV) {
+  //   try {
+  //     const res = await fetch('/example-trakt-response.json');
+  //     if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+  //       const data: TraktRawItem[] = await res.json();
+  //       console.log('Using local test data from example-trakt-response.json');
+  //       return data.map(mapTraktItem);
+  //     }
+  //   } catch (error) {
+  //     console.log('Test file not found or invalid, proceeding with API call:', error);
+  //     // Ignore if test file not found or invalid
+  //   }
+  // }
   
   // Always use Netlify proxy to avoid CORS issues
   const url = `/.netlify/functions/trakt-proxy?username=${encodeURIComponent(username)}&list=${encodeURIComponent(listSlug)}`;
