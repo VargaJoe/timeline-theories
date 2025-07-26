@@ -87,12 +87,6 @@ export class MediaUpdateService {
   static async fetchUpdateData(mediaItem: MediaItem, options?: UpdateOptions): Promise<MediaUpdateData | null> {
     try {
       console.log('Fetching update data for:', mediaItem.DisplayName);
-      console.log('MediaItem fields:', {
-        Title: mediaItem.Title,
-        Subtitle: mediaItem.Subtitle,
-        MediaType: mediaItem.MediaType,
-        DisplayName: mediaItem.DisplayName
-      });
       
       // Parse external links if available
       const externalLinks = this.parseExternalLinks(mediaItem.ExternalLinks);
@@ -158,9 +152,14 @@ export class MediaUpdateService {
       // If external IDs fail, try specialized handling for TV content
       if (mediaItem.DisplayName && mediaItem.MediaType) {
         console.log(`External IDs failed, trying specialized TV content handling for: ${mediaItem.DisplayName}`);
+        console.log(`MediaType value:`, mediaItem.MediaType, `(type: ${typeof mediaItem.MediaType})`);
+        
+        // Handle MediaType as either string or array
+        const mediaType = Array.isArray(mediaItem.MediaType) ? mediaItem.MediaType[0] : mediaItem.MediaType;
+        console.log(`Normalized MediaType: "${mediaType}"`);
         
         // Check if this is a season or episode
-        if (mediaItem.MediaType === 'season' || mediaItem.MediaType === 'episode') {
+        if (mediaType === 'season' || mediaType === 'episode') {
           const result = await this.handleTVSeasonOrEpisode(mediaItem, preferredSources);
           if (result) return result;
         }
@@ -168,7 +167,7 @@ export class MediaUpdateService {
         // Regular title search fallback
         const searchTitle = mediaItem.Title || mediaItem.DisplayName;
         console.log(`Specialized handling failed, trying title search for: ${searchTitle}`);
-        const titleResult = await this.searchByTitle(searchTitle, mediaItem.MediaType, preferredSources);
+        const titleResult = await this.searchByTitle(searchTitle, mediaType, preferredSources);
         if (titleResult) {
           return titleResult;
         }
@@ -209,9 +208,14 @@ export class MediaUpdateService {
     
     console.log(`Using clean show title: "${baseShowName}" for "${displayName}"`);
     
+    // Handle MediaType as either string or array
+    const mediaType = Array.isArray(mediaItem.MediaType) ? mediaItem.MediaType[0] : mediaItem.MediaType;
+    console.log(`Handling TV content with MediaType: "${mediaType}"`);
+    
     // Try to find the base show on TMDB first
     if (preferredSources.includes(DataSource.TMDB)) {
       try {
+        console.log(`Searching for base show: "${baseShowName}" on TMDB`);
         const showResult = await this.searchTMDBByTitle(baseShowName);
         if (showResult) {
           console.log(`Found base show on TMDB: ${showResult.title}`);
@@ -222,14 +226,20 @@ export class MediaUpdateService {
             console.log(`Got TMDB show ID: ${showId} for "${baseShowName}"`);
             
             // Now use specialized endpoints with the show ID
-            if (mediaItem.MediaType === 'season') {
+            if (mediaType === 'season') {
+              console.log(`Using specialized TMDB season endpoint for ${showId}`);
               const seasonData = await this.fetchTMDBSeason(showId, await loadApiKey(tmdbKeyFullPath) || '', mediaItem);
               if (seasonData) return { ...seasonData, source: 'TMDB (Season)' };
-            } else if (mediaItem.MediaType === 'episode') {
+            } else if (mediaType === 'episode') {
+              console.log(`Using specialized TMDB episode endpoint for ${showId}`);
               const episodeData = await this.fetchTMDBEpisode(showId, await loadApiKey(tmdbKeyFullPath) || '', mediaItem);
               if (episodeData) return { ...episodeData, source: 'TMDB (Episode)' };
             }
+          } else {
+            console.log(`Could not get TMDB show ID for "${baseShowName}"`);
           }
+        } else {
+          console.log(`No base show found on TMDB for "${baseShowName}"`);
         }
       } catch (error) {
         console.error('Error in specialized TV content handling:', error);

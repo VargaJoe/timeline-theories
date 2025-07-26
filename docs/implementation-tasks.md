@@ -1,21 +1,8 @@
-Timeline Theories is a personal application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order, based on personal research and opinio### Technical Task - Timeline Fixes
+# Timeline Theories - Personal Multi-Media Timeline Tool
 
-- [x] There should be an option to delete a timeline entry from the timeline page when an administrator is logged in.
-- [x] The delete timeline icon has disappeared from the timeline page; it was present before.
-- [x] HTML support for the timeline description editor has disappeared; it was previously available. 
-- [x] Timeline cards on the timelines page now show a "TEST" indicator if the timeline is not public.
+Timeline Theories is a personal application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order, based on personal research and opinio
 
-### Technical Task - Fix Media Update Service for TV Content
-- [x] **FIXED: Media updates only working for movies** - Enhanced MediaUpdateService to properly handle TV series, seasons, and episodes
-- [x] **FIXED: Media type recognition** - Added support for recognizing 'show', 'season', 'episode' media types from Trakt
-- [x] **FIXED: TMDB API endpoints** - Added specialized endpoints for seasons (/tv/{id}/season/{num}) and episodes (/tv/{id}/season/{num}/episode/{num})
-- [x] **FIXED: Season/episode number extraction** - Added logic to extract season and episode numbers from display names
-- [x] **FIXED: OMDb media type mapping** - Improved TV content type handling for OMDb API calls
-- [x] **FIXED: Content type schema** - Added 'tvseason', 'show', 'season', 'episode' options to MediaItem content type
-- [x] **FIXED: Fallback behavior** - Added fallback to series data when specific episode/season endpoints fail
-- [x] Test bulk media updates for TV series, seasons, and episodes
-  
----# Current Bugs & UX Issues
+## Current Bugs & UX Issues
 
 - [x] **Mobile: Timeline Cards Width Issue**
     - Timeline cards were wider than the header/page container causing horizontal overflow on mobile.
@@ -221,7 +208,17 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] The delete timeline icon has disappeared from the timeline page; it was present before.
 - [x] HTML support for the timeline description editor has disappeared; it was previously available. 
 - [x] Timeline cards on the timelines page now show a “TEST” indicator if the timeline is not public.
-  
+
+### Technical Task - Fix Media Update Service for TV Content
+- [x] **FIXED: Media updates only working for movies** - Enhanced MediaUpdateService to properly handle TV series, seasons, and episodes
+- [x] **FIXED: Media type recognition** - Added support for recognizing 'show', 'season', 'episode' media types from Trakt
+- [x] **FIXED: TMDB API endpoints** - Added specialized endpoints for seasons (/tv/{id}/season/{num}) and episodes (/tv/{id}/season/{num}/episode/{num})
+- [x] **FIXED: Season/episode number extraction** - Added logic to extract season and episode numbers from display names
+- [x] **FIXED: OMDb media type mapping** - Improved TV content type handling for OMDb API calls
+- [x] **FIXED: Content type schema** - Added 'tvseason', 'show', 'season', 'episode' options to MediaItem content type
+- [x] **FIXED: Fallback behavior** - Added fallback to series data when specific episode/season endpoints fail
+- [x] Test bulk media updates for TV series, seasons, and episodes
+
 ---
 
 ## In Progress Stories
