@@ -210,7 +210,7 @@ export class MediaLibraryService {
 
       // Allowed values for MediaType and Genre
       const allowedMediaTypes = [
-        'movie', 'show', 'season', 'episode', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
+        'movie', 'show', 'season', 'episode', 'tvepisode', 'tvseason', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
       ];
       const allowedGenres = [
         'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
@@ -220,6 +220,19 @@ export class MediaLibraryService {
       function mapToAllowedValue(value: string | undefined, allowed: string[]): string | undefined {
         if (!value) return undefined;
         const lower = value.toLowerCase();
+        
+        // Map Trakt types to SenseNet MediaType values
+        const traktToSenseNetMapping: { [key: string]: string } = {
+          'season': 'tvseason',
+          'episode': 'tvepisode',
+          'show': 'tvseries'
+        };
+        
+        // Check if it's a Trakt type that needs mapping
+        if (traktToSenseNetMapping[lower]) {
+          return traktToSenseNetMapping[lower];
+        }
+        
         // Accept both display and value forms (e.g. 'SciFi' or 'scifi')
         if (allowed.includes(lower)) return lower;
         // Try to match ignoring case and non-alphanumerics
@@ -366,7 +379,7 @@ export class MediaLibraryService {
 
       // Validate and map data similar to creation
       const allowedMediaTypes = [
-        'movie', 'show', 'season', 'episode', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
+        'movie', 'show', 'season', 'episode', 'tvepisode', 'tvseason', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
       ];
       const allowedGenres = [
         'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
@@ -375,6 +388,19 @@ export class MediaLibraryService {
       function mapToAllowedValue(value: string | undefined, allowed: string[]): string | undefined {
         if (!value) return undefined;
         const lower = value.toLowerCase();
+        
+        // Map Trakt types to SenseNet MediaType values
+        const traktToSenseNetMapping: { [key: string]: string } = {
+          'season': 'tvseason',
+          'episode': 'tvepisode',
+          'show': 'tvseries'
+        };
+        
+        // Check if it's a Trakt type that needs mapping
+        if (traktToSenseNetMapping[lower]) {
+          return traktToSenseNetMapping[lower];
+        }
+        
         if (allowed.includes(lower)) return lower;
         const found = allowed.find(opt => opt.toLowerCase() === lower.replace(/[^a-z0-9]/gi, ''));
         return found || undefined;

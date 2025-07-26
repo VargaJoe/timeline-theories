@@ -158,8 +158,8 @@ export class MediaUpdateService {
         const mediaType = Array.isArray(mediaItem.MediaType) ? mediaItem.MediaType[0] : mediaItem.MediaType;
         console.log(`Normalized MediaType: "${mediaType}"`);
         
-        // Check if this is a season or episode
-        if (mediaType === 'season' || mediaType === 'episode') {
+        // Check if this is a season or episode (handle both old and new MediaType values)
+        if (mediaType === 'season' || mediaType === 'episode' || mediaType === 'tvseason' || mediaType === 'tvepisode') {
           const result = await this.handleTVSeasonOrEpisode(mediaItem, preferredSources);
           if (result) return result;
         }
@@ -226,11 +226,11 @@ export class MediaUpdateService {
             console.log(`Got TMDB show ID: ${showId} for "${baseShowName}"`);
             
             // Now use specialized endpoints with the show ID
-            if (mediaType === 'season') {
+            if (mediaType === 'season' || mediaType === 'tvseason') {
               console.log(`Using specialized TMDB season endpoint for ${showId}`);
               const seasonData = await this.fetchTMDBSeason(showId, await loadApiKey(tmdbKeyFullPath) || '', mediaItem);
               if (seasonData) return { ...seasonData, source: 'TMDB (Season)' };
-            } else if (mediaType === 'episode') {
+            } else if (mediaType === 'episode' || mediaType === 'tvepisode') {
               console.log(`Using specialized TMDB episode endpoint for ${showId}`);
               const episodeData = await this.fetchTMDBEpisode(showId, await loadApiKey(tmdbKeyFullPath) || '', mediaItem);
               if (episodeData) return { ...episodeData, source: 'TMDB (Episode)' };

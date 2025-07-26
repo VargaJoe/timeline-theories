@@ -12,6 +12,11 @@ Timeline Theories is a personal application for creating, organizing, and sharin
     - Moved site title display to TopNavigationBar for consistent branding.
     - Set showSiteTitle={false} on all PageHeader instances to avoid redundant titles.
     - PageHeader now shows only page-specific titles and content under the main navigation.
+- [x] **Media Update: TV Seasons/Episodes Failing**
+    - Media update was failing for TV seasons because MediaType validation was missing 'show', 'season', 'episode' values.
+    - Fixed by adding missing MediaType values to allowedMediaTypes array in MediaLibraryService.
+    - Both createMediaItem and updateMediaItem functions updated for consistency.
+    - Specialized TV content handling in MediaUpdateService now works properly.
 - [ ] **Trakt Import: Series Episode Titles Missing**
     - When importing from Trakt, episode titles are not brought over for series.
 - [ ] **DisplayName/Title/Year Handling**
