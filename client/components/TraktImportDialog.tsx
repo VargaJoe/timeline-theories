@@ -112,9 +112,9 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         let found: MediaItem | undefined = undefined;
         try {
           const allMedia = await MediaLibraryService.getMediaItems();
-          // Use the properly formatted title from TraktService
-          const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
-          found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
+          // Use the formatted title for searching existing media items
+          const searchTitle = item.formattedTitle; // Use formatted title for consistent matching
+          found = allMedia.find(m => m.DisplayName.toLowerCase() === searchTitle.toLowerCase());
         } catch (err) {
           console.error('Error searching media items:', err);
           // Ignore errors, treat as not found
