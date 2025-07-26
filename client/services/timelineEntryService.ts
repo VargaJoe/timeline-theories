@@ -6,6 +6,9 @@ export interface MediaItemRef {
   Name: string;
   Id: number;
   DisplayName?: string;
+  Title?: string;
+  Subtitle?: string;
+  MediaType?: string;
   CoverImageUrl?: string;
   CoverImageBin?: {
     __mediaresource?: {
@@ -54,6 +57,9 @@ export class TimelineEntryService {
           'MediaItem/Id',
           'MediaItem/Name',
           'MediaItem/DisplayName',
+          'MediaItem/Title',
+          'MediaItem/Subtitle',
+          'MediaItem/MediaType',
           'MediaItem/CoverImageUrl',
           'MediaItem/CoverImageBin',
           'Position',

@@ -1,4 +1,6 @@
-Timeline Theories is a personal application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order, based on personal research and opinions.
+# Timeline Theories - Personal Multi-Media Timeline Tool
+
+Timeline Theories is a personal application for creating, organizing, and sharing timeline lists for stories or universes of different media in chronological order, based on personal research and opinio
 
 ## Current Bugs & UX Issues
 
@@ -10,6 +12,11 @@ Timeline Theories is a personal application for creating, organizing, and sharin
     - Moved site title display to TopNavigationBar for consistent branding.
     - Set showSiteTitle={false} on all PageHeader instances to avoid redundant titles.
     - PageHeader now shows only page-specific titles and content under the main navigation.
+- [x] **Media Update: TV Seasons/Episodes Failing**
+    - Media update was failing for TV seasons because MediaType validation was missing 'show', 'season', 'episode' values.
+    - Fixed by adding missing MediaType values to allowedMediaTypes array in MediaLibraryService.
+    - Both createMediaItem and updateMediaItem functions updated for consistency.
+    - Specialized TV content handling in MediaUpdateService now works properly.
 - [ ] **Trakt Import: Series Episode Titles Missing**
     - When importing from Trakt, episode titles are not brought over for series.
 - [ ] **DisplayName/Title/Year Handling**
@@ -206,7 +213,17 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] The delete timeline icon has disappeared from the timeline page; it was present before.
 - [x] HTML support for the timeline description editor has disappeared; it was previously available. 
 - [x] Timeline cards on the timelines page now show a “TEST” indicator if the timeline is not public.
-  
+
+### Technical Task - Fix Media Update Service for TV Content
+- [x] **FIXED: Media updates only working for movies** - Enhanced MediaUpdateService to properly handle TV series, seasons, and episodes
+- [x] **FIXED: Media type recognition** - Added support for recognizing 'show', 'season', 'episode' media types from Trakt
+- [x] **FIXED: TMDB API endpoints** - Added specialized endpoints for seasons (/tv/{id}/season/{num}) and episodes (/tv/{id}/season/{num}/episode/{num})
+- [x] **FIXED: Season/episode number extraction** - Added logic to extract season and episode numbers from display names
+- [x] **FIXED: OMDb media type mapping** - Improved TV content type handling for OMDb API calls
+- [x] **FIXED: Content type schema** - Added 'tvseason', 'show', 'season', 'episode' options to MediaItem content type
+- [x] **FIXED: Fallback behavior** - Added fallback to series data when specific episode/season endpoints fail
+- [x] Test bulk media updates for TV series, seasons, and episodes
+
 ---
 
 ## In Progress Stories

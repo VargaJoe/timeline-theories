@@ -12,6 +12,24 @@
         <ControlHint>sn:DisplayName</ControlHint>
       </Configuration>
     </Field>
+    <Field name="Title" type="ShortText">
+      <DisplayName>Clean Title</DisplayName>
+      <Description>Clean title without year, season, or episode info (e.g., 9-1-1: Lone Star)</Description>
+      <Configuration>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+      </Configuration>
+    </Field>
+    <Field name="Subtitle" type="ShortText">
+      <DisplayName>Subtitle</DisplayName>
+      <Description>Episode title, subtitle, or additional title info</Description>
+      <Configuration>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+      </Configuration>
+    </Field>
     <Field name="Description" type="LongText">
       <DisplayName>Description</DisplayName>
       <Description>Detailed description or synopsis</Description>
@@ -29,7 +47,11 @@
         <Options>
           <Option value="movie">Movie</Option>
           <Option value="tvepisode">TVEpisode</Option>
+          <Option value="tvseason">TVSeason</Option>
           <Option value="tvseries">TVSeries</Option>
+          <Option value="show">Show</Option>
+          <Option value="season">Season</Option>
+          <Option value="episode">Episode</Option>
           <Option value="book">Book</Option>
           <Option value="comic">Comic</Option>
           <Option value="videogame">VideoGame</Option>

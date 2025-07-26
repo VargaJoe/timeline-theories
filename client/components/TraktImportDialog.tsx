@@ -41,6 +41,34 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     } catch { return null; }
   };
 
+  const extractTitleAndSubtitle = (item: TraktListItem) => {
+    // No more parsing! Use the clean data directly from TraktService
+    const cleanTitle = item.title; // Clean show/movie title 
+    const displayName = item.formattedTitle;   // Formatted title for display
+    
+    let subtitle = '';
+    
+    if (item.type === 'season') {
+      subtitle = `Season ${item.season}`;
+    } else if (item.type === 'episode') {
+      // Prioritize episode title over episode number for better UX
+      if (item.episodeTitle) {
+        subtitle = item.episodeTitle; // Use meaningful episode title like "Pilot" or "The One Where..."
+      } else {
+        // Fallback to episode number if no title available
+        const seasonNum = item.season!.toString().padStart(2, '0');
+        const episodeNum = item.episode!.toString().padStart(2, '0');
+        subtitle = `S${seasonNum}E${episodeNum}`;
+      }
+    }
+    
+    return { 
+      title: cleanTitle,
+      subtitle: subtitle || undefined,
+      displayName 
+    };
+  };
+
   const handleImport = async () => {
     setError('');
     setSummary(null);
@@ -51,6 +79,14 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     }
     setImporting(true);
     try {
+      console.log('[TraktImportDialog] Starting import with:', { 
+        username: parsed.username, 
+        list: parsed.list, 
+        hasAccessToken: !!oidcUser?.access_token,
+        accessTokenLength: oidcUser?.access_token?.length,
+        oidcUserKeys: oidcUser ? Object.keys(oidcUser) : 'no oidcUser'
+      });
+      
       // Always use fetchTraktList for consistent mapping
       const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list, oidcUser?.access_token);
       
@@ -84,9 +120,9 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         let found: MediaItem | undefined = undefined;
         try {
           const allMedia = await MediaLibraryService.getMediaItems();
-          // Use the properly formatted title from TraktService
-          const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
-          found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
+          // Use the formatted title for searching existing media items
+          const searchTitle = item.formattedTitle; // Use formatted title for consistent matching
+          found = allMedia.find(m => m.DisplayName.toLowerCase() === searchTitle.toLowerCase());
         } catch (err) {
           console.error('Error searching media items:', err);
           // Ignore errors, treat as not found
@@ -97,9 +133,11 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             mediaItem = found;
             reused++;
           } else {
-            const displayName = item.title; // Already includes proper formatting for shows/seasons/episodes
+            const { title, subtitle, displayName } = extractTitleAndSubtitle(item);
             const req = {
-              DisplayName: displayName,
+              DisplayName: displayName, // Formatted for display: "Show Title (2020) S01E01"
+              Title: title,             // Clean title for API searches: "Show Title"  
+              Subtitle: subtitle,       // Episode/season info: "S01E01" or "Season 1"
               Description: '',
               MediaType: item.type,
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,

@@ -9,7 +9,9 @@ export interface TraktListItem {
     tmdb?: number;
     tvdb?: number;
   };
-  title: string;
+  formattedTitle: string; // Formatted title for display (existing)
+  title: string;          // Clean show/movie title (new)
+  episodeTitle?: string;  // Episode title for episodes (new)
   year?: number;
   season?: number;  // For season and episode types
   episode?: number; // For episode type
@@ -114,7 +116,8 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
       return {
         type: 'movie',
         ids: item.movie.ids,
-        title: `${item.movie.title} (${item.movie.year})`, // Keep movies as "title (year)"
+        formattedTitle: `${item.movie.title} (${item.movie.year})`, // Formatted movie title as "Title (Year)"
+        title: item.movie.title, // Clean title
         year: item.movie.year
       };
     
@@ -122,7 +125,8 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
       return {
         type: 'show',
         ids: item.show.ids,
-        title: `${item.show.title} (${item.show.year})`, // Shows as "title (year)"
+        formattedTitle: `${item.show.title} (${item.show.year})`, // Formatted show title as "Title (Year)"
+        title: item.show.title, // Clean title
         year: item.show.year
       };
     
@@ -130,7 +134,8 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
       return {
         type: 'season',
         ids: item.show.ids, // Use show IDs for seasons
-        title: `${item.show.title} (${item.show.year}) Season ${item.season.number}`, // "title (year) Season X"
+        formattedTitle: `${item.show.title} (${item.show.year}) Season ${item.season.number}`, // Formatted season title as "Title (Year) Season X"
+        title: item.show.title, // Clean show title
         year: item.show.year,
         season: item.season.number
       };
@@ -141,7 +146,9 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
       return {
         type: 'episode',
         ids: item.show.ids, // Use show IDs for episodes  
-        title: `${item.show.title} (${item.show.year}) S${seasonNum}E${episodeNum}`, // "title (year) SXXeXX"
+        formattedTitle: `${item.show.title} (${item.show.year}) S${seasonNum}E${episodeNum}`, // Formatted episode title as "Title (Year) SXXEYY"
+        title: item.show.title, // Clean show title
+        episodeTitle: item.episode.title, // Episode title
         year: item.show.year,
         season: item.episode.season,
         episode: item.episode.number
@@ -154,16 +161,19 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
 }
 
 export async function fetchTraktList(username: string, listSlug: string, accessToken?: string): Promise<TraktListItem[]> {
-  // Use real Trakt-format test JSON if present (for local dev)
+  // Re-enable test file logic with better debugging
   if (import.meta.env.DEV) {
     try {
+      console.log('[TraktService] Development mode - checking for test file...');
       const res = await fetch('/example-trakt-response.json');
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data: TraktRawItem[] = await res.json();
+        console.log('[TraktService] Using local test data from example-trakt-response.json');
         return data.map(mapTraktItem);
       }
-    } catch {
-      // Ignore if test file not found
+    } catch (error) {
+      console.log('[TraktService] Test file not found or invalid, proceeding with API call:', error);
+      // Ignore if test file not found or invalid
     }
   }
   
@@ -172,11 +182,27 @@ export async function fetchTraktList(username: string, listSlug: string, accessT
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
-  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  
+  console.log('[TraktService] Making API call with:', { url, hasAccessToken: !!accessToken, accessTokenLength: accessToken?.length });
+  
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+    console.log('[TraktService] Added Authorization header with Bearer token');
+  } else {
+    console.warn('[TraktService] No access token provided!');
+  }
   
   const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error('Failed to fetch Trakt list');
+  console.log('[TraktService] API response status:', res.status);
+  
+  if (!res.ok) {
+    console.error('[TraktService] API call failed:', res.status, res.statusText);
+    const errorText = await res.text();
+    console.error('[TraktService] Error response body:', errorText);
+    throw new Error(`Failed to fetch Trakt list: ${res.status} ${res.statusText}`);
+  }
   
   const data: TraktRawItem[] = await res.json();
+  console.log('[TraktService] Successfully fetched', data.length, 'items');
   return data.map(mapTraktItem);
 }

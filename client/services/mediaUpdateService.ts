@@ -149,23 +149,39 @@ export class MediaUpdateService {
         }
       }
 
-      // If external IDs fail, try searching by title with preferred sources
-      if (mediaItem.DisplayName) {
-        console.log(`External IDs failed, trying title search for: ${mediaItem.DisplayName}`);
-        const titleResult = await this.searchByTitle(mediaItem.DisplayName, mediaItem.MediaType, preferredSources);
+      // If external IDs fail, try specialized handling for TV content
+      if (mediaItem.DisplayName && mediaItem.MediaType) {
+        console.log(`External IDs failed, trying specialized TV content handling for: ${mediaItem.DisplayName}`);
+        console.log(`MediaType value:`, mediaItem.MediaType, `(type: ${typeof mediaItem.MediaType})`);
+        
+        // Handle MediaType as either string or array
+        const mediaType = Array.isArray(mediaItem.MediaType) ? mediaItem.MediaType[0] : mediaItem.MediaType;
+        console.log(`Normalized MediaType: "${mediaType}"`);
+        
+        // Check if this is a season or episode (handle both old and new MediaType values)
+        if (mediaType === 'season' || mediaType === 'episode' || mediaType === 'tvseason' || mediaType === 'tvepisode') {
+          const result = await this.handleTVSeasonOrEpisode(mediaItem, preferredSources);
+          if (result) return result;
+        }
+        
+        // Regular title search fallback
+        const searchTitle = mediaItem.Title || mediaItem.DisplayName;
+        console.log(`Specialized handling failed, trying title search for: ${searchTitle}`);
+        const titleResult = await this.searchByTitle(searchTitle, mediaType, preferredSources);
         if (titleResult) {
           return titleResult;
         }
       }
 
       // If title search fails, try extracting the base series name for broader search
-      if (mediaItem.DisplayName && mediaItem.DisplayName.includes(':')) {
-        const baseName = mediaItem.DisplayName.split(':')[0].trim();
+      const searchTitle = mediaItem.Title || mediaItem.DisplayName;
+      if (searchTitle && searchTitle.includes(':')) {
+        const baseName = searchTitle.split(':')[0].trim();
         console.log(`Specific title failed, trying base series search for: ${baseName}`);
         const baseResult = await this.searchByTitle(baseName, mediaItem.MediaType, preferredSources);
         if (baseResult) {
           // Mark that this is a fallback result
-          return { ...baseResult, title: mediaItem.DisplayName, source: `${baseResult.source} (Series Match)` };
+          return { ...baseResult, title: searchTitle, source: `${baseResult.source} (Series Match)` };
         }
       }
 
@@ -173,6 +189,94 @@ export class MediaUpdateService {
 
     } catch (error) {
       console.error('Error fetching update data for media item:', mediaItem.Id, error);
+      return null;
+    }
+  }
+
+  /**
+   * Handle TV seasons and episodes by finding the base show first, then using specialized endpoints
+   */
+  private static async handleTVSeasonOrEpisode(mediaItem: MediaItem, preferredSources: DataSourceType[]): Promise<MediaUpdateData | null> {
+    const displayName = mediaItem.DisplayName;
+    
+    // With the new data structure, Title should contain the clean show name
+    // Examples: Title: "9-1-1: Lone Star", Subtitle: "S02E01" 
+    //          Title: "Breaking Bad", Subtitle: "Season 5"
+    const baseShowName = mediaItem.Title || displayName;
+    
+    if (!baseShowName) return null;
+    
+    console.log(`Using clean show title: "${baseShowName}" for "${displayName}"`);
+    
+    // Handle MediaType as either string or array
+    const mediaType = Array.isArray(mediaItem.MediaType) ? mediaItem.MediaType[0] : mediaItem.MediaType;
+    console.log(`Handling TV content with MediaType: "${mediaType}"`);
+    
+    // Try to find the base show on TMDB first
+    if (preferredSources.includes(DataSource.TMDB)) {
+      try {
+        console.log(`Searching for base show: "${baseShowName}" on TMDB`);
+        const showResult = await this.searchTMDBByTitle(baseShowName);
+        if (showResult) {
+          console.log(`Found base show on TMDB: ${showResult.title}`);
+          
+          // Now we need to get the TMDB ID for this show
+          const showId = await this.getTMDBShowId(baseShowName);
+          if (showId) {
+            console.log(`Got TMDB show ID: ${showId} for "${baseShowName}"`);
+            
+            // Now use specialized endpoints with the show ID
+            if (mediaType === 'season' || mediaType === 'tvseason') {
+              console.log(`Using specialized TMDB season endpoint for ${showId}`);
+              const seasonData = await this.fetchTMDBSeason(showId, await loadApiKey(tmdbKeyFullPath) || '', mediaItem);
+              if (seasonData) return { ...seasonData, source: 'TMDB (Season)' };
+            } else if (mediaType === 'episode' || mediaType === 'tvepisode') {
+              console.log(`Using specialized TMDB episode endpoint for ${showId}`);
+              const episodeData = await this.fetchTMDBEpisode(showId, await loadApiKey(tmdbKeyFullPath) || '', mediaItem);
+              if (episodeData) return { ...episodeData, source: 'TMDB (Episode)' };
+            }
+          } else {
+            console.log(`Could not get TMDB show ID for "${baseShowName}"`);
+          }
+        } else {
+          console.log(`No base show found on TMDB for "${baseShowName}"`);
+        }
+      } catch (error) {
+        console.error('Error in specialized TV content handling:', error);
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Get TMDB show ID by searching for the show title
+   */
+  private static async getTMDBShowId(showTitle: string): Promise<string | null> {
+    try {
+      const apiKey = await loadApiKey(tmdbKeyFullPath);
+      if (!apiKey) return null;
+
+      // Clean title (remove year if present)
+      const cleanTitle = showTitle.replace(/\s*\(\d{4}\)$/, '');
+      // Extract year if present
+      const yearMatch = showTitle.match(/\((\d{4})\)$/);
+      const year = yearMatch ? yearMatch[1] : '';
+      
+      // Search for TV show
+      const tvUrl = `https://api.themoviedb.org/3/search/tv?api_key=${apiKey}&query=${encodeURIComponent(cleanTitle)}${year ? `&first_air_date_year=${year}` : ''}`;
+      const tvResponse = await fetch(tvUrl);
+      const tvData = await tvResponse.json();
+      
+      if (tvData.results && tvData.results.length > 0) {
+        const show = tvData.results[0];
+        console.log(`Found TMDB show: ${show.name} (ID: ${show.id})`);
+        return String(show.id);
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting TMDB show ID:', error);
       return null;
     }
   }
@@ -258,7 +362,7 @@ export class MediaUpdateService {
         data = await this.fetchFromOMDb(identifier);
         break;
       case DataSource.TMDB:
-        data = await this.fetchFromTMDB(identifier, mediaItem.MediaType);
+        data = await this.fetchFromTMDB(identifier, mediaItem.MediaType, mediaItem);
         break;
       case DataSource.TRAKT:
         data = await this.fetchFromTrakt(identifier);
@@ -367,13 +471,16 @@ export class MediaUpdateService {
       // Extract year if present
       const yearMatch = title.match(/\((\d{4})\)$/);
       const year = yearMatch ? yearMatch[1] : '';
-      // Map media type
+      
+      // Map media type to OMDb types
       let type = '';
       if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
         type = '&type=movie';
-      } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
+      } else if (mediaType === 'show' || mediaType === 'season' || mediaType === 'episode' || 
+                 mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
         type = '&type=series';
       }
+      
       const url = `https://www.omdbapi.com/?t=${encodeURIComponent(cleanTitle)}${year ? `&y=${year}` : ''}${type}&apikey=${apiKey}&plot=full`;
       const response = await fetch(url);
       const data = await response.json();
@@ -397,7 +504,7 @@ export class MediaUpdateService {
   /**
    * Fetch from TMDB API with rate limit handling
    */
-  private static async fetchFromTMDB(tmdbId: string, mediaType?: string): Promise<MediaUpdateData | null> {
+  private static async fetchFromTMDB(tmdbId: string, mediaType?: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
     const apiKey = await loadApiKey(tmdbKeyFullPath);
     if (!apiKey) {
       console.warn('TMDB API key not configured in SenseNet');
@@ -406,49 +513,225 @@ export class MediaUpdateService {
 
     return this.retryWithBackoff(async () => {
       console.log(`Attempting to fetch TMDB ID: ${tmdbId} with mediaType: ${mediaType}`);
-      // Try different content types based on media type or try both
-      const typesToTry = [];
+      
+      // Handle different media types with appropriate endpoints
       if (mediaType?.toLowerCase().includes('movie') || mediaType?.toLowerCase().includes('film')) {
-        typesToTry.push('movie');
-      } else if (mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series') || mediaType?.toLowerCase().includes('episode')) {
-        typesToTry.push('tv');
+        // Movie endpoint
+        return await this.fetchTMDBMovie(tmdbId, apiKey);
+      } else if (mediaType === 'show' || mediaType?.toLowerCase().includes('tv') || mediaType?.toLowerCase().includes('series')) {
+        // TV Series endpoint
+        return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+      } else if (mediaType === 'season') {
+        // Season endpoint - requires show ID and season number
+        return await this.fetchTMDBSeason(tmdbId, apiKey, mediaItem);
+      } else if (mediaType === 'episode') {
+        // Episode endpoint - requires show ID, season and episode numbers
+        return await this.fetchTMDBEpisode(tmdbId, apiKey, mediaItem);
       } else {
-        // Unknown type, try both
-        typesToTry.push('movie', 'tv');
+        // Unknown type, try both movie and TV series
+        console.log(`Unknown media type: ${mediaType}, trying both movie and TV endpoints`);
+        const movieResult = await this.fetchTMDBMovie(tmdbId, apiKey);
+        if (movieResult) return movieResult;
+        
+        const tvResult = await this.fetchTMDBTVSeries(tmdbId, apiKey);
+        if (tvResult) return tvResult;
+        
+        console.log(`No data found on TMDB for ID: ${tmdbId}`);
+        return null;
       }
-      for (const type of typesToTry) {
-        console.log(`Trying TMDB ${type} endpoint for ID: ${tmdbId}`);
-        const response = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${apiKey}`);
-        if (!response.ok) {
-          // If it's the last type to try, throw the error
-          if (type === typesToTry[typesToTry.length - 1]) {
-            const error: ApiError = new Error(`TMDB API error: ${response.status}`);
-            error.status = response.status;
-            if (response.status === 429) {
-              error.message = 'TMDB rate limit exceeded';
-            }
-            throw error;
-          }
-          // Otherwise continue to next type
-          console.log(`TMDB ${type} endpoint returned ${response.status} for ID: ${tmdbId}`);
-          continue;
-        }
-        const data = await response.json();
-        if (data.id) {
-          console.log(`Successfully fetched from TMDB ${type}:`, data.title || data.name);
-          return {
-            title: data.title || data.name,
-            description: data.overview,
-            coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
-            releaseDate: data.release_date || data.first_air_date,
-            runtime: data.runtime || data.episode_run_time?.[0],
-            genres: data.genres?.map((g: { name: string }) => g.name)
-          };
-        }
-      }
-      console.log(`No data found on TMDB for ID: ${tmdbId}`);
-      return null;
     }, DataSource.TMDB);
+  }
+
+  /**
+   * Fetch movie data from TMDB
+   */
+  private static async fetchTMDBMovie(tmdbId: string, apiKey: string): Promise<MediaUpdateData | null> {
+    console.log(`Trying TMDB movie endpoint for ID: ${tmdbId}`);
+    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB movie endpoint returned ${response.status} for ID: ${tmdbId}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB movie:`, data.title);
+      return {
+        title: data.title,
+        description: data.overview,
+        coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+        releaseDate: data.release_date,
+        runtime: data.runtime,
+        genres: data.genres?.map((g: { name: string }) => g.name)
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Fetch TV series data from TMDB
+   */
+  private static async fetchTMDBTVSeries(tmdbId: string, apiKey: string): Promise<MediaUpdateData | null> {
+    console.log(`Trying TMDB TV series endpoint for ID: ${tmdbId}`);
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB TV series endpoint returned ${response.status} for ID: ${tmdbId}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB TV series:`, data.name);
+      return {
+        title: data.name,
+        description: data.overview,
+        coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+        releaseDate: data.first_air_date,
+        runtime: data.episode_run_time?.[0],
+        genres: data.genres?.map((g: { name: string }) => g.name)
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Fetch season data from TMDB using series ID and season number
+   */
+  private static async fetchTMDBSeason(tmdbId: string, apiKey: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
+    // Extract season number from subtitle (clean data) or display name (fallback)
+    // With new structure: Subtitle should be "Season 1", DisplayName might be "Show (2020) Season 1"
+    let seasonNumber: string | null = null;
+    
+    // Try Subtitle field first (clean structured data)
+    if (mediaItem?.Subtitle) {
+      const subMatch = mediaItem.Subtitle.match(/Season (\d+)/i);
+      if (subMatch) {
+        seasonNumber = subMatch[1];
+        console.log(`Extracted season from Subtitle field: ${seasonNumber}`);
+      }
+    }
+    
+    // Fallback to DisplayName parsing for legacy data
+    if (!seasonNumber && mediaItem?.DisplayName) {
+      const seasonMatch = mediaItem.DisplayName.match(/Season (\d+)|S(\d{1,2})/i);
+      if (seasonMatch) {
+        seasonNumber = seasonMatch[1] || seasonMatch[2];
+        console.log(`Extracted season from DisplayName: ${seasonNumber}`);
+      }
+    }
+    
+    if (!seasonNumber) {
+      console.warn('Could not extract season number from subtitle or display name:', mediaItem?.Subtitle, mediaItem?.DisplayName);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    
+    // Convert to number and back to remove leading zeros
+    const seasonNum = parseInt(seasonNumber, 10).toString();
+    console.log(`Trying TMDB season endpoint for series ID: ${tmdbId}, season: ${seasonNum}`);
+    
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNum}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB season endpoint returned ${response.status} for series ID: ${tmdbId}, season: ${seasonNum}`);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB season:`, data.name);
+      return {
+        title: data.name,
+        description: data.overview,
+        coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
+        releaseDate: data.air_date,
+        runtime: undefined, // Seasons don't have runtime
+        genres: [] // Season data doesn't include genres
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Fetch episode data from TMDB using series ID, season and episode numbers
+   */
+  private static async fetchTMDBEpisode(tmdbId: string, apiKey: string, mediaItem?: MediaItem): Promise<MediaUpdateData | null> {
+    // Extract season and episode numbers from subtitle (clean data) or display name (fallback)
+    // With new structure: Subtitle should be "S01E01", DisplayName might be "Show (2020) S01E01"
+    let seasonNumber: number | null = null;
+    let episodeNumber: number | null = null;
+    
+    // Try Subtitle field first (clean structured data)
+    if (mediaItem?.Subtitle) {
+      // Check if Subtitle contains episode numbers (S01E01 format)
+      const subMatch = mediaItem.Subtitle.match(/S(\d{1,2})E(\d{1,2})/i);
+      if (subMatch) {
+        seasonNumber = parseInt(subMatch[1], 10);
+        episodeNumber = parseInt(subMatch[2], 10);
+        console.log(`Extracted from Subtitle field: Season ${seasonNumber}, Episode ${episodeNumber}`);
+      } else {
+        // Subtitle contains episode title, need to extract numbers from DisplayName
+        console.log(`Subtitle contains episode title: "${mediaItem.Subtitle}", checking DisplayName for episode numbers`);
+      }
+    }
+    
+    // Fallback to DisplayName parsing for legacy data
+    if ((seasonNumber === null || episodeNumber === null) && mediaItem?.DisplayName) {
+      const episodeMatch = mediaItem.DisplayName.match(/S(\d{2})E(\d{2})/i);
+      if (episodeMatch) {
+        seasonNumber = parseInt(episodeMatch[1], 10);
+        episodeNumber = parseInt(episodeMatch[2], 10);
+        console.log(`Extracted from DisplayName: Season ${seasonNumber}, Episode ${episodeNumber}`);
+      }
+    }
+    
+    if (seasonNumber === null || episodeNumber === null) {
+      console.warn('Could not extract season/episode numbers from subtitle or display name:', mediaItem?.Subtitle, mediaItem?.DisplayName);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    console.log(`Trying TMDB episode endpoint for series ID: ${tmdbId}, season: ${seasonNumber}, episode: ${episodeNumber}`);
+    
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}/episode/${episodeNumber}?api_key=${apiKey}`);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const error: ApiError = new Error('TMDB rate limit exceeded');
+        error.status = response.status;
+        throw error;
+      }
+      console.log(`TMDB episode endpoint returned ${response.status} for series ID: ${tmdbId}, season: ${seasonNumber}, episode: ${episodeNumber}`);
+      // Fallback to TV series data
+      return await this.fetchTMDBTVSeries(tmdbId, apiKey);
+    }
+    
+    const data = await response.json();
+    if (data.id) {
+      console.log(`Successfully fetched from TMDB episode:`, data.name);
+      return {
+        title: data.name,
+        description: data.overview,
+        coverImageUrl: data.still_path ? `https://image.tmdb.org/t/p/w500${data.still_path}` : undefined,
+        releaseDate: data.air_date,
+        runtime: data.runtime,
+        genres: [] // Episode data doesn't include genres
+      };
+    }
+    return null;
   }
 
   /**
