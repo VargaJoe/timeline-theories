@@ -210,7 +210,7 @@ export class MediaLibraryService {
 
       // Allowed values for MediaType and Genre
       const allowedMediaTypes = [
-        'movie', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
+        'movie', 'show', 'season', 'episode', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
       ];
       const allowedGenres = [
         'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
@@ -366,7 +366,7 @@ export class MediaLibraryService {
 
       // Validate and map data similar to creation
       const allowedMediaTypes = [
-        'movie', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
+        'movie', 'show', 'season', 'episode', 'tvepisode', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
       ];
       const allowedGenres = [
         'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
