@@ -17,6 +17,11 @@ Timeline Theories is a personal application for creating, organizing, and sharin
     - Fixed by adding missing MediaType values to allowedMediaTypes array in MediaLibraryService.
     - Both createMediaItem and updateMediaItem functions updated for consistency.
     - Specialized TV content handling in MediaUpdateService now works properly.
+- [x] **Private Cards Admin Restriction**
+    - Private timelines (formerly "test cards") are now only visible to authenticated administrators.
+    - Modified TimelineListPage.tsx to filter out private timelines unless oidcUser is present.
+    - Enhanced TimelineViewPage.tsx with access control to prevent direct URL access to private timelines.
+    - Added proper error messaging for unauthorized access attempts.
 - [ ] **Trakt Import: Series Episode Titles Missing**
     - When importing from Trakt, episode titles are not brought over for series.
 - [ ] **DisplayName/Title/Year Handling**
@@ -228,7 +233,17 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ## In Progress Stories
 
--- no stories in progress yet --
+### Story 28 - Auto Media Item Creation in Timeline Entry Process
+- [x] Enhanced TimelineEntryCreatePage with dual-mode interface (select existing vs create new)
+- [x] Added mode toggle between 'select' and 'create' workflows  
+- [x] Integrated MediaItemCreateForm component into timeline entry creation
+- [x] Improved UI/UX with modern card-based design and clear workflows
+- [x] Maintains backward compatibility with existing selection process
+- [x] New media items are automatically selected after creation
+- [x] Streamlined workflow reduces friction for adding new content
+- [ ] Test the new workflow end-to-end
+- [ ] Add user feedback and success messaging
+- [ ] Consider adding search functionality within the create mode
 
 ---
 

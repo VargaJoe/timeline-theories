@@ -230,6 +230,8 @@ export const TimelineListPage: React.FC = () => {
           >
             {timelines
               .slice()
+              // Filter out private timelines unless user is logged in (admin)
+              .filter(timeline => timeline.isPublic !== false || oidcUser)
               .sort((a, b) => {
                 if (sortOrder === 'alphabetical') {
                   return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
@@ -270,7 +272,7 @@ export const TimelineListPage: React.FC = () => {
                         e.currentTarget.parentElement!.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
                       }}
                     >
-                    {/* TEST indicator if not public */}
+                    {/* PRIVATE indicator if not public */}
                     {timeline.isPublic === false && (
                       <div style={{
                         position: 'absolute',
@@ -285,7 +287,7 @@ export const TimelineListPage: React.FC = () => {
                         boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
                         zIndex: 2
                       }}>
-                        TEST
+                        PRIVATE
                       </div>
                     )}
                       {/* Cover Image */}
