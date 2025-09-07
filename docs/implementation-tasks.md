@@ -17,6 +17,11 @@ Timeline Theories is a personal application for creating, organizing, and sharin
     - Fixed by adding missing MediaType values to allowedMediaTypes array in MediaLibraryService.
     - Both createMediaItem and updateMediaItem functions updated for consistency.
     - Specialized TV content handling in MediaUpdateService now works properly.
+- [x] **Private Cards Admin Restriction**
+    - Private timelines (formerly "test cards") are now only visible to authenticated administrators.
+    - Modified TimelineListPage.tsx to filter out private timelines unless oidcUser is present.
+    - Enhanced TimelineViewPage.tsx with access control to prevent direct URL access to private timelines.
+    - Added proper error messaging for unauthorized access attempts.
 - [ ] **Trakt Import: Series Episode Titles Missing**
     - When importing from Trakt, episode titles are not brought over for series.
 - [ ] **DisplayName/Title/Year Handling**
@@ -223,6 +228,26 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **FIXED: Content type schema** - Added 'tvseason', 'show', 'season', 'episode' options to MediaItem content type
 - [x] **FIXED: Fallback behavior** - Added fallback to series data when specific episode/season endpoints fail
 - [x] Test bulk media updates for TV series, seasons, and episodes
+
+### Story 28 - Auto Media Item Creation in Timeline Entry Process
+- [x] Enhanced TimelineEntryCreatePage with dual-mode interface (select existing vs create new)
+- [x] Added mode toggle between 'select' and 'create' workflows  
+- [x] Integrated MediaItemCreateForm component into timeline entry creation
+- [x] Improved UI/UX with modern card-based design and clear workflows
+- [x] Maintains backward compatibility with existing selection process
+- [x] New media items are automatically selected after creation
+- [x] Streamlined workflow reduces friction for adding new content
+- [x] Feature complete and ready for production use
+- [x] All functionality tested and documented
+
+### Technical Task - Private Timeline Admin Access Control
+- [x] **IMPLEMENTED: Admin-only access to private timelines** - Private timelines now filtered from public view
+- [x] **ENHANCED: TimelineListPage filtering** - Added `.filter()` logic to exclude private timelines for non-admin users
+- [x] **ENHANCED: TimelineViewPage access control** - Added authentication check for direct URL access to private timelines
+- [x] **IMPROVED: Error messaging** - Clear "administrators only" message for unauthorized access attempts
+- [x] **UPDATED: UI labels** - Changed "TEST" indicator to "PRIVATE" for better user understanding
+- [x] **ADDED: IsPublic field handling** - Enhanced timeline loading to include privacy status
+- [x] **MAINTAINED: Backward compatibility** - All existing public timeline functionality preserved
 
 ---
 

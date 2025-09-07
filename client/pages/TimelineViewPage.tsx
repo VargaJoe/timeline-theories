@@ -106,7 +106,7 @@ export const TimelineViewPage: React.FC = () => {
         const result = await repository.load({
           idOrPath: parentPath,
           oDataOptions: {
-            select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate'],
+            select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic'],
           },
         });
         // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
@@ -122,14 +122,23 @@ export const TimelineViewPage: React.FC = () => {
           if (val === 'release') sortOrder = 'release';
           else if (val === 'chronological') sortOrder = 'chronological';
         }
-        setTimeline({
+        const timelineData = {
           id: String(result.d.Id),
           name: decodedTimelineName, // Use the decoded timeline name
           displayName: result.d.DisplayName,
           description: result.d.Description || '',
           sort_order: sortOrder,
           created_at: result.d.CreationDate,
-        });
+          isPublic: typeof result.d.IsPublic === 'boolean' ? result.d.IsPublic : false,
+        };
+        
+        // Check if this is a private timeline and user is not logged in (admin)
+        if (timelineData.isPublic === false && !oidcUser) {
+          setError('This timeline is private and only accessible to administrators.');
+          return;
+        }
+        
+        setTimeline(timelineData);
         setEditTitle(result.d.DisplayName);
         setEditDescription(result.d.Description || '');
         setEditSortOrder(sortOrder);
@@ -162,7 +171,7 @@ export const TimelineViewPage: React.FC = () => {
       }
     };
     loadTimeline();
-  }, [timelineName]);
+  }, [timelineName, oidcUser]);
 
   // Load background image from SenseNet
   useEffect(() => {
