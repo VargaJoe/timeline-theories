@@ -411,3 +411,40 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Combine entries from multiple timelines as needed
 - [ ] Respect tags and cross-references in rendering
 - [ ] Test all rendering modes for correctness
+
+### Story 29 - Publisher Series Import and Management
+- [ ] Add timeline type option to mark as "Publisher Series" vs chronological timeline
+- [ ] Enhance media item creation for books with book-specific metadata fields:
+    - [ ] Author field (separate from generic metadata)
+    - [ ] Publisher field
+    - [ ] ISBN field
+    - [ ] Publication year vs story/setting year
+    - [ ] Book series number (if part of numbered series)
+- [ ] Implement default sort by publication date for publisher series
+- [ ] Add bulk book import from publisher data sources (Open Library, Google Books)
+- [ ] Create book-specific import workflows with appropriate field mapping
+- [ ] Add series metadata inheritance to auto-fill publisher/series info for subsequent books
+
+### Story 30 - Multi-Author Series Support
+- [ ] Enhance author management to support anthology collections with multiple authors
+- [ ] Add series editor field for edited collections
+- [ ] Implement contributor roles tracking (translator, editor, illustrator)
+- [ ] Create author timeline views to filter by specific authors within a series
+- [ ] Add support for multi-author book entries with proper attribution
+- [ ] Implement author search and filtering within book series
+
+### Story 31 - Book Series Discovery and Metadata Enhancement
+- [ ] Integrate with bibliographic databases for auto-complete series information
+- [ ] Add direct integration with book cover APIs (Open Library, Google Books)
+- [ ] Implement publication history tracking for different editions, reprints, translations
+- [ ] Add series completion tracking with "ongoing" vs "completed" status
+- [ ] Create book series templates for common publisher series patterns
+- [ ] Add multi-language support for translated titles and original publication info
+
+### Story 32 - Book Reading Progress and Personal Library Integration
+- [ ] Implement reading status tracking ("Want to Read", "Currently Reading", "Read", "Did Not Finish")
+- [ ] Add personal rating system separate from general media ratings
+- [ ] Create reading notes functionality separate from general timeline entry notes
+- [ ] Add reading date tracking (when user read each book vs publication date)
+- [ ] Implement reading progress statistics and analytics
+- [ ] Create personal reading timeline views alongside publication order
