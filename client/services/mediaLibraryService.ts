@@ -543,18 +543,36 @@ export class MediaLibraryService {
   }
 
   /**
-   * Helper function to get cover image URL (either from URL field or binary field)
+   * Uploads a cover image for a media item
+   * @param mediaItemId - The ID of the media item
+   * @param file - The image file to upload
+   */
+  static async uploadMediaItemCoverImage(mediaItemId: number, file: File): Promise<void> {
+    try {
+      // Convert File to Blob
+      const imageBlob = new Blob([file], { type: file.type });
+      
+      // Use the existing uploadCoverImageBinary function
+      await uploadCoverImageBinary(mediaItemId, imageBlob, file.name);
+    } catch (error) {
+      console.error('Failed to upload media item cover image:', error);
+      throw new Error('Failed to upload cover image');
+    }
+  }
+
+  /**
+   * Gets the cover image URL for a media item, preferring binary over URL
    */
   static getCoverImageUrl(mediaItem: MediaItem): string | null {
-    // If URL is set, use it
-    if (mediaItem.CoverImageUrl) {
-      return mediaItem.CoverImageUrl;
-    }
-    
-    // Otherwise, check if we have a binary image
+    // First check if we have a binary image (preferred)
     if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
       const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
       return `${repositoryUrl}${relativePath}`;
+    }
+    
+    // Otherwise, check if we have a URL
+    if (mediaItem.CoverImageUrl) {
+      return mediaItem.CoverImageUrl;
     }
     
     return null;

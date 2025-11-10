@@ -31,6 +31,8 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
   const [releaseDate, setReleaseDate] = useState('');
   const [description, setDescription] = useState('');
   const [coverImageUrl, setCoverImageUrl] = useState('');
+  const [coverImageMode, setCoverImageMode] = useState<'url' | 'binary'>('url');
+  const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (entry && isOpen) {
@@ -49,6 +51,8 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
         setReleaseDate(entry.mediaItem.ReleaseDate || '');
         setDescription(entry.mediaItem.Description || '');
         setCoverImageUrl(entry.mediaItem.CoverImageUrl || '');
+        setCoverImageMode('url'); // Default to URL mode
+        setCoverImageFile(null);
       }
 
       setEditMode('entry');
@@ -88,13 +92,19 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
     setError('');
 
     try {
-      await MediaLibraryService.updateMediaItem(entry.mediaItem.Id, {
+      const mediaItemData = {
         DisplayName: mediaDisplayName,
         MediaType: mediaType,
         ReleaseDate: releaseDate,
         Description: description,
-        CoverImageUrl: coverImageUrl,
-      });
+        CoverImageUrl: coverImageMode === 'url' ? coverImageUrl : undefined,
+      };
+
+      if (coverImageMode === 'binary' && coverImageFile) {
+        await MediaLibraryService.uploadMediaItemCoverImage(entry.mediaItem.Id, coverImageFile);
+      } else {
+        await MediaLibraryService.updateMediaItem(entry.mediaItem.Id, mediaItemData);
+      }
 
       onSave();
       onClose();
@@ -379,21 +389,59 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
 
             <div>
               <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: '#374151', marginBottom: 6 }}>
-                Cover Image URL
+                Cover Image
               </label>
-              <input
-                type="url"
-                value={coverImageUrl}
-                onChange={e => setCoverImageUrl(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: 6,
-                  fontSize: 14
-                }}
-                placeholder="https://..."
-              />
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ marginRight: 16, cursor: 'pointer', display: 'inline-block' }}>
+                  <input
+                    type="radio"
+                    name="coverImageMode"
+                    checked={coverImageMode === 'url'}
+                    onChange={() => setCoverImageMode('url')}
+                    style={{ marginRight: 6 }}
+                  />
+                  External URL
+                </label>
+                <label style={{ cursor: 'pointer', display: 'inline-block' }}>
+                  <input
+                    type="radio"
+                    name="coverImageMode"
+                    checked={coverImageMode === 'binary'}
+                    onChange={() => setCoverImageMode('binary')}
+                    style={{ marginRight: 6 }}
+                  />
+                  Upload Image
+                </label>
+              </div>
+              
+              {coverImageMode === 'url' ? (
+                <input
+                  type="url"
+                  value={coverImageUrl}
+                  onChange={e => setCoverImageUrl(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 6,
+                    fontSize: 14
+                  }}
+                  placeholder="https://..."
+                />
+              ) : (
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => setCoverImageFile(e.target.files?.[0] || null)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 6,
+                    fontSize: 14
+                  }}
+                />
+              )}
             </div>
 
             <div>

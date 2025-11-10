@@ -249,6 +249,18 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **ADDED: IsPublic field handling** - Enhanced timeline loading to include privacy status
 - [x] **MAINTAINED: Backward compatibility** - All existing public timeline functionality preserved
 
+### Technical Task - Chronological Description and Timeline Entry Editing
+- [x] **IMPLEMENTED: ChronologicalDescription field** - Added ShortText field to TimelineEntry content type for flexible chronology descriptions
+- [x] **ENHANCED: TypeScript interfaces** - Updated TimelineEntry interface with chronologicalDescription field
+- [x] **UPDATED: Timeline creation forms** - Added chronology fields to TimelineEntryCreatePage for new entries
+- [x] **CREATED: Unified edit modal** - Built TimelineEntryEditModal with tabbed interface for entry data vs media item data
+- [x] **INTEGRATED: Edit functionality** - Added edit buttons and modal integration to TimelineViewPage
+- [x] **IMPLEMENTED: Image upload in individual editing** - Added cover image mode selection (URL vs Upload) to TimelineEntryEditModal
+- [x] **ENHANCED: MediaLibraryService** - Added uploadMediaItemCoverImage method for individual item uploads
+- [x] **FIXED: Save logic** - Updated handleSaveMedia to handle both URL and binary image uploads
+- [x] **TESTED: Build verification** - All changes compile successfully with zero errors
+- [x] **COMPLETED: Feature parity** - Individual editing now has same image upload capabilities as bulk operations
+
 ---
 
 ## In Progress Stories
