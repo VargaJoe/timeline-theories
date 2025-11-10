@@ -14,6 +14,8 @@ export default function TimelineEntryCreatePage() {
   const [selectionMode, setSelectionMode] = useState<MediaSelectionMode>('select');
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [position, setPosition] = useState<number>(1);
+  const [chronologicalDate, setChronologicalDate] = useState('');
+  const [chronologicalDescription, setChronologicalDescription] = useState('');
   const [notes, setNotes] = useState('');
   const [entryLabel, setEntryLabel] = useState('mainstory');
   const [importance, setImportance] = useState('essential');
@@ -44,6 +46,8 @@ export default function TimelineEntryCreatePage() {
         },
         timelineId: 0, // Not used in backend, but required by type
         position,
+        chronologicalDate: chronologicalDate || undefined,
+        chronologicalDescription: chronologicalDescription || undefined,
         notes,
         entryLabel,
         importance,
@@ -278,6 +282,45 @@ export default function TimelineEntryCreatePage() {
                   resize: 'vertical'
                 }}
                 placeholder="Optional notes about this entry..."
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: '#495057', marginBottom: 8 }}>
+                Chronological Date (Optional)
+              </label>
+              <input 
+                type="datetime-local" 
+                value={chronologicalDate} 
+                onChange={e => setChronologicalDate(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid #ced4da',
+                  borderRadius: 6,
+                  fontSize: 14
+                }}
+                placeholder="In-universe date for chronological sorting"
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: '#495057', marginBottom: 8 }}>
+                Chronological Description (Optional)
+              </label>
+              <input 
+                type="text" 
+                value={chronologicalDescription} 
+                onChange={e => setChronologicalDescription(e.target.value)}
+                maxLength={200}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid #ced4da',
+                  borderRadius: 6,
+                  fontSize: 14
+                }}
+                placeholder="e.g., 'During the Clone Wars', 'Before Episode IV'"
               />
             </div>
 

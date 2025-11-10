@@ -3,6 +3,7 @@ import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TraktImportDialog } from '../components/TraktImportDialog';
+import { TimelineEntryEditModal } from '../components/TimelineEntryEditModal';
 import { PageHeader } from '../components/PageHeader';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
@@ -86,6 +87,8 @@ export const TimelineViewPage: React.FC = () => {
   const [editSortOrder, setEditSortOrder] = useState<'chronological' | 'release'>('chronological');
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState('');
+  const [showEntryEditModal, setShowEntryEditModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<TimelineEntry | null>(null);
 
   // Load timeline data
   useEffect(() => {
@@ -119,7 +122,7 @@ export const TimelineViewPage: React.FC = () => {
         }
         if (typeof sortOrderRaw === 'string') {
           const val = sortOrderRaw.trim().toLowerCase();
-          if (val === 'release') sortOrder = 'release';
+          if (val === 'release' ) sortOrder = 'release';
           else if (val === 'chronological') sortOrder = 'chronological';
         }
         const timelineData = {
@@ -889,6 +892,22 @@ export const TimelineViewPage: React.FC = () => {
                                   {entry.notes}
                                 </p>
                               )}
+                              {(entry.chronologicalDescription || entry.chronologicalDate) && (
+                                <div style={{ 
+                                  color: '#059669', 
+                                  margin: '8px 0 0 0', 
+                                  fontSize: 13,
+                                  fontWeight: 500,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}>
+                                  <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  {entry.chronologicalDescription || (entry.chronologicalDate ? new Date(entry.chronologicalDate).toLocaleDateString() : '')}
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -912,6 +931,34 @@ export const TimelineViewPage: React.FC = () => {
             {entries.map((entry) => (
               <div key={entry.id} className="entry-card" style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
                 <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
+                  {/* Delete Entry Button (admin only) */}
+                  {oidcUser && (
+                    <button
+                      title="Edit Entry"
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        right: 52,
+                        background: '#28a745',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '6px 10px',
+                        cursor: 'pointer',
+                        zIndex: 2,
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.12)'
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingEntry(entry);
+                        setShowEntryEditModal(true);
+                      }}
+                    >
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
                   {/* Delete Entry Button (admin only) */}
                   {oidcUser && (
                     <button
@@ -1071,6 +1118,22 @@ export const TimelineViewPage: React.FC = () => {
                 .then(setEntries)
                 .finally(() => setEntriesLoading(false));
             }
+          }
+        }}
+      />
+
+      {/* Timeline Entry Edit Modal */}
+      <TimelineEntryEditModal
+        entry={editingEntry}
+        isOpen={showEntryEditModal}
+        onClose={() => setShowEntryEditModal(false)}
+        onSave={() => {
+          // Reload entries after update
+          setEntriesLoading(true);
+          if (timeline) {
+            TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
+              .then(setEntries)
+              .finally(() => setEntriesLoading(false));
           }
         }}
       />

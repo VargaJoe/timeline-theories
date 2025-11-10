@@ -10,6 +10,8 @@ export interface MediaItemRef {
   Subtitle?: string;
   MediaType?: string;
   CoverImageUrl?: string;
+  ReleaseDate?: string;
+  Description?: string;
   CoverImageBin?: {
     __mediaresource?: {
       media_src: string;
@@ -24,6 +26,7 @@ export interface TimelineEntry {
   timelineId: number;
   position: number;
   chronologicalDate?: string;
+  chronologicalDescription?: string;
   releaseOrderPosition?: number;
   notes?: string;
   entryLabel?: string;
@@ -83,6 +86,7 @@ export class TimelineEntryService {
       timelineId,
       position: item.Position,
       chronologicalDate: item.ChronologicalDate,
+      chronologicalDescription: item.ChronologicalDescription,
       releaseOrderPosition: item.ReleaseOrderPosition,
       notes: item.Notes,
       entryLabel: item.EntryLabel,
@@ -109,6 +113,7 @@ export class TimelineEntryService {
         MediaItem: data.mediaItem?.Id, // Reference field (id)
         Position: data.position,
         ChronologicalDate: data.chronologicalDate,
+        ChronologicalDescription: data.chronologicalDescription,
         ReleaseOrderPosition: data.releaseOrderPosition,
         Notes: data.notes,
         EntryLabel: data.entryLabel,
@@ -122,6 +127,29 @@ export class TimelineEntryService {
       id: String(result.d.Id),
       ...data,
     };
+  }
+
+  // Update a timeline entry
+  static async updateTimelineEntry(entryId: string | number, updates: Partial<Omit<TimelineEntry, 'id' | 'mediaItem' | 'timelineId'>>): Promise<void> {
+    try {
+      await repository.patch({
+        idOrPath: entryId,
+        content: {
+          Position: updates.position,
+          ChronologicalDate: updates.chronologicalDate,
+          ChronologicalDescription: updates.chronologicalDescription,
+          ReleaseOrderPosition: updates.releaseOrderPosition,
+          Notes: updates.notes,
+          EntryLabel: updates.entryLabel,
+          IsOptional: updates.isOptional,
+          ArcGroup: updates.arcGroup,
+          Importance: updates.importance,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to update timeline entry:', error);
+      throw new Error('Failed to update timeline entry.');
+    }
   }
 
   // Bulk update entry positions
