@@ -5,6 +5,16 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 ## In Progress
 
 
+### Story 28 - Export/Import Timeline Data in Custom Format
+- [x] Design Notepad++-friendly TSV schema with expanded fields (entry_name, position, notes, etc.)
+- [x] Implement export logic to download timeline data as TSV with all relevant fields
+- [x] Implement import logic to create/update timeline entries from TSV, checking for existing entries by ID/Name
+- [ ] Enhance export: Download and package images in ZIP alongside TSV (currently only URLs exported)
+- [ ] Support cover image by URL (download) or filename (local upload)
+- [x] Add UI for export/import (buttons, dialogs)
+- [ ] Document format and usage for users (TSV vs CSV differences, supported programs)
+- [x] Ensure exported files are re-importable without data loss (updates existing entries)
+- [ ] No versioning required unless trivial to add
 
 ---
 

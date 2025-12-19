@@ -21,6 +21,7 @@ export interface MediaItemRef {
 
 export interface TimelineEntry {
   id: string;
+  name?: string;
   displayName: string;
   mediaItem: MediaItemRef | null;
   timelineId: number;
@@ -55,6 +56,7 @@ export class TimelineEntryService {
         query: `+TypeIs:TimelineEntry +Hidden:0`,
         select: [
           'Id',
+          'Name',
           'DisplayName',
           // 'MediaItem',
           'MediaItem/Id',
@@ -81,6 +83,7 @@ export class TimelineEntryService {
     });
     return result.d.results.map((item: Record<string, unknown>) => ({
       id: String(item.Id),
+      name: item.Name as string,
       displayName: item.DisplayName as string,
       mediaItem: item.MediaItem || null, // Expanded MediaItem object or null
       timelineId,

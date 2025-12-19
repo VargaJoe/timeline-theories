@@ -1,3 +1,177 @@
+import { TimelineEntryService } from './timelineEntryService';
+
+/**
+ * Export a timeline and its entries to TSV format (Notepad++-friendly)
+ * @param timeline Timeline object (with id, name, etc.)
+ * @param parentPath Path to the timeline (for entries)
+ * @returns TSV string with header and all entries
+ */
+export async function exportTimelineToTSV(timeline: Timeline, parentPath: string): Promise<string> {
+  // Fetch all entries for the timeline
+  const entries = await TimelineEntryService.listTimelineEntries(Number(timeline.id), parentPath);
+  // Define columns according to the spec
+  const columns = [
+    'timeline_name',
+    'entry_name',
+    'title',
+    'description',
+    'media_type',
+    'media_id',
+    'cover_image',
+    'date',
+    'position',
+    'notes',
+    // Add more fields as needed
+  ];
+  // Header
+  let tsv = columns.join('\t') + '\n';
+  // Rows
+  for (const entry of entries) {
+    const media = entry.mediaItem;
+    const row = [
+      timeline.name || '',
+      entry.name || '', // SenseNet Name field
+      media?.Title || entry.displayName || '',
+      media?.Description || entry.notes || '',
+      media?.MediaType || '',
+      media?.Id ? String(media.Id) : '',
+      media?.CoverImageUrl || (media?.CoverImageBin && media.CoverImageBin.__mediaresource ? media.CoverImageBin.__mediaresource.media_src : ''),
+      entry.chronologicalDate || '',
+      entry.position || '',
+      entry.notes || '',
+      // Add more fields as needed
+    ];
+    tsv += row.map(v => (v ? String(v).replace(/\t|\n|\r/g, ' ') : '')).join('\t') + '\n';
+  }
+  return tsv;
+}
+
+/**
+ * Import timeline entries from TSV format
+ * @param tsvContent TSV string content
+ * @param timelineName Name of the timeline
+ */
+export async function importTimelineFromTSV(tsvContent: string, timelineName: string): Promise<void> {
+  const lines = tsvContent.split('\n').filter(line => line.trim());
+  if (lines.length < 2) {
+    throw new Error('Invalid TSV format: must have at least header and one data row');
+  }
+
+  const headers = lines[0].split('\t').map(h => h.trim());
+  const requiredHeaders = ['title', 'media_type'];
+  const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+  if (missingHeaders.length > 0) {
+    throw new Error(`Missing required columns: ${missingHeaders.join(', ')}`);
+  }
+
+  // Verify timeline exists
+  const timelinePath = `${contentPaths.timelines}/Timelines/${timelineName}`;
+  try {
+    await repository.load({ idOrPath: timelinePath });
+  } catch {
+    throw new Error(`Timeline '${timelineName}' not found or inaccessible`);
+  }
+
+  const parentPath = `${timelinePath}`;
+
+  // Process each data row
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split('\t').map(v => v.trim());
+    if (values.length !== headers.length) {
+      console.warn(`Skipping row ${i + 1}: column count mismatch`);
+      continue;
+    }
+
+    const rowData: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      rowData[header] = values[index] || '';
+    });
+
+    // Validate required fields
+    if (!rowData.title || !rowData.media_type) {
+      console.warn(`Skipping row ${i + 1}: missing required fields`);
+      continue;
+    }
+
+    try {
+      // Check if entry already exists by path
+      let existingEntryPath: string | undefined;
+      if (rowData.entry_name) {
+        // Try to find existing entry by path
+        try {
+          const entryPath = `${parentPath}/${rowData.entry_name}`;
+          await repository.load({
+            idOrPath: entryPath,
+          });
+          existingEntryPath = entryPath;
+        } catch {
+          // Entry doesn't exist, will create new one
+        }
+      }
+
+      // Create media item if needed
+      let mediaItemId: number | undefined;
+      if (rowData.media_id) {
+        mediaItemId = parseInt(rowData.media_id);
+      } else {
+        // For now, create a basic media item
+        // TODO: Enhance with more fields and better media item creation
+        const mediaResult = await repository.post({
+          parentPath: '/Root/Content/MediaLibrary',
+          contentType: 'MediaItem',
+          content: {
+            Name: rowData.title.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase(),
+            DisplayName: rowData.title,
+            Title: rowData.title,
+            Description: rowData.description || '',
+            MediaType: rowData.media_type,
+            CoverImageUrl: rowData.cover_image || undefined,
+          },
+        });
+        mediaItemId = mediaResult.d.Id;
+      }
+
+      // Generate unique name for the entry
+      const generateEntryName = (baseName: string, index: number): string => {
+        const cleanName = baseName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+        return `entry-${index}-${cleanName}`.substring(0, 50); // Limit length
+      };
+
+      const entryName = rowData.entry_name || generateEntryName(rowData.title, i);
+
+      if (existingEntryPath) {
+        // Update existing entry
+        await repository.patch({
+          idOrPath: existingEntryPath,
+          content: {
+            DisplayName: rowData.title,
+            MediaItem: mediaItemId,
+            Position: rowData.position ? parseInt(rowData.position) : i,
+            ChronologicalDate: rowData.date || undefined,
+            Notes: rowData.description || rowData.notes || undefined,
+          },
+        });
+      } else {
+        // Create new timeline entry
+        await repository.post({
+          parentPath,
+          contentType: 'TimelineEntry',
+          content: {
+            Name: entryName,
+            DisplayName: rowData.title,
+            MediaItem: mediaItemId,
+            Position: rowData.position ? parseInt(rowData.position) : i,
+            ChronologicalDate: rowData.date || undefined,
+            Notes: rowData.notes || undefined,
+          },
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to import row ${i + 1}:`, error);
+      throw new Error(`Failed to import row ${i + 1}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
 /**
  * Deletes a timeline by path segment (Name) or Id
  * @param idOrPath Timeline Id (number) or path segment (string)
@@ -22,7 +196,7 @@ export async function deleteTimeline(idOrPath: string | number, permanent = fals
 import { repository } from './sensenet';
 import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
-import { repositoryUrl } from '../configuration';
+import { repositoryUrl, contentPaths } from '../configuration';
 
 // Helper function to get cover image URL from MediaItem reference
 function getCoverImageUrl(mediaItem: {

@@ -64,6 +64,45 @@ interface DroppableProvided {
 }
 
 export const TimelineViewPage: React.FC = () => {
+    // Export handler
+    const handleExportTimeline = async () => {
+      if (!timeline) return;
+      const parentPath = `${timelinesPath}/${timeline.name}`;
+      try {
+        const { exportTimelineToTSV } = await import('../services/timelineService');
+        const tsv = await exportTimelineToTSV(timeline, parentPath);
+        // Create a blob and trigger download
+        const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${timeline.name || 'timeline'}.tsv`;
+        link.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+        }, 100);
+      } catch (err) {
+        alert('Failed to export timeline: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    };
+  // Import handler
+  const handleImportTimeline = async (file: File) => {
+    if (!timeline) return;
+    const parentPath = `${timelinesPath}/${timeline.name}`;
+    try {
+      const text = await file.text();
+      const { importTimelineFromTSV } = await import('../services/timelineService');
+      await importTimelineFromTSV(text, timeline.name);
+      // Reload entries after import
+      setEntriesLoading(true);
+      const entries = await TimelineEntryService.listTimelineEntries(Number(timeline.id), parentPath);
+      setEntries(entries);
+      setEntriesLoading(false);
+      alert('Import completed successfully!');
+    } catch (err) {
+      alert('Failed to import timeline: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
   const DESCRIPTION_ROW_LIMIT = 3;
   const [showFullDescription, setShowFullDescription] = useState(false);
   const { id: timelineName } = useParams<{ id: string }>();
@@ -457,6 +496,79 @@ export const TimelineViewPage: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </button>
+            <button
+              onClick={handleExportTimeline}
+              title="Export Timeline (TSV)"
+              style={{
+                background: '#17a2b8',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v16h16V4H4zm4 8h8m-4-4v8" />
+              </svg>
+              <span style={{ marginLeft: 8 }}>Export Timeline</span>
+            </button>
+            <label
+              title="Import Timeline (TSV)"
+              style={{
+                background: '#28a745',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                margin: 0
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+              }}
+            >
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <span style={{ marginLeft: 8 }}>Import Timeline</span>
+              <input
+                type="file"
+                accept=".tsv,.csv,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    handleImportTimeline(file);
+                  }
+                  // Reset input
+                  e.target.value = '';
+                }}
+              />
+            </label>
             <div title="Import from Trakt List" style={{ display: 'inline-block' }}>
               <TraktImportDialog
                 timelineName={timeline.name}
