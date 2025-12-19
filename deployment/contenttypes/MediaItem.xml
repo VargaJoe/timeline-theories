@@ -69,6 +69,17 @@
         <Precision>Second</Precision>
       </Configuration>
     </Field>
+    <Field name="Year" type="Integer">
+      <DisplayName>Year</DisplayName>
+      <Description>Release year (e.g., 2023)</Description>
+      <Configuration>
+        <MinValue>1800</MinValue>
+        <MaxValue>2100</MaxValue>
+        <VisibleBrowse>Show</VisibleBrowse>
+        <VisibleEdit>Show</VisibleEdit>
+        <VisibleNew>Show</VisibleNew>
+      </Configuration>
+    </Field>
     <Field name="ChronologicalDate" type="DateTime">
       <DisplayName>Chronological Date</DisplayName>
       <Description>In-universe date (optional)</Description>

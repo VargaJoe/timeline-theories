@@ -109,7 +109,7 @@ export const TimelineViewPage: React.FC = () => {
         const result = await repository.load({
           idOrPath: parentPath,
           oDataOptions: {
-            select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic'],
+            select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic', 'TimelineType'],
           },
         });
         // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
@@ -133,6 +133,7 @@ export const TimelineViewPage: React.FC = () => {
           sort_order: sortOrder,
           created_at: result.d.CreationDate,
           isPublic: typeof result.d.IsPublic === 'boolean' ? result.d.IsPublic : false,
+          timelineType: result.d.TimelineType || 'chronological',
         };
         
         // Check if this is a private timeline and user is not logged in (admin)
@@ -148,7 +149,7 @@ export const TimelineViewPage: React.FC = () => {
         // Load timeline entries and media items
         setEntriesLoading(true);
         try {
-          const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id), parentPath);
+          const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id), parentPath, timelineData.timelineType === 'publisher-series' ? 'publication-date' : 'position');
           setEntries(entries);
           console.log(`[TimelineViewPage] Successfully loaded ${entries.length} entries`);
         } catch (entriesError) {

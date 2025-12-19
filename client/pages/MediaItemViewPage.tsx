@@ -156,7 +156,7 @@ export const MediaItemViewPage: React.FC = () => {
   const externalLinks = getExternalLinks(mediaItem.ExternalLinks);
 
   // Header formatting logic
-  let headerTitle = mediaItem.DisplayName;
+  let headerTitle = mediaItem.Title || mediaItem.DisplayName;
   let headerSubtitle = '';
   // Normalize MediaType to string for robust comparison
   let mediaTypeStr = '';
@@ -168,21 +168,16 @@ export const MediaItemViewPage: React.FC = () => {
   mediaTypeStr = mediaTypeStr.toLowerCase();
 
   if (mediaTypeStr === 'tvepisode') {
-    // Try to extract season/episode from DisplayName or Genre
-    // Example: "Series Title: Season 2" (subtitle), "2x03 Episode Title (2021)" (title)
-    // If DisplayName is "2x03 Episode Title", try to split
-    const match = mediaItem.DisplayName.match(/^(\d+x\d+)\s+(.+?)(\s+\((\d{4})\))?$/);
-    if (match) {
-      headerTitle = match[2] + (match[4] ? ` (${match[4]})` : '');
-      headerSubtitle = `${mediaItem.Genre ? mediaItem.Genre + ': ' : ''}${match[1]}`;
-    } else {
-      headerTitle = mediaItem.DisplayName;
-      headerSubtitle = mediaItem.Genre || '';
-    }
-  } else if (mediaTypeStr === 'movie') {
-    // Movie: "MovieTitle (year)"
-    // const year = mediaItem.ReleaseDate ? ` (${new Date(mediaItem.ReleaseDate).getFullYear()})` : '';
-    headerTitle = mediaItem.DisplayName; // + year;
+    // For episodes, show clean title with year, and subtitle with season/episode info
+    headerTitle = (mediaItem.Title || mediaItem.DisplayName) + (mediaItem.Year ? ` (${mediaItem.Year})` : '');
+    headerSubtitle = mediaItem.Subtitle || '';
+  } else if (mediaTypeStr === 'tvseason') {
+    // For seasons, show clean title with year, and subtitle with season info
+    headerTitle = (mediaItem.Title || mediaItem.DisplayName) + (mediaItem.Year ? ` (${mediaItem.Year})` : '');
+    headerSubtitle = mediaItem.Subtitle || '';
+  } else {
+    // For movies, books, etc., show clean title with year
+    headerTitle = (mediaItem.Title || mediaItem.DisplayName) + (mediaItem.Year ? ` (${mediaItem.Year})` : '');
     headerSubtitle = '';
   }
 
@@ -322,6 +317,11 @@ export const MediaItemViewPage: React.FC = () => {
             </div>
             {/* Release Date and Tags */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginBottom: 8 }}>
+              {mediaItem.Year && (
+                <div style={{ color: '#374151', fontSize: 16 }}>
+                  <strong>Year:</strong> {mediaItem.Year}
+                </div>
+              )}
               {mediaItem.ReleaseDate && (
                 <div style={{ color: '#374151', fontSize: 16 }}>
                   <strong>Release:</strong> {formatDate(mediaItem.ReleaseDate)}

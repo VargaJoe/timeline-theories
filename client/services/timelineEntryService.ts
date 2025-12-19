@@ -48,7 +48,7 @@ export class TimelineEntryService {
     }
   }
   // List all entries for a given timeline
-  static async listTimelineEntries(timelineId: number, parentPath: string): Promise<TimelineEntry[]> {
+  static async listTimelineEntries(timelineId: number, parentPath: string, sortBy?: 'position' | 'publication-date' | 'chronological-date'): Promise<TimelineEntry[]> {
     const result = await repository.loadCollection({
       path: parentPath,
       oDataOptions: {
@@ -76,7 +76,7 @@ export class TimelineEntryService {
           'CreatedBy',
         ],
         expand: ['MediaItem'], // Expand the MediaItem reference
-        orderby: ['Position'],
+        orderby: sortBy === 'publication-date' ? ['MediaItem/PublicationYear'] : sortBy === 'chronological-date' ? ['ChronologicalDate'] : ['Position'],
       },
     });
     return result.d.results.map((item: Record<string, unknown>) => ({

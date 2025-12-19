@@ -3,4 +3,5 @@
 
 export const TIMELINE_CONTENT_TYPE = 'Timeline';
 export const MEDIA_ITEM_CONTENT_TYPE = 'MediaItem';
+export const BOOK_CONTENT_TYPE = 'BookMediaItem';
 export const TIMELINE_ENTRY_CONTENT_TYPE = 'TimelineEntry';

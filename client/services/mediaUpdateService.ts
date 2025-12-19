@@ -19,6 +19,7 @@ export interface ApiError extends Error {
 
 export interface MediaUpdateData {
   title?: string;
+  year?: number;
   description?: string;
   coverImageUrl?: string;
   releaseDate?: string;
@@ -447,6 +448,7 @@ export class MediaUpdateService {
       if (data.Response === 'True') {
         return {
           title: data.Title,
+          year: data.Year && data.Year !== 'N/A' ? parseInt(data.Year) : undefined,
           description: data.Plot,
           coverImageUrl: data.Poster !== 'N/A' ? data.Poster : undefined,
           releaseDate: data.Released !== 'N/A' ? data.Released : undefined,
@@ -487,6 +489,7 @@ export class MediaUpdateService {
       if (data.Response === 'True') {
         return {
           title: data.Title,
+          year: data.Year && data.Year !== 'N/A' ? parseInt(data.Year) : undefined,
           description: data.Plot,
           coverImageUrl: data.Poster !== 'N/A' ? data.Poster : undefined,
           releaseDate: data.Released !== 'N/A' ? data.Released : undefined,
@@ -563,11 +566,11 @@ export class MediaUpdateService {
       console.log(`Successfully fetched from TMDB movie:`, data.title);
       return {
         title: data.title,
+        year: data.release_date ? new Date(data.release_date).getFullYear() : undefined,
         description: data.overview,
         coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
         releaseDate: data.release_date,
-        runtime: data.runtime,
-        genres: data.genres?.map((g: { name: string }) => g.name)
+        genres: [] // Would need additional API call for full genre names
       };
     }
     return null;
@@ -594,11 +597,11 @@ export class MediaUpdateService {
       console.log(`Successfully fetched from TMDB TV series:`, data.name);
       return {
         title: data.name,
+        year: data.first_air_date ? new Date(data.first_air_date).getFullYear() : undefined,
         description: data.overview,
         coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
         releaseDate: data.first_air_date,
-        runtime: data.episode_run_time?.[0],
-        genres: data.genres?.map((g: { name: string }) => g.name)
+        genres: [] // Would need additional API call for full genre names
       };
     }
     return null;
@@ -657,6 +660,7 @@ export class MediaUpdateService {
       console.log(`Successfully fetched from TMDB season:`, data.name);
       return {
         title: data.name,
+        year: data.air_date ? new Date(data.air_date).getFullYear() : undefined,
         description: data.overview,
         coverImageUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : undefined,
         releaseDate: data.air_date,
@@ -724,6 +728,7 @@ export class MediaUpdateService {
       console.log(`Successfully fetched from TMDB episode:`, data.name);
       return {
         title: data.name,
+        year: data.air_date ? new Date(data.air_date).getFullYear() : undefined,
         description: data.overview,
         coverImageUrl: data.still_path ? `https://image.tmdb.org/t/p/w500${data.still_path}` : undefined,
         releaseDate: data.air_date,
@@ -755,6 +760,7 @@ export class MediaUpdateService {
         const movie = movieData.results[0];
         return {
           title: movie.title,
+          year: movie.release_date ? new Date(movie.release_date).getFullYear() : undefined,
           description: movie.overview,
           coverImageUrl: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : undefined,
           releaseDate: movie.release_date,
@@ -769,6 +775,7 @@ export class MediaUpdateService {
         const show = tvData.results[0];
         return {
           title: show.name,
+          year: show.first_air_date ? new Date(show.first_air_date).getFullYear() : undefined,
           description: show.overview,
           coverImageUrl: show.poster_path ? `https://image.tmdb.org/t/p/w500${show.poster_path}` : undefined,
           releaseDate: show.first_air_date,
@@ -832,6 +839,18 @@ export class MediaUpdateService {
       
       if (shouldUpdate && updateData.description !== mediaItem.Description) {
         changes.description = updateData.description;
+        hasChanges = true;
+      }
+    }
+
+    // Check year
+    if (options.updateTitles && updateData.year !== undefined) {
+      const shouldUpdate = options.onlyMissing ? 
+        (mediaItem.Year === undefined || mediaItem.Year === null) : 
+        true;
+      
+      if (shouldUpdate && updateData.year !== mediaItem.Year) {
+        changes.year = updateData.year;
         hasChanges = true;
       }
     }
@@ -939,6 +958,7 @@ export class MediaUpdateService {
             const updateFields: Record<string, string | number | undefined> = {};
             if (changes.title) updateFields.DisplayName = changes.title;
             if (changes.description) updateFields.Description = changes.description;
+            if (changes.year !== undefined) updateFields.Year = changes.year;
 
             // Cover image update logic
             console.log('[processBulkUpdate] options:', options, 'changes:', changes);

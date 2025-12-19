@@ -141,6 +141,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
               Description: '',
               MediaType: item.type,
               ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
+              Year: item.year,          // Year as a separate field
               ExternalLinks: JSON.stringify(item.ids),
             };
             mediaItem = await MediaLibraryService.createMediaItem(req);
