@@ -90,7 +90,7 @@ export async function uploadCoverImageBinary(
 // src/client/services/mediaLibraryService.ts
 import { repository } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
-import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
+import { MEDIA_ITEM_CONTENT_TYPE, BOOK_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
 
 export interface MediaItem {
@@ -103,6 +103,7 @@ export interface MediaItem {
   Description: string;
   MediaType: string;
   ReleaseDate?: string;
+  Year?: number;
   ChronologicalDate?: string;
   CoverImageUrl?: string;
   CoverImageBin?: {
@@ -116,6 +117,13 @@ export interface MediaItem {
   Rating?: number;
   ExternalLinks?: string; // JSON string
   Tags?: string;
+  // Book-specific fields
+  Author?: string;
+  Publisher?: string;
+  ISBN?: string;
+  PublicationYear?: number;
+  BookSeriesNumber?: number;
+  SeriesName?: string;
   CreationDate: string;
   CreatedBy: {
     DisplayName: string;
@@ -126,6 +134,7 @@ export interface MediaItem {
 interface MediaMetadata {
   MediaType?: string;
   ReleaseDate?: string;
+  Year?: number;
   ChronologicalDate?: string;
   CoverImageUrl?: string;
   Duration?: number;
@@ -133,6 +142,12 @@ interface MediaMetadata {
   Rating?: number;
   ExternalLinks?: string;
   Tags?: string;
+  // Book-specific fields
+  Author?: string;
+  Publisher?: string;
+  ISBN?: string;
+  PublicationYear?: number;
+  BookSeriesNumber?: number;
 }
 
 interface SenseNetContent {
@@ -150,6 +165,7 @@ interface SenseNetContent {
   // MediaItem fields (optional for type safety)
   MediaType?: string;
   ReleaseDate?: string;
+  Year?: number;
   ChronologicalDate?: string;
   CoverImageUrl?: string;
   CoverImageBin?: {
@@ -163,6 +179,13 @@ interface SenseNetContent {
   Rating?: number;
   ExternalLinks?: string;
   Tags?: string;
+  // Book-specific fields
+  Author?: string;
+  Publisher?: string;
+  ISBN?: string;
+  PublicationYear?: number;
+  BookSeriesNumber?: number;
+  SeriesName?: string;
 }
 
 export interface CreateMediaItemRequest {
@@ -172,6 +195,7 @@ export interface CreateMediaItemRequest {
   Description: string;
   MediaType: string;
   ReleaseDate?: string;
+  Year?: number;
   ChronologicalDate?: string;
   CoverImageUrl?: string;
   Duration?: number;
@@ -179,6 +203,13 @@ export interface CreateMediaItemRequest {
   Rating?: number;
   ExternalLinks?: string;
   Tags?: string;
+  // Book-specific fields
+  Author?: string;
+  Publisher?: string;
+  ISBN?: string;
+  PublicationYear?: number;
+  BookSeriesNumber?: number;
+  SeriesName?: string;
 }
 
 /**
@@ -252,28 +283,42 @@ export class MediaLibraryService {
       const releaseDateIso = toIsoDateString(data.ReleaseDate);
       const chronologicalDateIso = toIsoDateString(data.ChronologicalDate);
 
+      // Determine content type based on MediaType
+      const contentType = mappedMediaType === 'book' ? BOOK_CONTENT_TYPE : MEDIA_ITEM_CONTENT_TYPE;
+
+      // Build content object, excluding undefined fields
+      const content: Partial<CreateMediaItemRequest> = {
+        DisplayName: data.DisplayName,
+        Title: data.Title,
+        Subtitle: data.Subtitle,
+        Description: data.Description,
+        MediaType: mappedMediaType,
+        ReleaseDate: releaseDateIso,
+        Year: data.Year,
+        ChronologicalDate: chronologicalDateIso,
+        CoverImageUrl: data.CoverImageUrl,
+        Duration: data.Duration,
+        Genre: mappedGenre,
+        Rating: safeRating,
+        ExternalLinks: externalLinksJson,
+        Tags: data.Tags,
+        // Book-specific fields (only include if defined)
+        ...(data.Author && { Author: data.Author }),
+        ...(data.Publisher && { Publisher: data.Publisher }),
+        ...(data.ISBN && { ISBN: data.ISBN }),
+        ...(data.PublicationYear && { PublicationYear: data.PublicationYear }),
+        ...(data.BookSeriesNumber && { BookSeriesNumber: data.BookSeriesNumber }),
+        ...(data.SeriesName && { SeriesName: data.SeriesName })
+      };
+
       const response = await repository.post({
         parentPath: this.MEDIA_LIBRARY_PATH,
-        contentType: MEDIA_ITEM_CONTENT_TYPE,
+        contentType: contentType,
         oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
           expand: ['CreatedBy']
         },
-        content: {
-          DisplayName: data.DisplayName,
-          Title: data.Title,
-          Subtitle: data.Subtitle,
-          Description: data.Description,
-          MediaType: mappedMediaType,
-          ReleaseDate: releaseDateIso,
-          ChronologicalDate: chronologicalDateIso,
-          CoverImageUrl: data.CoverImageUrl,
-          Duration: data.Duration,
-          Genre: mappedGenre,
-          Rating: safeRating,
-          ExternalLinks: externalLinksJson,
-          Tags: data.Tags
-        }
+        content: content
       });
 
       console.log('Media item created successfully:', response);
@@ -294,8 +339,8 @@ export class MediaLibraryService {
       const response = await repository.loadCollection({
         path: this.MEDIA_LIBRARY_PATH,
         oDataOptions: {
-          query: `+TypeIs:${MEDIA_ITEM_CONTENT_TYPE} +Hidden:0`,
-          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          query: `+(TypeIs:${MEDIA_ITEM_CONTENT_TYPE} OR TypeIs:${BOOK_CONTENT_TYPE}) +Hidden:0`,
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
           expand: ['CreatedBy'],
           orderby: ['CreationDate desc']
         }
@@ -319,7 +364,7 @@ export class MediaLibraryService {
       const response = await repository.load({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
           expand: ['CreatedBy']
         }
       });
@@ -338,12 +383,12 @@ export class MediaLibraryService {
   static async getMediaItemByName(name: string): Promise<MediaItem> {
     try {
       // Use a query to find by Name, supporting subfolders
-      const query = `+Name:'${name}' +TypeIs:'${MEDIA_ITEM_CONTENT_TYPE}'`;
+      const query = `+Name:'${name}' +(TypeIs:${MEDIA_ITEM_CONTENT_TYPE} OR TypeIs:${BOOK_CONTENT_TYPE})`;
       const response = await repository.loadCollection({
         path: mediaLibraryPath,
         oDataOptions: {
           query,
-          select: ['Id', 'ParentId', 'Name', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'Name', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber'],
           expand: ['CreatedBy']
         }
       });
@@ -362,12 +407,14 @@ export class MediaLibraryService {
    */
   static async updateMediaItem(id: number, data: Partial<CreateMediaItemRequest>): Promise<MediaItem> {
     try {
-      console.log('Updating media item:', id, data);
+      console.log('🔄 Starting update for media item:', id);
+      console.log('📝 Input data:', data);
 
       // Prepare external links if provided
       let externalLinksJson: string | undefined = undefined;
       if (data.ExternalLinks !== undefined) {
         externalLinksJson = typeof data.ExternalLinks === 'string' ? data.ExternalLinks : JSON.stringify(data.ExternalLinks);
+        console.log('🔗 External links prepared:', externalLinksJson);
       }
 
       // Date conversion helper
@@ -378,6 +425,9 @@ export class MediaLibraryService {
       }
 
       // Validate and map data similar to creation
+      console.log('🔍 Starting validation and mapping...');
+
+      // Allowed values for MediaType and Genre
       const allowedMediaTypes = [
         'movie', 'show', 'season', 'episode', 'tvepisode', 'tvseason', 'tvseries', 'book', 'comic', 'videogame', 'podcast', 'documentary', 'other'
       ];
@@ -385,6 +435,7 @@ export class MediaLibraryService {
         'action', 'adventure', 'comedy', 'drama', 'fantasy', 'horror', 'mystery', 'romance', 'scifi', 'thriller', 'documentary', 'other'
       ];
 
+      // Map MediaType and Genre to allowed lowercase values
       function mapToAllowedValue(value: string | undefined, allowed: string[]): string | undefined {
         if (!value) return undefined;
         const lower = value.toLowerCase();
@@ -409,6 +460,8 @@ export class MediaLibraryService {
       const mappedMediaType = data.MediaType !== undefined ? mapToAllowedValue(data.MediaType, allowedMediaTypes) : undefined;
       const mappedGenre = data.Genre !== undefined ? mapToAllowedValue(data.Genre, allowedGenres) : undefined;
 
+      console.log('✅ Validation complete. Mapped values:', { mappedMediaType, mappedGenre });
+
       // Validate rating
       let safeRating: number | undefined = undefined;
       if (data.Rating !== undefined) {
@@ -425,6 +478,7 @@ export class MediaLibraryService {
       if (data.Description !== undefined) updateContent.Description = data.Description;
       if (mappedMediaType !== undefined) updateContent.MediaType = mappedMediaType;
       if (data.ReleaseDate !== undefined) updateContent.ReleaseDate = toIsoDateString(data.ReleaseDate);
+      if (data.Year !== undefined) updateContent.Year = data.Year;
       if (data.ChronologicalDate !== undefined) updateContent.ChronologicalDate = toIsoDateString(data.ChronologicalDate);
       if (data.CoverImageUrl !== undefined) updateContent.CoverImageUrl = data.CoverImageUrl;
       if (data.Duration !== undefined) updateContent.Duration = data.Duration;
@@ -432,13 +486,21 @@ export class MediaLibraryService {
       if (safeRating !== undefined) updateContent.Rating = safeRating;
       if (externalLinksJson !== undefined) updateContent.ExternalLinks = externalLinksJson;
       if (data.Tags !== undefined) updateContent.Tags = data.Tags;
+      // Book-specific fields
+      if (data.Author !== undefined) updateContent.Author = data.Author;
+      if (data.Publisher !== undefined) updateContent.Publisher = data.Publisher;
+      if (data.ISBN !== undefined) updateContent.ISBN = data.ISBN;
+      if (data.PublicationYear !== undefined) updateContent.PublicationYear = data.PublicationYear;
+      if (data.BookSeriesNumber !== undefined) updateContent.BookSeriesNumber = data.BookSeriesNumber;
+      if (data.SeriesName !== undefined) updateContent.SeriesName = data.SeriesName;
 
       console.log('📝 Update content:', updateContent);
 
+      console.log('🌐 Making PATCH request to SenseNet...');
       const response = await repository.patch({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName'],
+          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
           expand: ['CreatedBy']
         },
         content: updateContent
@@ -447,7 +509,12 @@ export class MediaLibraryService {
       console.log('Media item updated successfully:', response);
       return this.mapMemoToMediaItem(response.d);
     } catch (error) {
-      console.error('Error updating media item:', error);
+      console.error('❌ Error updating media item:', error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        error
+      });
       throw new Error('Failed to update media item. Please check your connection and try again.');
     }
   }
@@ -536,6 +603,13 @@ export class MediaLibraryService {
       Rating: memo.Rating,
       ExternalLinks: memo.ExternalLinks,
       Tags: memo.Tags,
+      // Book-specific fields
+      Author: memo.Author,
+      Publisher: memo.Publisher,
+      ISBN: memo.ISBN,
+      PublicationYear: memo.PublicationYear,
+      BookSeriesNumber: memo.BookSeriesNumber,
+      SeriesName: memo.SeriesName,
       CreationDate: memo.CreationDate,
       CreatedBy: memo.CreatedBy || { DisplayName: 'Unknown' },
       SortOrder: memo.SortOrder // Keep original for updates
@@ -543,18 +617,36 @@ export class MediaLibraryService {
   }
 
   /**
-   * Helper function to get cover image URL (either from URL field or binary field)
+   * Uploads a cover image for a media item
+   * @param mediaItemId - The ID of the media item
+   * @param file - The image file to upload
+   */
+  static async uploadMediaItemCoverImage(mediaItemId: number, file: File): Promise<void> {
+    try {
+      // Convert File to Blob
+      const imageBlob = new Blob([file], { type: file.type });
+      
+      // Use the existing uploadCoverImageBinary function
+      await uploadCoverImageBinary(mediaItemId, imageBlob, file.name);
+    } catch (error) {
+      console.error('Failed to upload media item cover image:', error);
+      throw new Error('Failed to upload cover image');
+    }
+  }
+
+  /**
+   * Gets the cover image URL for a media item, preferring binary over URL
    */
   static getCoverImageUrl(mediaItem: MediaItem): string | null {
-    // If URL is set, use it
-    if (mediaItem.CoverImageUrl) {
-      return mediaItem.CoverImageUrl;
-    }
-    
-    // Otherwise, check if we have a binary image
+    // First check if we have a binary image (preferred)
     if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
       const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
       return `${repositoryUrl}${relativePath}`;
+    }
+    
+    // Otherwise, check if we have a URL
+    if (mediaItem.CoverImageUrl) {
+      return mediaItem.CoverImageUrl;
     }
     
     return null;

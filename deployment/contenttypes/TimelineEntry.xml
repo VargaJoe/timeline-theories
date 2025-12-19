@@ -33,6 +33,13 @@
         <Precision>Second</Precision>
       </Configuration>
     </Field>
+    <Field name="ChronologicalDescription" type="ShortText">
+      <DisplayName>Chronological Description</DisplayName>
+      <Description>Flexible description for chronology (e.g., 'During the Clone Wars', 'Before Episode IV')</Description>
+      <Configuration>
+        <MaxLength>200</MaxLength>
+      </Configuration>
+    </Field>
     <Field name="ReleaseOrderPosition" type="Integer">
       <DisplayName>Release Order Position</DisplayName>
       <Description>Position in release order</Description>

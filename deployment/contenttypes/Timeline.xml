@@ -42,6 +42,16 @@
         <DefaultValue>0</DefaultValue>
       </Configuration>
     </Field>
+    <Field name="TimelineType" type="Choice">
+      <DisplayName>Timeline Type</DisplayName>
+      <Description>Type of timeline organization</Description>
+      <Configuration>
+        <Options>
+          <Option selected="true" value="chronological">Chronological</Option>
+          <Option value="publisher-series">Publisher Series</Option>
+        </Options>
+      </Configuration>
+    </Field>
     <Field name="Category" type="Choice">
       <DisplayName>Category</DisplayName>
       <Description>Timeline category</Description>

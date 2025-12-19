@@ -58,22 +58,24 @@ export interface Timeline {
   created_at?: string;
   coverImageUrl?: string;
   isPublic?: boolean;
+  timelineType?: string;
 }
 
-export async function createTimeline(data: { name: string; displayName?: string; description?: string; sortOrder?: string }): Promise<Timeline> {
+export async function createTimeline(data: { name: string; displayName?: string; description?: string; sortOrder?: string; timelineType?: string }): Promise<Timeline> {
   try {
     // Create a Timeline content under the configured path
     const result = await repository.post({
       parentPath: timelinesPath,
       contentType: TIMELINE_CONTENT_TYPE,
       oDataOptions: {
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic'],
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic', 'TimelineType'],
       },
       content: {
         Name: data.name,
         DisplayName: data.displayName || data.name,
         Description: data.description || '',
         SortOrder: data.sortOrder || 'chronological',
+        TimelineType: data.timelineType || 'chronological',
       },
     });
     
@@ -85,6 +87,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
       sort_order: result.d.SortOrder || data.sortOrder,
       created_at: result.d.CreationDate,
       isPublic: typeof result.d.IsPublic === 'boolean' ? result.d.IsPublic : false,
+      timelineType: result.d.TimelineType || data.timelineType || 'chronological',
     };
   } catch (error) {
     console.error('Failed to create timeline:', error);
@@ -99,7 +102,7 @@ export async function getTimelines(): Promise<Timeline[]> {
       path: timelinesPath,
       oDataOptions: {
         query: `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`,
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsPublic'],
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsPublic', 'TimelineType'],
         orderby: ['DisplayName'],
       },
     });
@@ -113,6 +116,7 @@ export async function getTimelines(): Promise<Timeline[]> {
       CreationDate: string;
       CoverImageUrl?: string;
       IsPublic?: boolean;
+      TimelineType?: string;
     }) => {
       // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
       let sortOrder = 'chronological';
@@ -131,6 +135,7 @@ export async function getTimelines(): Promise<Timeline[]> {
         created_at: item.CreationDate,
         coverImageUrl: item.CoverImageUrl,
         isPublic: typeof item.IsPublic === 'boolean' ? item.IsPublic : false,
+        timelineType: item.TimelineType || 'chronological',
       };
     });
   } catch (error) {

@@ -16,6 +16,7 @@ export const TimelineCreateForm: React.FC = () => {
   const [displayName, setDisplayName] = useState('');  
   const [description, setDescription] = useState('');
   const [sortOrder, setSortOrder] = useState<'chronological' | 'release'>('chronological');
+  const [timelineType, setTimelineType] = useState<'chronological' | 'publisher-series'>('chronological');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -45,7 +46,8 @@ export const TimelineCreateForm: React.FC = () => {
         name: name.trim(), 
         displayName: displayName.trim(),
         description: description.trim() || undefined, 
-        sortOrder 
+        sortOrder,
+        timelineType
       });
       let created = 0, reused = 0;
       const errors: string[] = [];
@@ -241,6 +243,24 @@ export const TimelineCreateForm: React.FC = () => {
             >
               <option value="chronological">Chronological Order</option>
               <option value="release">Release Order</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Timeline Type</label>
+            <select
+              value={timelineType}
+              onChange={e => setTimelineType(e.target.value as 'chronological' | 'publisher-series')}
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: 6,
+                border: '1px solid #ccc',
+                fontSize: 16,
+                boxSizing: 'border-box'
+              }}
+            >
+              <option value="chronological">Chronological</option>
+              <option value="publisher-series">Publisher Series</option>
             </select>
           </div>
           <button

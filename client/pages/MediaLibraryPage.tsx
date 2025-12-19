@@ -4,6 +4,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 import { PageHeader } from '../components/PageHeader';
 import { LazyImage } from '../components/LazyImage';
+import { BookImportDialog } from '../components/BookImportDialog';
+import { MediaItemEditDialog } from '../components/MediaItemEditDialog';
 import { siteConfig } from '../configuration';
 import { loadBackgroundImage } from '../services/sensenet';
 
@@ -31,6 +33,9 @@ export default function MediaLibraryPage() {
   const [selectedType, setSelectedType] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
+  const [showBookImportDialog, setShowBookImportDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
 
   // Load background image (same as timeline/media item pages)
   useEffect(() => {
@@ -93,6 +98,7 @@ export default function MediaLibraryPage() {
       const matchesQuery =
         !query ||
         (item.DisplayName && item.DisplayName.toLowerCase().includes(query)) ||
+        (item.Title && item.Title.toLowerCase().includes(query)) ||
         (item.Description && item.Description.toLowerCase().includes(query));
       // Filter by type (normalize both sides)
       const itemType = normalizeMediaType(item.MediaType).toLowerCase();
@@ -131,6 +137,19 @@ export default function MediaLibraryPage() {
     } catch {
       return { url: externalLinksJson };
     }
+  };
+
+  const handleEditItem = (item: MediaItem, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent navigation to item detail page
+    setEditingItem(item);
+    setShowEditDialog(true);
+  };
+
+  const handleEditSave = (updatedItem: MediaItem) => {
+    // Update the item in the local state
+    setMediaItems(prev => prev.map(item => 
+      item.Id === updatedItem.Id ? updatedItem : item
+    ));
   };
 
 
@@ -177,6 +196,24 @@ export default function MediaLibraryPage() {
             >
               Add Media Item
             </Link>
+            <button
+              onClick={() => setShowBookImportDialog(true)}
+              style={{
+                background: '#28a745',
+                color: 'white',
+                border: 'none',
+                padding: '12px 24px',
+                borderRadius: 6,
+                fontWeight: 500,
+                display: 'inline-block',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
+                marginTop: 8,
+                marginLeft: 12,
+                cursor: 'pointer'
+              }}
+            >
+              Import Books
+            </button>
             <span style={{ color: '#fff', marginLeft: 16, fontWeight: 400 }}>
               or <Link to="/media-library/create" style={{ color: '#fff', fontWeight: 500, textDecoration: 'underline' }}>add a new item</Link>.
             </span>
@@ -359,7 +396,7 @@ export default function MediaLibraryPage() {
                       wordBreak: 'break-word',
                       lineHeight: 1.2
                     }}>
-                      {item.DisplayName}
+                      {item.Title || item.DisplayName}
                     </h3>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                       <span style={{
@@ -389,6 +426,11 @@ export default function MediaLibraryPage() {
                         </span>
                       )}
                     </div>
+                    {item.Year && (
+                      <div style={{ fontSize: 14, color: '#666', marginBottom: 8, textAlign: 'center' }}>
+                        {item.Year}
+                      </div>
+                    )}
                     {/* Description, if present, below title */}
                     {item.Description && (
                       <div style={{ fontSize: 13, color: '#444', marginBottom: 8, textAlign: 'center', maxHeight: 48, overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.3 }}>
@@ -422,6 +464,29 @@ export default function MediaLibraryPage() {
                         </div>
                       </div>
                     )}
+                    {/* Edit Button for authenticated users */}
+                    {oidcUser && (
+                      <div style={{ marginBottom: 8, width: '100%', display: 'flex', justifyContent: 'center' }}>
+                        <button
+                          onClick={(e) => handleEditItem(item, e)}
+                          style={{
+                            background: '#28a745',
+                            color: 'white',
+                            border: 'none',
+                            padding: '6px 12px',
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            transition: 'background-color 0.2s'
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.background = '#218838'}
+                          onMouseOut={(e) => e.currentTarget.style.background = '#28a745'}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
                     <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'center' }}>
                       Added {formatDate(item.CreationDate)}
                     </div>
@@ -433,6 +498,22 @@ export default function MediaLibraryPage() {
         </div>
       )}
       </div>
+
+      <BookImportDialog
+        isOpen={showBookImportDialog}
+        onClose={() => setShowBookImportDialog(false)}
+        onImportComplete={() => {
+          setShowBookImportDialog(false);
+          // Refresh the media library
+          loadMediaItems();
+        }}
+      />
+      <MediaItemEditDialog
+        isOpen={showEditDialog}
+        onClose={() => setShowEditDialog(false)}
+        mediaItem={editingItem}
+        onSave={handleEditSave}
+      />
     </>
   );
 }
