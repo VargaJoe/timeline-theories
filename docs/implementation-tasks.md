@@ -205,6 +205,57 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Add error handling and fallbacks for failed image loads
 - [ ] Test with various media types and network conditions
 
+### Story 06 - Organize Timeline Entries
+- [ ] User can drag and drop timeline entries to reorder them
+- [ ] User can manually set position numbers for entries
+- [ ] User can group entries by story arcs or themes
+- [ ] User can set dates for entries (for chronological sorting)
+- [ ] Changes are saved automatically
+- [ ] Timeline view reflects the new order immediately
+- [ ] Implement drag-and-drop functionality
+- [ ] Add position field management
+- [ ] Create grouping/arc functionality
+- [ ] Add date field for chronological sorting
+- [ ] Implement auto-save for position changes
+- [ ] Update timeline display logic
+
+### Story 26 - Timeline Entry Tagging for Loops, Universes, and Parallel Events
+- [ ] User can assign tags to timeline entries (e.g., "Prime Timeline", "Alternate Timeline", "Time Loop", "Character A", "City X")
+- [ ] Tags can be used to filter or group entries in the timeline view
+- [ ] UI supports tag selection, creation, and removal for entries
+- [ ] Tags are visible on timeline entries
+- [ ] Timeline can be rendered by tag grouping (e.g., show only "Prime Timeline" or alternate arcs)
+- [ ] Tags can be used for advanced rendering logic (e.g., alternating, grouped, or separated views)
+- [ ] Extend tag system to support timeline entry tags (not just media items)
+- [ ] Update TimelineEntry model and UI for tag assignment
+- [ ] Implement tag-based filtering and grouping in timeline view
+- [ ] Add rendering logic for different tag-based views (universe order, binge order, etc.)
+- [ ] Test tag assignment and filtering/grouping
+
+### Story 27 - Multi-Timeline Rendering and Viewing Modes
+- [ ] User can select different timeline rendering modes
+- [ ] Timeline entries from multiple timelines can be shown in a combined view
+- [ ] UI allows switching between rendering modes
+- [ ] Entries are grouped/alternated according to selected mode
+- [ ] Tag and cross-reference logic is respected in rendering
+- [ ] Implement rendering logic for each mode
+- [ ] Update timeline view UI to allow mode selection
+- [ ] Combine entries from multiple timelines as needed
+- [ ] Respect tags and cross-references in rendering
+- [ ] Test all rendering modes for correctness
+
+### Story 29 - Publisher Series Import and Management
+- [ ] Add timeline type option to mark as "Publisher Series" vs chronological timeline
+- [ ] Enhance media item creation for books with book-specific metadata fields
+- [ ] Implement default sort by publication date for publisher series
+- [ ] Add bulk book import from publisher data sources (Open Library, Google Books)
+- [ ] Create book-specific import workflows with appropriate field mapping
+- [ ] Add series metadata inheritance to auto-fill publisher/series info for subsequent books
+- [ ] Refactor content types for proper inheritance (Book inherits from MediaItem)
+- [ ] Update media item creation forms with book-specific fields
+- [ ] Implement bulk import services for book data sources
+- [ ] Add timeline type selection and sorting logic
+
 ---
 
 ## Completed 
