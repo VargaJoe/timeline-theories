@@ -39,14 +39,15 @@ export const LazyImage: React.FC<LazyImageProps> = ({
 
   // Default placeholder styles
   const placeholderStyle: React.CSSProperties = {
-    backgroundColor: '#f0f0f0',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     color: '#999',
     fontSize: '14px',
     minHeight: '100px',
-    ...style
+    ...style,
+    // Only set backgroundColor if parent didn't provide background or backgroundColor
+    backgroundColor: (style as any)?.background || (style as any)?.backgroundColor ? undefined : '#f0f0f0'
   };
 
   // Image styles with smooth fade-in animation
