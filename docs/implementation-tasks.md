@@ -104,6 +104,12 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Ensure proper startup order with healthcheck conditions
 - [ ] Test that containers start in correct sequence without manual intervention
 - [ ] Verify that services are fully ready before depending services start
+
+### Technical Task - Automate Development Certificate Generation in Docker Compose
+- [ ] Implement certificate generation within Docker Compose (e.g., using OpenSSL in a init container)
+- [ ] Ensure generated certificates are trusted on Windows host (import to trusted root store)
+- [ ] Remove dependency on external scripts for certificate creation
+- [ ] Test certificate auto-generation and trust setup
 - [ ] Add instance differentiation labels
 - [ ] Test multiple instance functionality
 
@@ -451,4 +457,19 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] Add proper event handling to prevent navigation when clicking edit buttons
 - [x] Add book-specific fields (author, publisher, ISBN, publication year, series info) to edit dialog
 - [x] Test the complete edit functionality with various media types and ensure data persistence
+
+### Technical Task - Admin-only Media Library Access
+- [x] **IMPLEMENTED: Admin-only visibility for Media Library menu** - Media Library link only appears for authenticated users
+- [x] **UPDATED: TopNavigationBar component** - Added oidcUser conditional rendering for Media Library link
+- [x] **UPDATED: Mobile navigation** - Applied same admin-only logic to mobile menu Media Library link
+- [x] **MAINTAINED: Consistent behavior** - Admin access control matches other admin functions in the application
+- [x] **TESTED: Build verification** - All changes compile successfully with zero errors
+
+### Technical Task - Maintenance Mode Implementation
+- [x] **IMPLEMENTED: Environment variable-based maintenance mode** - VITE_MAINTENANCE_MODE environment variable controls site availability
+- [x] **CREATED: MaintenanceMode component** - Professional maintenance page with clear messaging and visual design
+- [x] **UPDATED: AppProviders component** - Added maintenance mode check before rendering main application
+- [x] **ENHANCED: Error handling** - Graceful fallback when API is unavailable or security issues require quick shutdown
+- [x] **TESTED: Build verification** - All changes compile successfully with zero errors
+- [x] **DOCUMENTED: Usage** - Environment variable configuration documented for deployment scenarios
 

@@ -12,6 +12,12 @@ export interface MediaItemRef {
   CoverImageUrl?: string;
   ReleaseDate?: string;
   Description?: string;
+  Author?: string;
+  Publisher?: string;
+  ISBN?: string;
+  PublicationYear?: number;
+  Genre?: string | string[];
+  Tags?: string | string[];
   CoverImageBin?: {
     __mediaresource?: {
       media_src: string;

@@ -76,22 +76,24 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          <Link 
-            to="/media-library" 
-            style={{
-              color: '#fff',
-              textDecoration: 'none',
-              fontSize: '16px',
-              fontWeight: 500,
-              padding: '8px 12px',
-              borderRadius: 6,
-              transition: 'background 0.2s'
-            }}
-            onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-            onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-          >
-            Media Library
-          </Link>
+          {oidcUser && (
+            <Link 
+              to="/media-library" 
+              style={{
+                color: '#fff',
+                textDecoration: 'none',
+                fontSize: '16px',
+                fontWeight: 500,
+                padding: '8px 12px',
+                borderRadius: 6,
+                transition: 'background 0.2s'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+              onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              Media Library
+            </Link>
+          )}
 
           {/* Desktop User Profile/Login */}
           <div style={{
@@ -181,21 +183,23 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          <Link 
-            to="/media-library" 
-            style={{
-              color: '#fff',
-              textDecoration: 'none',
-              fontSize: '16px',
-              fontWeight: 500,
-              padding: '12px 20px',
-              display: 'block',
-              borderBottom: '1px solid rgba(255,255,255,0.1)'
-            }}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            Media Library
-          </Link>
+          {oidcUser && (
+            <Link 
+              to="/media-library" 
+              style={{
+                color: '#fff',
+                textDecoration: 'none',
+                fontSize: '16px',
+                fontWeight: 500,
+                padding: '12px 20px',
+                display: 'block',
+                borderBottom: '1px solid rgba(255,255,255,0.1)'
+              }}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Media Library
+            </Link>
+          )}
 
           {/* Mobile User Profile/Login */}
           <div style={{

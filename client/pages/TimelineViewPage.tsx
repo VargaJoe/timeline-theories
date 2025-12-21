@@ -69,14 +69,14 @@ export const TimelineViewPage: React.FC = () => {
       if (!timeline) return;
       const parentPath = `${timelinesPath}/${timeline.name}`;
       try {
-        const { exportTimelineToTSV } = await import('../services/timelineService');
-        const tsv = await exportTimelineToTSV(timeline, parentPath);
-        // Create a blob and trigger download
-        const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
+        const { exportTimelineToZIP } = await import('../services/timelineService');
+        const zipBlob = await exportTimelineToZIP(timeline, parentPath);
+        
+        // Trigger ZIP download
+        const url = URL.createObjectURL(zipBlob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${timeline.name || 'timeline'}.tsv`;
+        link.download = `${timeline.name || 'timeline'}-export.zip`;
         link.click();
         setTimeout(() => {
           URL.revokeObjectURL(url);
@@ -85,14 +85,23 @@ export const TimelineViewPage: React.FC = () => {
         alert('Failed to export timeline: ' + (err instanceof Error ? err.message : String(err)));
       }
     };
+  
   // Import handler
   const handleImportTimeline = async (file: File) => {
     if (!timeline) return;
     const parentPath = `${timelinesPath}/${timeline.name}`;
     try {
-      const text = await file.text();
-      const { importTimelineFromTSV } = await import('../services/timelineService');
-      await importTimelineFromTSV(text, timeline.name);
+      // Check if it's a ZIP file
+      if (file.name.endsWith('.zip')) {
+        const { importTimelineFromZIP } = await import('../services/timelineService');
+        await importTimelineFromZIP(file, timeline.name);
+      } else {
+        // Fall back to TSV import for backward compatibility
+        const text = await file.text();
+        const { importTimelineFromTSV } = await import('../services/timelineService');
+        await importTimelineFromTSV(text, timeline.name);
+      }
+      
       // Reload entries after import
       setEntriesLoading(true);
       const entries = await TimelineEntryService.listTimelineEntries(Number(timeline.id), parentPath);
