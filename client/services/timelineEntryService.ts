@@ -149,6 +149,8 @@ export class TimelineEntryService {
       await repository.patch({
         idOrPath: entryId,
         content: {
+          Name: updates.name,
+          DisplayName: updates.displayName,
           Position: updates.position,
           ChronologicalDate: updates.chronologicalDate,
           ChronologicalDescription: updates.chronologicalDescription,

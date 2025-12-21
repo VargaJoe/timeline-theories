@@ -220,10 +220,12 @@ export async function importTimelineFromZip(
         }
 
         if (existingEntry) {
-          // Update existing entry
+          // Update existing entry using path-based addressing (security: no ID)
           console.log(`[timelineImportService] Updating existing entry: ${entry.entryName}`);
           
-          await TimelineEntryService.updateTimelineEntry(existingEntry.id, {
+          const entryPath = `${parentPath}/${entry.entryName}`;
+          await TimelineEntryService.updateTimelineEntry(entryPath, {
+            name: entry.entryName,
             displayName: entry.title,
             chronologicalDate: entry.date,
             position: entry.position,
