@@ -23,13 +23,48 @@ const MEDIA_TYPES = [
 ];
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
 
+function isAdmin(user: any): boolean {
+  if (!user) return false;
+  
+  // Special case: Admin user is always admin
+  if (user.Name === 'Admin' || user.LoginName === 'Admin') {
+    return true;
+  }
+  
+  // Check SenseNet group membership first
+  if (user.Groups && Array.isArray(user.Groups)) {
+    // Check if user is member of 'administrators' group
+    const isInAdminGroup = user.Groups.some((group: any) => {
+      // Group can be an object with Name property or just a string
+      const groupName = typeof group === 'string' ? group : group?.Name || group?.DisplayName;
+      return groupName === 'administrators' || groupName === 'Administrators';
+    });
+    if (isInAdminGroup) return true;
+  }
+  
+  // Fallback to email-based admin check
+  const userEmail = user.email || user.Email || user.preferred_username || user.name;
+  return siteConfig.adminEmails.length === 0 || siteConfig.adminEmails.includes(userEmail);
+}
+
 export default function MediaLibraryPage() {
   // Use unified auth context
-  const { user } = useSharedAuth();
+  const { user, isLoading } = useSharedAuth();
   const navigate = useNavigate();
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Check authentication and admin access - redirect if not admin
+  useEffect(() => {
+    // Wait for auth to finish loading before checking admin status
+    if (isLoading) return;
+    
+    if (!isAdmin(user)) {
+      navigate('/');
+      return;
+    }
+  }, [user, isLoading, navigate]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
@@ -179,7 +214,7 @@ export default function MediaLibraryPage() {
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
       >
-        {user && (
+        {user && isAdmin(user) && (
           <>
             <Link
               to="/media-library/create"
@@ -341,7 +376,7 @@ export default function MediaLibraryPage() {
               ? 'Try adjusting your search criteria.' 
               : 'Get started by adding your first media item.'}
           </p>
-          {user && (
+          {user && isAdmin(user) && (
             <Link 
               to="/media-library/create"
               style={{
@@ -466,7 +501,7 @@ export default function MediaLibraryPage() {
                       </div>
                     )}
                     {/* Edit Button for authenticated users */}
-                    {user && (
+                    {user && isAdmin(user) && (
                       <div style={{ marginBottom: 8, width: '100%', display: 'flex', justifyContent: 'center' }}>
                         <button
                           onClick={(e) => handleEditItem(item, e)}

@@ -4,6 +4,30 @@ import { useSharedAuth } from '../context/useSharedAuth';
 import { LoginButton } from './LoginButton';
 import { siteConfig } from '../configuration';
 
+function isAdmin(user: any): boolean {
+  if (!user) return false;
+  
+  // Special case: Admin user is always admin
+  if (user.Name === 'Admin' || user.LoginName === 'Admin') {
+    return true;
+  }
+  
+  // Check SenseNet group membership first
+  if (user.Groups && Array.isArray(user.Groups)) {
+    // Check if user is member of 'administrators' group
+    const isInAdminGroup = user.Groups.some((group: any) => {
+      // Group can be an object with Name property or just a string
+      const groupName = typeof group === 'string' ? group : group?.Name || group?.DisplayName;
+      return groupName === 'administrators' || groupName === 'Administrators';
+    });
+    if (isInAdminGroup) return true;
+  }
+  
+  // Fallback to email-based admin check
+  const userEmail = user.email || user.Email || user.preferred_username || user.name;
+  return siteConfig.adminEmails.length === 0 || siteConfig.adminEmails.includes(userEmail);
+}
+
 export const TopNavigationBar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -82,7 +106,7 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          {isAuthenticated && (
+          {isAuthenticated && isAdmin(userProfile) && (
             <Link 
               to="/media-library" 
               style={{
@@ -189,7 +213,7 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          {isAuthenticated && (
+          {isAuthenticated && isAdmin(userProfile) && (
             <Link 
               to="/media-library" 
               style={{

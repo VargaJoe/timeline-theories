@@ -22,7 +22,10 @@ export const siteConfig = {
 
   // Default cover image dimensions for binary upload (px)
   coverImageDefaultWidth: 360,
-  coverImageDefaultHeight: 480
+  coverImageDefaultHeight: 480,
+
+  // Admin emails for restricted access
+  adminEmails: (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((email: string) => email.trim()).filter(Boolean)
 };
 
 export const configuration = {
