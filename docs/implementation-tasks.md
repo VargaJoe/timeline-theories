@@ -195,6 +195,16 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Add series completion tracking and progress indicators
 - [ ] Implement series-based sorting and filtering options
 
+### Story 33 - Optimize Media API Queries and Fix Lazy Loading Images
+- [ ] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
+- [ ] Lazy loading images load correctly without errors or broken displays
+- [ ] Performance metrics (e.g., query response time) meet acceptable thresholds
+- [ ] No regressions in existing media browsing functionality
+- [ ] Implement query optimization (e.g., debouncing, batching) in media services
+- [ ] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
+- [ ] Add error handling and fallbacks for failed image loads
+- [ ] Test with various media types and network conditions
+
 ---
 
 ## Completed 
