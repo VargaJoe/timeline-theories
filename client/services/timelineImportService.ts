@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { TimelineEntryService, type TimelineEntry } from './timelineEntryService';
+import { uploadCoverImageBinary } from './mediaLibraryService';
 
 /**
  * Parsed timeline entry from TSV
@@ -108,41 +109,6 @@ function parseTSV(content: string): { timelineName: string; entries: ParsedTimel
 }
 
 /**
- * Uploads cover image to media item
- */
-async function uploadCoverImage(
-  repository: typeof import('./sensenet').repository,
-  mediaItemPath: string,
-  imageBlob: Blob,
-  filename: string
-): Promise<boolean> {
-  try {
-    // Use repository upload for binary field
-    const formData = new FormData();
-    formData.append('CoverImageBin', imageBlob, filename);
-
-    const response = await repository.fetch(
-      `${repository.configuration.repositoryUrl}${mediaItemPath}`,
-      {
-        method: 'PATCH',
-        body: formData,
-        credentials: 'include',
-      }
-    );
-
-    if (!response.ok) {
-      console.warn(`[timelineImportService] Failed to upload cover image: ${response.status}`);
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.warn(`[timelineImportService] Error uploading cover image:`, error);
-    return false;
-  }
-}
-
-/**
  * Imports timeline from ZIP file
  * @param zipFile ZIP file containing timeline_data.tsv and covers folder
  * @param timelineId Timeline ID to import into
@@ -154,7 +120,7 @@ export async function importTimelineFromZip(
   zipFile: File,
   timelineId: number,
   parentPath: string,
-  repository: typeof import('./sensenet').repository
+  _repository: typeof import('./sensenet').repository
 ): Promise<ImportResult> {
   const result: ImportResult = {
     entriesCreated: 0,
@@ -239,16 +205,25 @@ export async function importTimelineFromZip(
 
           // Upload cover image if available
           if (entry.coverImageFilename && entryData.mediaItem) {
+            console.log(`[timelineImportService] Attempting to upload cover: ${entry.coverImageFilename} for media ${entryData.mediaItem.Id}`);
             const coverFile = zip.file(`covers/${entry.coverImageFilename}`);
             if (coverFile) {
               const imageBlob = await coverFile.async('blob');
-              const mediaPath = `/Root/Content/MediaLibrary/${entryData.mediaItem.Id}`;
-              await uploadCoverImage(
-                repository,
-                mediaPath,
-                imageBlob,
-                entry.coverImageFilename
-              );
+              try {
+                await uploadCoverImageBinary(entryData.mediaItem.Id, imageBlob, entry.coverImageFilename);
+                console.log(`[timelineImportService] Successfully uploaded cover for ${entry.entryName}`);
+              } catch (error) {
+                console.warn(`[timelineImportService] Failed to upload cover:`, error);
+              }
+            } else {
+              console.warn(`[timelineImportService] Cover file not found in ZIP: covers/${entry.coverImageFilename}`);
+            }
+          } else {
+            if (!entry.coverImageFilename) {
+              console.log(`[timelineImportService] No cover filename for entry: ${entry.entryName}`);
+            }
+            if (!entryData.mediaItem) {
+              console.log(`[timelineImportService] No media item for entry: ${entry.entryName}`);
             }
           }
         } else {
@@ -262,16 +237,25 @@ export async function importTimelineFromZip(
 
           // Upload cover image if available - use the actual media item ID from the created entry
           if (entry.coverImageFilename && entryData.mediaItem) {
+            console.log(`[timelineImportService] Attempting to upload cover: ${entry.coverImageFilename} for media ${entryData.mediaItem.Id}`);
             const coverFile = zip.file(`covers/${entry.coverImageFilename}`);
             if (coverFile) {
               const imageBlob = await coverFile.async('blob');
-              const mediaPath = `/Root/Content/MediaLibrary/${entryData.mediaItem.Id}`;
-              await uploadCoverImage(
-                repository,
-                mediaPath,
-                imageBlob,
-                entry.coverImageFilename
-              );
+              try {
+                await uploadCoverImageBinary(entryData.mediaItem.Id, imageBlob, entry.coverImageFilename);
+                console.log(`[timelineImportService] Successfully uploaded cover for ${entry.entryName}`);
+              } catch (error) {
+                console.warn(`[timelineImportService] Failed to upload cover:`, error);
+              }
+            } else {
+              console.warn(`[timelineImportService] Cover file not found in ZIP: covers/${entry.coverImageFilename}`);
+            }
+          } else {
+            if (!entry.coverImageFilename) {
+              console.log(`[timelineImportService] No cover filename for entry: ${entry.entryName}`);
+            }
+            if (!entryData.mediaItem) {
+              console.log(`[timelineImportService] No media item for entry: ${entry.entryName}`);
             }
           }
 

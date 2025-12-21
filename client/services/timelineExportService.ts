@@ -70,8 +70,9 @@ async function downloadImage(
 
 /**
  * Builds TSV content from timeline entries
+ * @param coverFilenames Map of entry index to cover filename in ZIP
  */
-function buildTSV(entries: TimelineEntry[], timelineName: string): string {
+function buildTSV(entries: TimelineEntry[], timelineName: string, coverFilenames: Map<number, string>): string {
   // Define all 19 columns as per the TSV format specification
   const columns = [
     'timeline_name',
@@ -99,8 +100,10 @@ function buildTSV(entries: TimelineEntry[], timelineName: string): string {
   const rows: string[] = [columns.join('\t')];
 
   // Data rows
-  for (const entry of entries) {
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
     const media = entry.mediaItem;
+    const coverFilename = coverFilenames.get(i) || '';
     
     const row = [
       escapeTSVField(timelineName),
@@ -109,7 +112,7 @@ function buildTSV(entries: TimelineEntry[], timelineName: string): string {
       escapeTSVField(media?.Description || entry.notes),
       escapeTSVField(media?.MediaType),
       media?.Id ? String(media.Id) : '',
-      escapeTSVField(media?.CoverImageUrl),
+      coverFilename, // ZIP-beli fájlnév (cover_0.jpg, cover_1.jpg, stb.)
       escapeTSVField(entry.chronologicalDate),
       entry.position ? String(entry.position) : '',
       escapeTSVField(entry.notes),
@@ -164,24 +167,21 @@ export async function exportTimelineAsZip(
     // Fetch all timeline entries with expanded media items
     const entries = await TimelineEntryService.listTimelineEntries(timelineId, parentPath);
 
-    // Build TSV content
-    const tsvContent = buildTSV(entries, timelineName);
-
     // Create ZIP file
     const zip = new JSZip();
-    zip.file('timeline_data.tsv', tsvContent);
 
-    // Create covers folder
+    // Download and add cover images first, track filenames
     const coversFolder = zip.folder('covers');
     if (!coversFolder) {
       throw new Error('Failed to create covers folder in ZIP');
     }
 
-    // Download and add cover images
+    const coverFilenames = new Map<number, string>();
     let skippedImagesCount = 0;
     let imageIndex = 0;
 
-    for (const entry of entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       const media = entry.mediaItem;
       
       // Check if media item has binary cover image
@@ -193,12 +193,17 @@ export async function exportTimelineAsZip(
           const extension = getExtensionFromContentType(blob.type || 'image/jpeg');
           const filename = `cover_${imageIndex}.${extension}`;
           coversFolder.file(filename, blob);
+          coverFilenames.set(i, filename); // Track which entry has which cover file
           imageIndex++;
         } else {
           skippedImagesCount++;
         }
       }
     }
+
+    // Build TSV content with cover filenames
+    const tsvContent = buildTSV(entries, timelineName, coverFilenames);
+    zip.file('timeline_data.tsv', tsvContent);
 
     // Generate ZIP blob
     const zipBlob = await zip.generateAsync({ type: 'blob' });
