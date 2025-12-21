@@ -119,7 +119,7 @@ export const TimelineViewPage: React.FC = () => {
         repository
       );
       
-      console.log(`[TimelineViewPage] Import complete. Created: ${result.entriesCreated}, Skipped: ${result.entriesSkipped}`);
+      console.log(`[TimelineViewPage] Import complete. Created: ${result.entriesCreated}, Updated: ${result.entriesUpdated}, Skipped: ${result.entriesSkipped}`);
       
       // Reload entries after import
       setEntriesLoading(true);

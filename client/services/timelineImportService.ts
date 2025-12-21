@@ -30,6 +30,7 @@ interface ParsedTimelineEntry {
  */
 interface ImportResult {
   entriesCreated: number;
+  entriesUpdated: number;
   entriesSkipped: number;
   errors: string[];
 }
@@ -157,6 +158,7 @@ export async function importTimelineFromZip(
 ): Promise<ImportResult> {
   const result: ImportResult = {
     entriesCreated: 0,
+    entriesUpdated: 0,
     entriesSkipped: 0,
     errors: [],
   };
@@ -176,19 +178,14 @@ export async function importTimelineFromZip(
 
     console.log(`[timelineImportService] Importing ${entries.length} entries into timeline: ${timelineName}`);
 
-    // Get existing entries to avoid duplicates
+    // Get existing entries - map by name for quick lookup
     const existingEntries = await TimelineEntryService.listTimelineEntries(timelineId, parentPath);
-    const existingNames = new Set(existingEntries.map(e => e.name));
+    const existingEntriesMap = new Map(existingEntries.map(e => [e.name, e]));
 
     // Process each entry
     for (const entry of entries) {
       try {
-        // Skip if entry already exists
-        if (existingNames.has(entry.entryName)) {
-          console.log(`[timelineImportService] Skipping duplicate entry: ${entry.entryName}`);
-          result.entriesSkipped++;
-          continue;
-        }
+        const existingEntry = existingEntriesMap.get(entry.entryName);
 
         // Prepare entry data, excluding empty choice fields
         const entryData: Omit<TimelineEntry, 'id'> = {
@@ -221,39 +218,73 @@ export async function importTimelineFromZip(
         if (entry.importance && entry.importance.trim() !== '') {
           entryData.importance = entry.importance;
         }
-        
-        // Create timeline entry
-        const createdEntry = await TimelineEntryService.createTimelineEntry(
-          entryData,
-          parentPath
-        );
 
-        // Upload cover image if available - use the actual media item ID from the created entry
-        if (entry.coverImageFilename && entryData.mediaItem) {
-          const coverFile = zip.file(`covers/${entry.coverImageFilename}`);
-          if (coverFile) {
-            const imageBlob = await coverFile.async('blob');
-            const mediaPath = `/Root/Content/MediaLibrary/${entryData.mediaItem.Id}`;
-            await uploadCoverImage(
-              repository,
-              mediaPath,
-              imageBlob,
-              entry.coverImageFilename
-            );
+        if (existingEntry) {
+          // Update existing entry
+          console.log(`[timelineImportService] Updating existing entry: ${entry.entryName}`);
+          
+          await TimelineEntryService.updateTimelineEntry(existingEntry.id, {
+            displayName: entry.title,
+            chronologicalDate: entry.date,
+            position: entry.position,
+            notes: entry.notes,
+            chronologicalDescription: entry.chronologicalDescription,
+            entryLabel: entryData.entryLabel,
+            importance: entryData.importance,
+          });
+
+          result.entriesUpdated++;
+
+          // Upload cover image if available
+          if (entry.coverImageFilename && entryData.mediaItem) {
+            const coverFile = zip.file(`covers/${entry.coverImageFilename}`);
+            if (coverFile) {
+              const imageBlob = await coverFile.async('blob');
+              const mediaPath = `/Root/Content/MediaLibrary/${entryData.mediaItem.Id}`;
+              await uploadCoverImage(
+                repository,
+                mediaPath,
+                imageBlob,
+                entry.coverImageFilename
+              );
+            }
           }
-        }
+        } else {
+          // Create new timeline entry
+          console.log(`[timelineImportService] Creating new entry: ${entry.entryName}`);
+          
+          await TimelineEntryService.createTimelineEntry(
+            entryData,
+            parentPath
+          );
 
-        result.entriesCreated++;
+          // Upload cover image if available - use the actual media item ID from the created entry
+          if (entry.coverImageFilename && entryData.mediaItem) {
+            const coverFile = zip.file(`covers/${entry.coverImageFilename}`);
+            if (coverFile) {
+              const imageBlob = await coverFile.async('blob');
+              const mediaPath = `/Root/Content/MediaLibrary/${entryData.mediaItem.Id}`;
+              await uploadCoverImage(
+                repository,
+                mediaPath,
+                imageBlob,
+                entry.coverImageFilename
+              );
+            }
+          }
+
+          result.entriesCreated++;
+        }
       } catch (error) {
-        console.error(`[timelineImportService] Failed to create entry: ${entry.entryName}`, error);
+        console.error(`[timelineImportService] Failed to process entry: ${entry.entryName}`, error);
         result.entriesSkipped++;
         result.errors.push(
-          `Failed to create entry "${entry.entryName}": ${error instanceof Error ? error.message : 'Unknown error'}`
+          `Failed to process entry "${entry.entryName}": ${error instanceof Error ? error.message : 'Unknown error'}`
         );
       }
     }
 
-    console.log(`[timelineImportService] Import complete. Created: ${result.entriesCreated}, Skipped: ${result.entriesSkipped}`);
+    console.log(`[timelineImportService] Import complete. Created: ${result.entriesCreated}, Updated: ${result.entriesUpdated}, Skipped: ${result.entriesSkipped}`);
     return result;
   } catch (error) {
     console.error('[timelineImportService] Import failed:', error);
