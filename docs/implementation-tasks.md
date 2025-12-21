@@ -489,5 +489,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **FIXED: Description vs Notes mapping** - Export now always exports MediaItem.Description in Description column, TimelineEntry.Notes in Notes column
 - [x] **TESTED: TypeScript compilation** - Zero errors, all types properly resolved
 - [x] **READY: For testing** - Full export/import round-trip functionality complete and ready for end-to-end testing
+- [x] **DOCUMENTATION: Complete user guide** - Created comprehensive export/import guide in English (docs/export-import-guide.md) with usage examples, error handling, and admin workflows
 
 ---
