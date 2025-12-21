@@ -1,7 +1,7 @@
-# Story 32 - Book Reading Progress and Personal Library Integration
+# Story 30 - Book Reading Progress and Personal Library Integration
 
 ## User Story
-**US32 – Book Reading Progress and Personal Library Integration**
+**US30 – Book Reading Progress and Personal Library Integration**
 > As a user, I want to track my reading progress and maintain a personal library with ratings and notes, so I can manage my book reading habits effectively.
 
 ## Acceptance Criteria

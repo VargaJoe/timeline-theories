@@ -1,4 +1,4 @@
-# Story 33 - Optimize Media API Queries and Fix Lazy Loading Images
+# Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
 
 ## User Story
 **US033 – Optimize Media API Queries and Fix Lazy Loading Images**

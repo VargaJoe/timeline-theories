@@ -9,7 +9,7 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ## Planned
 
-### Story 32 - Book Reading Progress and Personal Library Integration
+### Story 30 - Book Reading Progress and Personal Library Integration
 - [ ] Implement reading status tracking ("Want to Read", "Currently Reading", "Read", "Did Not Finish")
 - [ ] Add personal rating system separate from general media ratings
 - [ ] Create reading notes functionality separate from general timeline entry notes
@@ -195,7 +195,7 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Add series completion tracking and progress indicators
 - [ ] Implement series-based sorting and filtering options
 
-### Story 33 - Optimize Media API Queries and Fix Lazy Loading Images
+### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
 - [ ] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
 - [ ] Lazy loading images load correctly without errors or broken displays
 - [ ] Performance metrics (e.g., query response time) meet acceptable thresholds
