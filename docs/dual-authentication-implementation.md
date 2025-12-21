@@ -177,23 +177,107 @@ SNAuth server redirects to: `http://localhost:5173/authentication/callback?auth_
 
 ---
 
+## Unified Auth Context Architecture
+
+### AuthTypeContext
+
+Provides global auth type information to all components:
+
+```typescript
+// AppProviders.tsx
+export const AuthTypeContext = createContext<{ authType: AuthServerType | null }>({ authType: null });
+
+export function useAuthType() {
+  return useContext(AuthTypeContext);
+}
+```
+
+**Usage in components:**
+```typescript
+const { authType } = useAuthType();
+// authType is 'SNAuth' or 'IdentityServer'
+```
+
+### useSharedAuth Hook
+
+Automatically detects and uses the active auth provider:
+
+```typescript
+// useSharedAuth.ts
+export function useSharedAuth(): AuthContextModel {
+  const snAuth = useContext(SNAuthContext);
+  const isAuth = useContext(ISAuthContext);
+
+  // Check ISAuth first (IdentityServer)
+  if (isAuth !== undefined) {
+    return isAuth;
+  }
+
+  // Check SNAuth
+  if (snAuth !== undefined) {
+    return snAuth;
+  }
+
+  // Fallback
+  return {
+    user: undefined,
+    isAuthenticated: false,
+    login: async () => { throw new Error('No auth provider available'); },
+    logout: async () => { throw new Error('No auth provider available'); },
+    isLoading: false,
+  };
+}
+```
+
+**Key points:**
+- Returns the same `AuthContextModel` interface regardless of provider
+- Components don't need to know which provider is active
+- Simplifies component code (no try-catch for provider detection)
+
+### Context Initialization with undefined
+
+Both auth contexts use `undefined` as default to enable proper detection:
+
+```typescript
+// ISAuthProvider.tsx
+const AuthContext = createContext<AuthContextModel | undefined>(undefined);
+
+// SNAuthProvider.tsx  
+const AuthContext = createContext<AuthContextModel | undefined>(undefined);
+```
+
+**Why?** This allows `useSharedAuth()` to distinguish between:
+- Provider is active and mounted (context has value)
+- Provider is not active (context is `undefined`)
+
+Without this, both contexts would have default values making detection impossible.
+
+---
+
 ## Provider Hierarchy
 
 ```
 AppProviders
   └─ AuthTypeDetector (fetch auth config)
-      ├─ SNAuthProviderWrapper (if SNAuth)
-      │   └─ SNAuthenticationProvider (@sensenet/sn-auth-react)
-      │       └─ SNAuthProvider (our wrapper)
-      │           └─ children
-      │
-      └─ ISAuthProviderWrapper (if IdentityServer)
-          └─ OidcAuthenticationProvider (@sensenet/authentication-oidc-react)
-              └─ ISAuthProvider (our wrapper)
-                  └─ children
+      └─ AuthTypeContext.Provider (provides authType to all children)
+          ├─ SNAuthProviderWrapper (if SNAuth)
+          │   └─ SNAuthenticationProvider (@sensenet/sn-auth-react)
+          │       └─ SNAuthProvider (our wrapper)
+          │           └─ SNAuthContext.Provider
+          │               └─ children
+          │
+          └─ ISAuthProviderWrapper (if IdentityServer)
+              └─ OidcAuthenticationProvider (@sensenet/authentication-oidc-react)
+                  └─ ISAuthProvider (our wrapper)
+                      └─ ISAuthContext.Provider
+                          └─ children
 ```
 
-**Key Point:** We wrap BOTH the package provider AND add our own context provider for unified interface.
+**Key Points:** 
+- We wrap BOTH the package provider AND add our own context provider for unified interface
+- `AuthTypeContext` provides global auth type information to all child components
+- Contexts use `undefined` as default value for proper provider detection
+- `useSharedAuth()` hook automatically detects and uses the active provider
 
 ---
 
@@ -262,6 +346,56 @@ setIsProcessingCallback(true);
 
 ---
 
+### 7. "IdentityServer login shows SNAuth button"
+
+**Cause:** LoginButton component tries to detect auth type by attempting to access both contexts.
+
+**Solution:** Use centralized `AuthTypeContext` and `useSharedAuth()` hook:
+```typescript
+// AppProviders.tsx
+export const AuthTypeContext = createContext<{ authType: AuthServerType | null }>({ authType: null });
+
+// LoginButton.tsx
+const { authType } = useAuthType();
+const auth = useSharedAuth(); // Automatically detects active provider
+```
+
+---
+
+### 8. "Cannot read properties of undefined (reading 'location')"
+
+**Cause:** OIDC AuthenticationProvider needs a history object for navigation.
+
+**Solution:** Pass `browserHistory` to OidcAuthenticationProvider:
+```typescript
+import { browserHistory } from './browserHistory';
+
+<OidcAuthenticationProvider
+  configuration={{...}}
+  history={browserHistory}
+>
+```
+
+---
+
+### 9. "Wrong auth provider context being used"
+
+**Cause:** Both SNAuthContext and ISAuthContext exist with default values, making detection ambiguous.
+
+**Solution:** Initialize contexts with `undefined`:
+```typescript
+// ISAuthProvider.tsx & SNAuthProvider.tsx
+const AuthContext = createContext<AuthContextModel | undefined>(undefined);
+
+// useSharedAuth.ts
+const isAuth = useContext(ISAuthContext);
+if (isAuth !== undefined) {
+  return isAuth; // Use IdentityServer
+}
+```
+
+---
+
 ## Reference Implementations
 
 ### SenseNet Admin UI (OIDC)
@@ -291,6 +425,7 @@ https://github.com/SenseNet/sn-client/blob/feature/sn-auth-package-extraimprovem
 
 ## Testing Checklist
 
+### SNAuth Flow
 - [ ] Login button triggers externalLogin()
 - [ ] SNAuth server page loads
 - [ ] After login, redirects to `/authentication/callback?auth_code=...`
@@ -301,6 +436,23 @@ https://github.com/SenseNet/sn-client/blob/feature/sn-auth-package-extraimprovem
 - [ ] User object appears in useSnAuth() hook
 - [ ] Page redirects to /timelines
 - [ ] User remains authenticated after page reload
+
+### IdentityServer/OIDC Flow
+- [ ] Login button shows "Login with IdentityServer"
+- [ ] Login button triggers OIDC redirect
+- [ ] IdentityServer login page loads
+- [ ] After login, redirects to `/authentication/callback` with code
+- [ ] OIDC library exchanges code for tokens automatically
+- [ ] User object appears in useOidcAuthentication() hook
+- [ ] User remains authenticated after page reload
+- [ ] Logout works correctly
+
+### Unified Auth Context
+- [ ] `useSharedAuth()` returns correct provider based on auth type
+- [ ] `useAuthType()` returns correct auth type ('SNAuth' or 'IdentityServer')
+- [ ] LoginButton shows correct auth type label
+- [ ] No context errors in console
+- [ ] Switching between auth types works (by changing repository URL)
 
 ---
 
@@ -378,6 +530,16 @@ For issues with:
 ---
 
 ## Changelog
+
+### 2025-12-21 - Context Architecture Improvements
+- Added `AuthTypeContext` for global auth type tracking
+- Refactored `LoginButton` to use `useSharedAuth()` and `useAuthType()`
+- Fixed context initialization with `undefined` defaults for proper detection
+- Updated `useSharedAuth()` to prioritize ISAuth, then SNAuth
+- Added `browserHistory` to `OidcAuthenticationProvider` to fix login redirect
+- Added comprehensive logging to `ISAuthProvider` for debugging
+- Resolved "Cannot read properties of undefined (reading 'location')" error
+- Fixed issue where IdentityServer login showed SNAuth button
 
 ### 2025-12-21 - Initial Implementation
 - Implemented dual auth detection
