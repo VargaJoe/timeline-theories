@@ -98,6 +98,12 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Update UI to handle multiple instances
 - [ ] Implement instance-specific note handling
 - [ ] Update timeline view for multiple instances
+
+### Technical Task - Fix Docker Compose Healthchecks for Local SenseNet Repository
+- [ ] Restore appropriate healthchecks for SQL Server, Auth, and API services
+- [ ] Ensure proper startup order with healthcheck conditions
+- [ ] Test that containers start in correct sequence without manual intervention
+- [ ] Verify that services are fully ready before depending services start
 - [ ] Add instance differentiation labels
 - [ ] Test multiple instance functionality
 
