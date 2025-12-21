@@ -72,7 +72,9 @@ services:
       - Application__AllowedHosts__0=https://adminui.test.sensenet.com
       - Application__AllowedHosts__1=https://localhost:51016
       - Application__AllowedHosts__2=http://sensenet-insql-cdb-snapp
-      - Application__AllowedHosts__3=http://localhost:5173
+      - Application__AllowedHosts__3=https://localhost:5173
+      - Application__AllowedHosts__4=http://localhost:5173
+      - Application__AllowedHosts__5=https://localhost:8080
       - Sensenet__Repository__InnerUrl=http://sensenet-insql-cdb-snapp
     ports:
       - "51017:443"
@@ -88,7 +90,8 @@ services:
 
   # SenseNet Application with Custom Auth
   sensenet-insql-cdb-snapp:
-    image: sensenetcsp/sn-api-sql:preview
+    # image: sensenetcsp/sn-api-sql:preview
+    image: vargajoe/sn-api-sql:cors-test 
     container_name: sensenet-insql-cdb-snapp
     environment:
       - ASPNETCORE_ENVIRONMENT=Development

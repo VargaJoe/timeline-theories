@@ -549,77 +549,56 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
 
 
 /**
- * Get OIDC access token from storage
- */
-function getAccessToken(): string | null {
-  try {
-    // Try localStorage first
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('oidc.user:')) {
-        const data = localStorage.getItem(key);
-        if (data) {
-          const userData = JSON.parse(data);
-          return userData.access_token || null;
-        }
-      }
-    }
-    
-    // Try sessionStorage
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (key && key.startsWith('oidc.user:')) {
-        const data = sessionStorage.getItem(key);
-        if (data) {
-          const userData = JSON.parse(data);
-          return userData.access_token || null;
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Failed to get access token:', error);
-  }
-  
-  return null;
-}
-
-/**
- * Download an image blob from a URL
- * @param imageUrl Image URL to download
+ * Download an image blob from binaryhandler URL
+ * Uses XMLHttpRequest WITHOUT Authorization header to avoid CORS preflight
+ * Relies on session cookies for authentication
+ * @param imageUrl SenseNet binaryhandler URL
  * @returns Blob or null if download fails
  */
 async function downloadImageBlob(imageUrl: string): Promise<Blob | null> {
-  try {
-    if (!imageUrl) return null;
-    
-    // If it's a relative SenseNet path, prepend repository URL
-    const fullUrl = imageUrl.startsWith('http') ? imageUrl : `${repositoryUrl}${imageUrl}`;
-    
-    console.log('Downloading image from:', fullUrl);
-    
-    // Get OIDC access token
-    const accessToken = getAccessToken();
-    
-    const response = await fetch(fullUrl, {
-      credentials: 'include',
-      headers: accessToken ? {
-        'Authorization': `Bearer ${accessToken}`
-      } : {},
-      mode: 'cors',
-    });
-    
-    if (!response.ok) {
-      console.warn(`Failed to download image: ${response.status} ${response.statusText}`);
-      return null;
+  return new Promise((resolve) => {
+    try {
+      if (!imageUrl) {
+        resolve(null);
+        return;
+      }
+      
+      // If it's a relative SenseNet path, prepend repository URL
+      const fullUrl = imageUrl.startsWith('http') ? imageUrl : `${repositoryUrl}${imageUrl}`;
+      
+      console.log('Downloading image from:', fullUrl);
+      
+      // Use XMLHttpRequest WITHOUT Authorization header
+      // This avoids CORS preflight and relies on cookie-based session auth
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', fullUrl, true);
+      xhr.responseType = 'blob';
+      xhr.withCredentials = true; // Send cookies for session authentication
+      
+      // DO NOT add Authorization header - it triggers CORS preflight!
+      // The session cookie should be enough
+      
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          console.log('Successfully downloaded image blob:', xhr.response.type, xhr.response.size);
+          resolve(xhr.response as Blob);
+        } else {
+          console.warn('Failed to download image:', xhr.status, xhr.statusText);
+          resolve(null);
+        }
+      };
+      
+      xhr.onerror = function() {
+        console.warn('XHR error downloading image');
+        resolve(null);
+      };
+      
+      xhr.send();
+    } catch (error) {
+      console.warn('Failed to download image blob:', error);
+      resolve(null);
     }
-    
-    const blob = await response.blob();
-    console.log('Successfully downloaded image blob:', blob.type, blob.size);
-    return blob;
-  } catch (error) {
-    console.warn('Failed to download image blob:', error);
-    return null;
-  }
+  });
 }
 
 /**

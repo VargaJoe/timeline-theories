@@ -26,24 +26,21 @@ if (authType === 'jwt') {
   repository.authentication = new JwtService(repository);
   console.log('[sensenet] Using JWT authentication');
 } else {
-  console.log('[sensenet] Using OIDC authentication (token set externally)');
+  console.log('[sensenet] Using OIDC authentication (token set via configuration.token)');
 }
 
-// Store reference to original fetch method for proper cleanup
-const originalFetch = repository.fetch.bind(repository);
-
+/**
+ * Sets the access token in the repository configuration
+ * This is the proper way to set authentication for sn-client Repository
+ */
 export const setRepositoryAccessToken = (token: string) => {
   if (!token || token.trim() === '') {
-    // Clear authentication by restoring original fetch method
-    repository.fetch = originalFetch;
+    // Clear the token
+    (repository.configuration as { token?: string }).token = undefined;
     console.log('[sensenet] Repository authentication cleared');
   } else {
-    // Set up authenticated fetch with the provided token
-    repository.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-      const headers = new Headers(init?.headers || {});
-      headers.set('Authorization', `Bearer ${token}`);
-      return originalFetch.call(repository, input, { ...init, headers });
-    };
+    // Set the token in repository configuration - this is the proper sn-client way
+    (repository.configuration as { token?: string }).token = token;
     console.log('[sensenet] Repository authentication set with token');
   }
 };

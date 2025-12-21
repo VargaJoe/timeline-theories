@@ -5,17 +5,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 ## In Progress
 
 
-### Story 28 - Export/Import Timeline Data in Custom Format
-- [x] Design Notepad++-friendly TSV schema with expanded fields (entry_name, position, notes, etc.)
-- [x] Implement export logic to download timeline data as TSV with all relevant fields
-- [x] Implement import logic to create/update timeline entries from TSV, checking for existing entries by ID/Name
-- [ ] Enhance export: Download and package images in ZIP alongside TSV (currently only URLs exported)
-- [ ] Support cover image by URL (download) or filename (local upload)
-- [x] Add UI for export/import (buttons, dialogs)
-- [ ] Document format and usage for users (TSV vs CSV differences, supported programs)
-- [x] Ensure exported files are re-importable without data loss (updates existing entries)
-- [ ] No versioning required unless trivial to add
-
 ---
 
 ## Planned
@@ -481,3 +470,17 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
 - [x] **READY: Testing phase** - JWT authentication flow and user state management ready for testing in both modes
 
+### Story 28 - Export Timeline Data (Export-Only Phase)
+- [x] **IMPLEMENTED: Professional export service** - Created timelineExportService.ts using repository.fetch() pattern for authenticated binary downloads
+- [x] **ENHANCED: Cover image downloads** - Proper authenticated fetch with SenseNet's __mediaresource pattern for binary fields
+- [x] **ADDED: TSV format with 19 columns** - Complete field mapping including timeline_name, entry_name, media fields, dates, notes, labels, etc.
+- [x] **IMPLEMENTED: Special character escaping** - Proper handling of tabs, newlines, and special characters in TSV fields
+- [x] **CREATED: ZIP packaging** - timeline_data.tsv + covers/ folder with numbered images (cover_0.jpg, cover_1.jpg, etc.)
+- [x] **ENHANCED: UI with loading states** - Export button shows spinner during operation, disables during export, displays success/failure messages
+- [x] **ADDED: Graceful image handling** - Continues export even if images fail to download (empty binary fields), tracks skipped images count
+- [x] **INTEGRATED: Both auth providers** - Uses repository instance with token from useSharedAuth() for OIDC and JWT compatibility
+- [x] **TESTED: TypeScript compilation** - Zero errors, all types properly resolved
+- [x] **READY: For testing** - Export functionality complete and ready for end-to-end testing with real timeline data
+- [ ] **PENDING: Import functionality** - To be implemented in next phase after export testing is complete
+
+---
