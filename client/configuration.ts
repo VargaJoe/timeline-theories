@@ -1,6 +1,9 @@
 export const repositoryUrl = import.meta.env.VITE_SENSENET_REPO_URL || 'https://your-sensenet-repo-url';
 export const traktApiKey = import.meta.env.VITE_TRAKT_API_KEY || '';
 
+// Authentication type: 'oidc' or 'jwt'
+export const authType = import.meta.env.VITE_AUTH_TYPE || 'oidc';
+
 // Base paths for content organization
 export const contentPaths = {
   timelines: import.meta.env.VITE_PROJECT_ROOT_PATH || '/Root/Content',

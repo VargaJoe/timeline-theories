@@ -13,6 +13,7 @@ import { MediaItemViewPage } from './pages/MediaItemViewPage';
 import { OidcTokenInjector } from './components/OidcTokenInjector';
 import { setupMediaLibrary } from './scripts/setupMediaLibrary';
 import TimelineEntryCreatePage from './pages/TimelineEntryCreatePage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 
 function ScrollToTopOnRouteChange() {
   const location = useLocation();
@@ -45,6 +46,7 @@ function App() {
           <TopNavigationBar />
           <main>
             <Routes>
+              <Route path="/authentication/callback" element={<AuthCallbackPage />} />
               <Route path="/timelines" element={<TimelineListPage />} />
               <Route path="/timelines/:id" element={<TimelineViewPage />} />
               <Route path="/media-library" element={<MediaLibraryPage />} />

@@ -6,6 +6,7 @@
     "build": "cd client && npm run build"
   },
   "dependencies": {
+    "@sensenet/authentication-jwt": "^1.1.4",
     "@sensenet/authentication-oidc-react": "^2.3.1",
     "@sensenet/client-core": "^4.2.0",
     "cors": "^2.8.5",

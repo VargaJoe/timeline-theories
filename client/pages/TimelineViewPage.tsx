@@ -6,7 +6,6 @@ import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TimelineEntryEditModal } from '../components/TimelineEntryEditModal';
 import { PageHeader } from '../components/PageHeader';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
@@ -15,6 +14,7 @@ import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { loadBackgroundImage } from '../services/sensenet';
 import { siteConfig, repositoryUrl } from '../configuration';
+import { useSharedAuth } from '../context/useSharedAuth';
 import type { Timeline } from '../services/timelineService';
 import type { TimelineEntry, MediaItemRef } from '../services/timelineEntryService';
 
@@ -64,6 +64,9 @@ interface DroppableProvided {
 }
 
 export const TimelineViewPage: React.FC = () => {
+  const auth = useSharedAuth();
+  const isUserAuthenticated = auth.isAuthenticated;
+
     // Export handler
     const handleExportTimeline = async () => {
       if (!timeline) return;
@@ -115,8 +118,7 @@ export const TimelineViewPage: React.FC = () => {
   const DESCRIPTION_ROW_LIMIT = 3;
   const [showFullDescription, setShowFullDescription] = useState(false);
   const { id: timelineName } = useParams<{ id: string }>();
-  const { oidcUser } = useOidcAuthentication();
-
+  
   console.log('[TimelineViewPage] Component mounted with timelineName:', timelineName);
 
   const [timeline, setTimeline] = useState<Timeline | null>(null);
@@ -185,7 +187,7 @@ export const TimelineViewPage: React.FC = () => {
         };
         
         // Check if this is a private timeline and user is not logged in (admin)
-        if (timelineData.isPublic === false && !oidcUser) {
+        if (timelineData.isPublic === false && !isUserAuthenticated) {
           setError('This timeline is private and only accessible to administrators.');
           return;
         }
@@ -223,7 +225,7 @@ export const TimelineViewPage: React.FC = () => {
       }
     };
     loadTimeline();
-  }, [timelineName, oidcUser]);
+  }, [timelineName, isUserAuthenticated]);
 
   // Load background image from SenseNet
   useEffect(() => {
@@ -349,7 +351,7 @@ export const TimelineViewPage: React.FC = () => {
         showSiteTitle={false}
       >
         {/* Header Actions */}
-        {oidcUser && (
+        {isUserAuthenticated && (
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={() => setEditMode(m => !m)}
@@ -848,7 +850,7 @@ export const TimelineViewPage: React.FC = () => {
         ) : entries.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 32, color: '#666' }}>
             <p style={{ marginBottom: 16 }}>No entries in this timeline yet.</p>
-            {oidcUser && (
+            {isUserAuthenticated && (
               <Link 
                 to={`/timelines/${timelineName}/add-entry`}
                 style={{
@@ -1054,7 +1056,7 @@ export const TimelineViewPage: React.FC = () => {
               <div key={entry.id} className="entry-card" style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
                 <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
                   {/* Delete Entry Button (admin only) */}
-                  {oidcUser && (
+                  {isUserAuthenticated && (
                     <button
                       title="Edit Entry"
                       style={{
@@ -1082,7 +1084,7 @@ export const TimelineViewPage: React.FC = () => {
                     </button>
                   )}
                   {/* Delete Entry Button (admin only) */}
-                  {oidcUser && (
+                  {isUserAuthenticated && (
                     <button
                       title="Delete Entry"
                       style={{

@@ -1,87 +1,155 @@
-import React from 'react';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import React, { useState } from 'react';
 import { setRepositoryAccessToken } from '../services/sensenet';
+
+// Unified auth hook - works for both SNAuth and OIDC
+import { useAuth as useSNAuth } from '../context/SNAuthProvider';
+import { useAuth as useOidcAuth } from '../context/ISAuthProvider';
 
 console.log('[LoginButton] Component loaded');
 
+/**
+ * Unified Login Button Component
+ * Uses the unified useAuth hook from either SNAuthProvider or ISAuthProvider
+ */
 export const LoginButton: React.FC = () => {
   console.log('[LoginButton] Component rendering...');
   
-  // React hooks must be called at the top level
-  console.log('[LoginButton] About to call useOidcAuthentication...');
-  
-  const oidcResult = useOidcAuthentication();
-  console.log('[LoginButton] useOidcAuthentication returned:', oidcResult);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const { oidcUser, login, logout, isLoading, error } = oidcResult;
-
-  // Debug logging for OIDC state
-  console.log('[LoginButton] isLoading:', isLoading);
-  console.log('[LoginButton] oidcUser:', oidcUser);
-  console.log('[LoginButton] error:', error);
-  console.log('[LoginButton] login:', typeof login);
-  console.log('[LoginButton] logout:', typeof logout);
-
-  // Log all available methods in the oidcResult
-  console.log('[LoginButton] Available OIDC methods:', Object.keys(oidcResult));
-
-  // Check if there's a userManager or other logout methods
-  if (oidcResult.userManager) {
-    console.log('[LoginButton] UserManager methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(oidcResult.userManager)));
-  }
+  // Try to get auth from SNAuthProvider
+  let auth: any = null;
+  let isSNAuthMode = false;
 
   try {
-    // PROVEN LOGOUT SOLUTION from SNBooking repository
-    const handleLogout = async () => {
-      console.log('[LoginButton] Starting proven SNBooking logout pattern...');
-      
-      try {
-        // Step 1: Clear localStorage FIRST (like SNBooking did)
-        localStorage.clear();
-        console.log('[LoginButton] localStorage cleared');
-        
-        // Step 2: Clear repository token immediately
-        setRepositoryAccessToken('');
-        console.log('[LoginButton] Repository token cleared');
-        
-        // Step 3: Call official logout().then() pattern (like SNBooking)
-        logout().then(() => {
-          console.log('[LoginButton] Official logout completed');
-          // Step 4: Clear sessionStorage after logout completes
-          sessionStorage.clear();
-          console.log('[LoginButton] sessionStorage cleared - logout complete');
-        }).catch((err: unknown) => {
-          console.warn('[LoginButton] Official logout failed, but continuing:', err);
-          // Fallback: clear sessionStorage anyway
-          sessionStorage.clear();
-          console.log('[LoginButton] sessionStorage cleared (fallback)');
-        });
-        
-      } catch (err) {
-        console.error('[LoginButton] Logout error:', err);
-        // Last resort: clear everything and redirect
-        localStorage.clear();
-        sessionStorage.clear();
-        setRepositoryAccessToken('');
-        window.location.href = '/';
-      }
-    };
-
-    // Skip the loading state entirely - just show login/logout based on user state
-    if (error) {
-      console.log('[LoginButton] Rendering: OIDC Error', error);
-      return <div style={{ color: 'red', padding: '8px', border: '1px solid red' }}>OIDC Error: {error}</div>;
+    auth = useSNAuth();
+    isSNAuthMode = true;
+  } catch (e) {
+    console.log('[LoginButton] SNAuth not available, trying OIDC');
+    try {
+      auth = useOidcAuth();
+      isSNAuthMode = false;
+    } catch (e2) {
+      console.log('[LoginButton] Neither auth method available');
+      auth = null;
     }
-
-    if (oidcUser) {
-      console.log('[LoginButton] Rendering: Logout button');
-      return <button onClick={handleLogout} style={{ backgroundColor: 'red', color: 'white', padding: '8px 16px' }}>Logout</button>;
-    } else {
-      console.log('[LoginButton] Rendering: Login button');
-      return <button onClick={login} style={{ backgroundColor: 'blue', color: 'white', padding: '8px 16px' }}>Login</button>;
-    }
-  } catch (err) {
-    console.error('[LoginButton] Error in render:', err);
-    return <div style={{ color: 'red', padding: '8px', border: '1px solid red' }}>LoginButton Error: {String(err)}</div>;
   }
+
+  if (!auth) {
+    return (
+      <button 
+        disabled
+        style={{ 
+          backgroundColor: '#ccc', 
+          color: '#999', 
+          padding: '8px 16px', 
+          border: 'none', 
+          borderRadius: '4px', 
+          cursor: 'not-allowed'
+        }}
+      >
+        Auth Not Available
+      </button>
+    );
+  }
+
+  const { user, isAuthenticated, login, logout, error } = auth;
+
+  console.log('[LoginButton] Auth state:', {
+    isSNAuthMode,
+    isAuthenticated,
+  });
+
+  // Login handler - unified for both auth types
+  const handleLogin = async () => {
+    console.log('[LoginButton] Attempting login');
+    
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      await login();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('[LoginButton] Login failed:', err);
+      setAuthError(errorMessage);
+      setIsLoggingIn(false);
+    }
+    // Note: For redirect-based auth (OIDC/SNAuth), page will navigate away on success
+  };
+
+  // Logout handler - unified for both auth types
+  const handleLogout = async () => {
+    console.log('[LoginButton] Logging out');
+    setRepositoryAccessToken('');
+    
+    try {
+      await logout();
+    } catch (err) {
+      console.error('[LoginButton] Logout error:', err);
+    }
+    
+    // Force reload to clear session
+    window.location.reload();
+  };
+
+  // Logged in state - show user and logout button
+  if (isAuthenticated && user) {
+    const userName = user.Name || user.name || 'User';
+    console.log('[LoginButton] Rendering: Logout button for user', userName);
+    return (
+      <button 
+        onClick={handleLogout} 
+        style={{ 
+          backgroundColor: '#d32f2f', 
+          color: 'white', 
+          padding: '8px 16px', 
+          border: 'none', 
+          borderRadius: '4px', 
+          cursor: 'pointer',
+          fontWeight: 'bold'
+        }}
+        title="Click to logout"
+      >
+        Logout ({userName})
+      </button>
+    );
+  }
+
+  // Not logged in - show login button
+  console.log('[LoginButton] Rendering: Login button');
+  const authTypeLabel = isSNAuthMode ? 'SNAuth' : 'IdentityServer';
+  
+  return (
+    <div>
+      {(authError || error) && (
+        <div style={{ 
+          color: '#d32f2f', 
+          marginBottom: '10px', 
+          padding: '8px', 
+          backgroundColor: '#ffebee', 
+          borderRadius: '4px',
+          fontSize: '12px'
+        }}>
+          ❌ {authError || error}
+        </div>
+      )}
+      <button 
+        onClick={handleLogin}
+        disabled={isLoggingIn}
+        style={{ 
+          backgroundColor: '#2a4d8f', 
+          color: 'white', 
+          padding: '8px 16px', 
+          border: 'none', 
+          borderRadius: '4px', 
+          cursor: isLoggingIn ? 'not-allowed' : 'pointer',
+          fontWeight: 'bold',
+          opacity: isLoggingIn ? 0.6 : 1
+        }}
+        title={`Redirects to ${authTypeLabel} for login`}
+      >
+        {isLoggingIn ? `Redirecting to ${authTypeLabel}...` : `Login with ${authTypeLabel}`}
+      </button>
+    </div>
+  );
 };

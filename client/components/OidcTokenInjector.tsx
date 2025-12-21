@@ -1,23 +1,49 @@
 import { useEffect } from 'react';
+import { useSnAuth } from '@sensenet/sn-auth-react';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { setRepositoryAccessToken } from '../services/sensenet';
 
 export const OidcTokenInjector: React.FC = () => {
-  const { oidcUser } = useOidcAuthentication();
+  // Try to use SNAuth hook (for SNAuth mode)
+  let snAuthToken: string | undefined = undefined;
+  let snAuthUser: any = undefined;
+  
+  try {
+    const snAuth = useSnAuth();
+    snAuthToken = snAuth?.accessToken;
+    snAuthUser = snAuth?.user;
+  } catch (e) {
+    // SNAuth not available (probably OIDC mode)
+  }
+
+  // Try to use OIDC hook (for IdentityServer mode)
+  let oidcToken: string | undefined = undefined;
+  let oidcUser: any = undefined;
+
+  try {
+    const oidcAuth = useOidcAuthentication();
+    oidcToken = oidcAuth?.oidcUser?.access_token;
+    oidcUser = oidcAuth?.oidcUser?.profile;
+  } catch (e) {
+    // OIDC not available (probably SNAuth mode)
+  }
+
+  // Use whichever token is available
+  const accessToken = snAuthToken || oidcToken;
+  const user = snAuthUser || oidcUser;
 
   useEffect(() => {
-    console.log('[OidcTokenInjector] OIDC user state changed:', {
-      hasUser: !!oidcUser,
-      hasAccessToken: oidcUser?.access_token ? 'yes' : 'no',
-      tokenLength: oidcUser?.access_token?.length || 0
+    console.log('[OidcTokenInjector] Auth state changed:', {
+      hasUser: !!user,
+      hasAccessToken: !!accessToken
     });
-    
-    if (oidcUser && oidcUser.access_token) {
-      setRepositoryAccessToken(oidcUser.access_token);
+
+    if (accessToken) {
+      setRepositoryAccessToken(accessToken);
     } else {
       setRepositoryAccessToken('');
     }
-  }, [oidcUser]);
+  }, [user, accessToken]);
 
   return null;
 };

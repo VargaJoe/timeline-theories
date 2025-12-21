@@ -23,5 +23,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["./*", "components/*", "pages/*", "services/*"]
+  "include": ["./*", "components/*", "pages/*", "services/*"],
+  "ts-node": {
+    "skipLibCheck": true
+  }
 }

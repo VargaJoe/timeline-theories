@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { useSnAuth } from '@sensenet/sn-auth-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 import { PageHeader } from '../components/PageHeader';
@@ -24,7 +25,23 @@ const MEDIA_TYPES = [
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
 
 export default function MediaLibraryPage() {
-  const { oidcUser } = useOidcAuthentication();
+  // Handle authentication state - support both SNAuth and OIDC
+  let oidcUser: any = undefined;
+  try {
+    const oidcAuth = useOidcAuthentication();
+    oidcUser = oidcAuth?.oidcUser;
+  } catch (e) {
+    // OIDC not available
+  }
+  try {
+    const snAuth = useSnAuth();
+    // For SNAuth, we don't need oidcUser, just presence of auth is enough
+    if (!oidcUser && snAuth?.user) {
+      oidcUser = { profile: snAuth.user };
+    }
+  } catch (e) {
+    // SNAuth not available
+  }
   const navigate = useNavigate();
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);

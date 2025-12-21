@@ -16,9 +16,18 @@ export async function loadApiKey(serviceKeyPath: string): Promise<string | null>
   }
 }
 import { Repository } from '@sensenet/client-core';
-import { repositoryUrl } from '../configuration';
+import { JwtService } from '@sensenet/authentication-jwt';
+import { repositoryUrl, authType } from '../configuration';
 
 export const repository = new Repository({ repositoryUrl });
+
+// Set up authentication service based on auth type
+if (authType === 'jwt') {
+  repository.authentication = new JwtService(repository);
+  console.log('[sensenet] Using JWT authentication');
+} else {
+  console.log('[sensenet] Using OIDC authentication (token set externally)');
+}
 
 // Store reference to original fetch method for proper cleanup
 const originalFetch = repository.fetch.bind(repository);

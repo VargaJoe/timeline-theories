@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
+import { useSnAuth } from '@sensenet/sn-auth-react';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { getTimelines, getTimelineMediaCovers } from '../services/timelineService';
 import type { Timeline } from '../services/timelineService';
@@ -11,7 +12,21 @@ import { siteConfig } from '../configuration';
 import { timelinesPath } from '../projectPaths';
 
 export const TimelineListPage: React.FC = () => {
-  const { oidcUser } = useOidcAuthentication();
+  // Handle authentication state - support both SNAuth and OIDC
+  let user: any = undefined;
+  try {
+    const oidcAuth = useOidcAuthentication();
+    user = oidcAuth?.oidcUser?.profile;
+  } catch (e) {
+    // OIDC not available
+  }
+  try {
+    const snAuth = useSnAuth();
+    user = snAuth?.user || user;
+  } catch (e) {
+    // SNAuth not available
+  }
+
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -151,7 +166,7 @@ export const TimelineListPage: React.FC = () => {
               <option value="created_desc" style={{ color: '#333' }}>Newest First</option>
             </select>
           </div>
-          {oidcUser && (
+          {user && (
             <Link
               to="/create"
               style={{
@@ -194,7 +209,7 @@ export const TimelineListPage: React.FC = () => {
             <p style={{ color: '#6c757d', marginBottom: 32, fontSize: 16 }}>
               It looks like there are no timelines available yet. 
             </p>
-            {oidcUser && (
+            {user && (
               <Link 
                 to="/create" 
                 style={{
@@ -231,7 +246,7 @@ export const TimelineListPage: React.FC = () => {
             {timelines
               .slice()
               // Filter out private timelines unless user is logged in (admin)
-              .filter(timeline => timeline.isPublic !== false || oidcUser)
+              .filter(timeline => timeline.isPublic !== false || user)
               .sort((a, b) => {
                 if (sortOrder === 'alphabetical') {
                   return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });

@@ -1,12 +1,39 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useSnAuth } from '@sensenet/sn-auth-react';
 import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { LoginButton } from './LoginButton';
 import { siteConfig } from '../configuration';
 
 export const TopNavigationBar: React.FC = () => {
-  const { oidcUser } = useOidcAuthentication();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Try to use SNAuth hook (for SNAuth mode)
+  let snAuthUser: any = undefined;
+  
+  try {
+    const snAuth = useSnAuth();
+    snAuthUser = snAuth?.user;
+  } catch (e) {
+    // SNAuth not available (probably OIDC mode)
+  }
+
+  // Try to use OIDC hook (for IdentityServer mode)
+  let oidcUser: any = undefined;
+
+  try {
+    const oidcAuth = useOidcAuthentication();
+    oidcUser = oidcAuth?.oidcUser?.profile;
+  } catch (e) {
+    // OIDC not available (probably SNAuth mode)
+  }
+
+  // Use whichever user is available
+  const user = snAuthUser || oidcUser;
+
+  // Determine if user is authenticated
+  const isAuthenticated = !!user;
+  const userProfile = user;
 
   return (
     <nav style={{
@@ -76,7 +103,7 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          {oidcUser && (
+          {isAuthenticated && (
             <Link 
               to="/media-library" 
               style={{
@@ -101,7 +128,7 @@ export const TopNavigationBar: React.FC = () => {
             alignItems: 'center',
             gap: 12
           }}>
-            {oidcUser ? (
+            {isAuthenticated ? (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -120,10 +147,10 @@ export const TopNavigationBar: React.FC = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {(oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email || 'U').charAt(0)?.toUpperCase()}
+                  {(userProfile?.DisplayName || userProfile?.Name || userProfile?.Email || 'U').charAt(0)?.toUpperCase()}
                 </div>
                 <span style={{ fontSize: '14px' }}>
-                  {oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email?.split('@')[0] || 'User'}
+                  {userProfile?.DisplayName || userProfile?.Name || userProfile?.Email?.split('@')[0] || 'User'}
                 </span>
                 <LoginButton />
               </div>
@@ -183,7 +210,7 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          {oidcUser && (
+          {isAuthenticated && (
             <Link 
               to="/media-library" 
               style={{
@@ -205,7 +232,7 @@ export const TopNavigationBar: React.FC = () => {
           <div style={{
             padding: '12px 20px'
           }}>
-            {oidcUser ? (
+            {isAuthenticated ? (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -224,10 +251,10 @@ export const TopNavigationBar: React.FC = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {(oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email || 'U').charAt(0)?.toUpperCase()}
+                  {(userProfile?.name || userProfile?.preferred_username || userProfile?.email || 'U').charAt(0)?.toUpperCase()}
                 </div>
                 <span style={{ fontSize: '14px', flex: 1 }}>
-                  {oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email?.split('@')[0] || 'User'}
+                  {userProfile?.name || userProfile?.preferred_username || userProfile?.email?.split('@')[0] || 'User'}
                 </span>
                 <LoginButton />
               </div>

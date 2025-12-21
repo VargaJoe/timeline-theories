@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "@material-ui/core": "^4.12.4",
+    "@sensenet/authentication-jwt": "^1.1.4",
     "@sensenet/authentication-oidc-react": "^2.3.1",
     "@sensenet/client-core": "^4.2.0",
+    "@sensenet/sn-auth-react": "^1.0.2",
     "@types/react-router-dom": "^5.3.3",
     "dompurify": "^3.2.6",
     "history": "^5.3.0",

@@ -56,7 +56,7 @@ services:
       - Authority__PublicHost=https://localhost:51017
       - Repository__Url=https://localhost:51016
       - Repository__PublicHost=https://localhost:51016
-      - Sensenet__Repository__Authentication__ApiKey=pr3Gen3R4Tedpr3Gen3R4Tedpr3Gen3R4Tedpr3Gen3R4Tedpr3Gen3R4Tedpr3Gen3R4Tedpr3Gen3R4Ted
+      - Sensenet__Repository__Authentication__ApiKey=itKgNHb7mmf0sqjqZFcvYBV1U5yhSfPHwkJZZaER6JZUzxO82gAu5nars6gkLNnj4majGnxumMDXlfqlhlO
       - JwtSettings__Issuer=https://localhost:51017
       - JwtSettings__Audience=sensenet
       - JwtSettings__SecretKey=pr3Gen3R4Tedpr3Gen3R4Tedpr3Gen3R4Ted
@@ -72,6 +72,7 @@ services:
       - Application__AllowedHosts__0=https://adminui.test.sensenet.com
       - Application__AllowedHosts__1=https://localhost:51016
       - Application__AllowedHosts__2=http://sensenet-insql-cdb-snapp
+      - Application__AllowedHosts__3=http://localhost:5173
       - Sensenet__Repository__InnerUrl=http://sensenet-insql-cdb-snapp
     ports:
       - "51017:443"
