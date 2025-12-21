@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { useSnAuth } from '@sensenet/sn-auth-react';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { useSharedAuth } from '../context/useSharedAuth';
 import { getTimelines, getTimelineMediaCovers } from '../services/timelineService';
 import type { Timeline } from '../services/timelineService';
 import { Link } from 'react-router-dom';
@@ -12,21 +11,9 @@ import { siteConfig } from '../configuration';
 import { timelinesPath } from '../projectPaths';
 
 export const TimelineListPage: React.FC = () => {
-  // Handle authentication state - support both SNAuth and OIDC
-  let user: any = undefined;
-  try {
-    const oidcAuth = useOidcAuthentication();
-    user = oidcAuth?.oidcUser?.profile;
-  } catch (e) {
-    // OIDC not available
-  }
-  try {
-    const snAuth = useSnAuth();
-    user = snAuth?.user || user;
-  } catch (e) {
-    // SNAuth not available
-  }
-
+  // Handle authentication state - unified auth context
+  const { user } = useSharedAuth();
+  
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

@@ -1,35 +1,14 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useSnAuth } from '@sensenet/sn-auth-react';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { useSharedAuth } from '../context/useSharedAuth';
 import { LoginButton } from './LoginButton';
 import { siteConfig } from '../configuration';
 
 export const TopNavigationBar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Try to use SNAuth hook (for SNAuth mode)
-  let snAuthUser: any = undefined;
-  
-  try {
-    const snAuth = useSnAuth();
-    snAuthUser = snAuth?.user;
-  } catch (e) {
-    // SNAuth not available (probably OIDC mode)
-  }
-
-  // Try to use OIDC hook (for IdentityServer mode)
-  let oidcUser: any = undefined;
-
-  try {
-    const oidcAuth = useOidcAuthentication();
-    oidcUser = oidcAuth?.oidcUser?.profile;
-  } catch (e) {
-    // OIDC not available (probably SNAuth mode)
-  }
-
-  // Use whichever user is available
-  const user = snAuthUser || oidcUser;
+  // Use unified auth context
+  const { user } = useSharedAuth();
 
   // Determine if user is authenticated
   const isAuthenticated = !!user;

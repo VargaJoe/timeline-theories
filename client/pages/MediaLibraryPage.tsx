@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
-import { useSnAuth } from '@sensenet/sn-auth-react';
+import { useSharedAuth } from '../context/useSharedAuth';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 import { PageHeader } from '../components/PageHeader';
@@ -25,23 +24,8 @@ const MEDIA_TYPES = [
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
 
 export default function MediaLibraryPage() {
-  // Handle authentication state - support both SNAuth and OIDC
-  let oidcUser: any = undefined;
-  try {
-    const oidcAuth = useOidcAuthentication();
-    oidcUser = oidcAuth?.oidcUser;
-  } catch (e) {
-    // OIDC not available
-  }
-  try {
-    const snAuth = useSnAuth();
-    // For SNAuth, we don't need oidcUser, just presence of auth is enough
-    if (!oidcUser && snAuth?.user) {
-      oidcUser = { profile: snAuth.user };
-    }
-  } catch (e) {
-    // SNAuth not available
-  }
+  // Use unified auth context
+  const { user } = useSharedAuth();
   const navigate = useNavigate();
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -195,7 +179,7 @@ export default function MediaLibraryPage() {
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
       >
-        {oidcUser && (
+        {user && (
           <>
             <Link
               to="/media-library/create"
@@ -357,7 +341,7 @@ export default function MediaLibraryPage() {
               ? 'Try adjusting your search criteria.' 
               : 'Get started by adding your first media item.'}
           </p>
-          {oidcUser && (
+          {user && (
             <Link 
               to="/media-library/create"
               style={{
@@ -482,7 +466,7 @@ export default function MediaLibraryPage() {
                       </div>
                     )}
                     {/* Edit Button for authenticated users */}
-                    {oidcUser && (
+                    {user && (
                       <div style={{ marginBottom: 8, width: '100%', display: 'flex', justifyContent: 'center' }}>
                         <button
                           onClick={(e) => handleEditItem(item, e)}
