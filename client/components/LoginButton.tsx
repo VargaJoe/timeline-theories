@@ -1,41 +1,25 @@
 import React, { useState } from 'react';
 import { setRepositoryAccessToken } from '../services/sensenet';
-
-// Unified auth hook - works for both SNAuth and OIDC
-import { useAuth as useSNAuth } from '../context/SNAuthProvider';
-import { useAuth as useOidcAuth } from '../context/ISAuthProvider';
+import { useSharedAuth } from '../context/useSharedAuth';
+import { useAuthType } from '../AppProviders';
 
 console.log('[LoginButton] Component loaded');
 
 /**
  * Unified Login Button Component
- * Uses the unified useAuth hook from either SNAuthProvider or ISAuthProvider
+ * Uses the unified useSharedAuth hook that works with both SNAuth and IdentityServer
  */
 export const LoginButton: React.FC = () => {
-  console.log('[LoginButton] Component rendering...');
+  const { authType } = useAuthType();
+  console.log('[LoginButton] Component rendering with authType:', authType);
   
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Try to get auth from SNAuthProvider
-  let auth: any = null;
-  let isSNAuthMode = false;
+  // Use shared auth hook
+  const auth = useSharedAuth();
 
-  try {
-    auth = useSNAuth();
-    isSNAuthMode = true;
-  } catch (e) {
-    console.log('[LoginButton] SNAuth not available, trying OIDC');
-    try {
-      auth = useOidcAuth();
-      isSNAuthMode = false;
-    } catch (e2) {
-      console.log('[LoginButton] Neither auth method available');
-      auth = null;
-    }
-  }
-
-  if (!auth) {
+  if (!auth || auth.isAuthenticated === undefined) {
     return (
       <button 
         disabled
@@ -56,7 +40,7 @@ export const LoginButton: React.FC = () => {
   const { user, isAuthenticated, login, logout, error } = auth;
 
   console.log('[LoginButton] Auth state:', {
-    isSNAuthMode,
+    authType,
     isAuthenticated,
   });
 
@@ -117,7 +101,7 @@ export const LoginButton: React.FC = () => {
 
   // Not logged in - show login button
   console.log('[LoginButton] Rendering: Login button');
-  const authTypeLabel = isSNAuthMode ? 'SNAuth' : 'IdentityServer';
+  const authTypeLabel = authType || 'Unknown';
   
   return (
     <div>

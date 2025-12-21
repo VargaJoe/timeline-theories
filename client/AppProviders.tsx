@@ -1,4 +1,4 @@
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useEffect, useState, Suspense, createContext, useContext } from 'react';
 import { AuthenticationProvider as SNAuthenticationProvider } from '@sensenet/sn-auth-react';
 import { AuthenticationProvider as OidcAuthenticationProvider } from '@sensenet/authentication-oidc-react';
 import type { AuthServerType, AuthConfig } from './services/authConfigService';
@@ -6,9 +6,18 @@ import { getAuthConfig } from './services/authConfigService';
 import { repositoryUrl } from './configuration';
 import { ISAuthProvider } from './context/ISAuthProvider';
 import { SNAuthProvider } from './context/SNAuthProvider';
+import { browserHistory } from './browserHistory';
 
 console.log('[AppProviders] Mounting AppProviders');
 console.log('[AppProviders] repositoryUrl:', repositoryUrl);
+
+// Auth Type Context
+export const AuthTypeContext = createContext<{ authType: AuthServerType | null }>({ authType: null });
+
+// Hook to use auth type
+export function useAuthType() {
+  return useContext(AuthTypeContext);
+}
 
 // Maintenance mode component
 const MaintenanceMode = () => (
@@ -168,6 +177,8 @@ const SNAuthProviderWrapper = ({ children, authServerUrl }: { children: React.Re
  * Wraps OIDC AuthenticationProvider and ISAuthProvider
  */
 const ISAuthProviderWrapper = ({ children, authServerUrl }: { children: React.ReactNode; authServerUrl: string }) => {
+  console.log('[ISAuthProviderWrapper] Initializing with authServerUrl:', authServerUrl);
+  
   return (
     <OidcAuthenticationProvider
       configuration={{
@@ -181,6 +192,7 @@ const ISAuthProviderWrapper = ({ children, authServerUrl }: { children: React.Re
         automaticSilentRenew: true,
         extraQueryParams: { snrepo: repositoryUrl },
       }}
+      history={browserHistory}
     >
       <ISAuthProvider>
         {children}
@@ -264,25 +276,31 @@ function AuthTypeDetector({ children }: { children: React.ReactNode }) {
 
   console.log('[AuthTypeDetector] Rendering provider for auth type:', authType);
 
-  // Render appropriate provider based on detected auth type
+  // Render appropriate provider based on detected auth type, wrapping in AuthTypeContext
+  const contextValue = { authType };
+
   if (authType === 'IdentityServer') {
     const authServerUrl = authConfig?.authServerSettings.authority || authConfig?.authServerSettings.issuer || repositoryUrl;
     return (
-      <Suspense fallback={<LoadingScreen />}>
-        <ISAuthProviderWrapper authServerUrl={authServerUrl}>
-          {children}
-        </ISAuthProviderWrapper>
-      </Suspense>
+      <AuthTypeContext.Provider value={contextValue}>
+        <Suspense fallback={<LoadingScreen />}>
+          <ISAuthProviderWrapper authServerUrl={authServerUrl}>
+            {children}
+          </ISAuthProviderWrapper>
+        </Suspense>
+      </AuthTypeContext.Provider>
     );
   } else {
     // SNAuth
     const authServerUrl = authConfig?.authServerSettings.authority || authConfig?.authServerSettings.issuer || repositoryUrl;
     return (
-      <Suspense fallback={<LoadingScreen />}>
-        <SNAuthProviderWrapper authServerUrl={authServerUrl}>
-          {children}
-        </SNAuthProviderWrapper>
-      </Suspense>
+      <AuthTypeContext.Provider value={contextValue}>
+        <Suspense fallback={<LoadingScreen />}>
+          <SNAuthProviderWrapper authServerUrl={authServerUrl}>
+            {children}
+          </SNAuthProviderWrapper>
+        </Suspense>
+      </AuthTypeContext.Provider>
     );
   }
 }

@@ -12,30 +12,26 @@ import { ISAuthContext } from './ISAuthProvider';
 
 /**
  * Use auth from whichever provider is active
- * This hook tries SNAuth first, then OIDC
+ * This hook checks which context has a valid value and returns it
  */
 export function useSharedAuth(): AuthContextModel {
-  let auth: AuthContextModel | null = null;
+  const snAuth = useContext(SNAuthContext);
+  const isAuth = useContext(ISAuthContext);
 
-  try {
-    auth = useContext(SNAuthContext);
-    if (auth && auth.isAuthenticated !== undefined) {
-      return auth;
-    }
-  } catch (e) {
-    // SNAuth not available
+  // Check ISAuth first (IdentityServer)
+  if (isAuth !== undefined) {
+    console.log('[useSharedAuth] Using IdentityServer auth context');
+    return isAuth;
   }
 
-  try {
-    auth = useContext(ISAuthContext);
-    if (auth && auth.isAuthenticated !== undefined) {
-      return auth;
-    }
-  } catch (e) {
-    // OIDC not available
+  // Check SNAuth
+  if (snAuth !== undefined) {
+    console.log('[useSharedAuth] Using SNAuth context');
+    return snAuth;
   }
 
   // Fallback if neither provider is active
+  console.warn('[useSharedAuth] No auth provider available, returning fallback');
   return {
     user: undefined,
     isAuthenticated: false,

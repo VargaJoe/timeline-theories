@@ -17,13 +17,7 @@ export interface AuthContextModel {
   error?: string;
 }
 
-const AuthContext = createContext<AuthContextModel>({
-  user: undefined,
-  isAuthenticated: false,
-  login: async () => {},
-  logout: async () => {},
-  isLoading: false,
-});
+const AuthContext = createContext<AuthContextModel | undefined>(undefined);
 
 // Export AuthContext for shared auth hooks
 export { AuthContext as ISAuthContext };
@@ -36,8 +30,19 @@ export function ISAuthProvider({ children }: { children: ReactNode }) {
 
   const isAuthenticated = !!oidcUser;
 
+  console.log('[ISAuthProvider] Hook state:', {
+    hasOidcUser: !!oidcUser,
+    hasLogin: !!login,
+    hasLogout: !!logout,
+    loginType: typeof login,
+  });
+
   const handleLogin = async () => {
+    console.log('[ISAuthProvider] handleLogin called, login function:', login);
     try {
+      if (!login) {
+        throw new Error('Login function not available from useOidcAuthentication');
+      }
       await login();
     } catch (error) {
       console.error('[ISAuthProvider] Login failed:', error);
@@ -47,6 +52,9 @@ export function ISAuthProvider({ children }: { children: ReactNode }) {
 
   const handleLogout = async () => {
     try {
+      if (!logout) {
+        throw new Error('Logout function not available from useOidcAuthentication');
+      }
       await logout();
     } catch (error) {
       console.error('[ISAuthProvider] Logout failed:', error);

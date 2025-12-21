@@ -17,13 +17,7 @@ export interface AuthContextModel {
   error?: string;
 }
 
-const AuthContext = createContext<AuthContextModel>({
-  user: undefined,
-  isAuthenticated: false,
-  login: async () => {},
-  logout: async () => {},
-  isLoading: false,
-});
+const AuthContext = createContext<AuthContextModel | undefined>(undefined);
 
 // Export AuthContext for shared auth hooks
 export { AuthContext as SNAuthContext };
