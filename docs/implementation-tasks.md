@@ -485,6 +485,8 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **IMPLEMENTED: Duplicate detection** - Detects existing entries by name and updates them instead of creating duplicates
 - [x] **ADDED: Choice field validation** - Excludes empty values for EntryLabel/Importance fields during import
 - [x] **ENHANCED: Cover image upload** - Uploads cover images to MediaItem during import with proper authentication
+- [x] **FIXED: Field name consistency** - Updated export/import to use SenseNet field names (Title, Description, Notes, etc.) instead of generic names
+- [x] **FIXED: Description vs Notes mapping** - Export now always exports MediaItem.Description in Description column, TimelineEntry.Notes in Notes column
 - [x] **TESTED: TypeScript compilation** - Zero errors, all types properly resolved
 - [x] **READY: For testing** - Full export/import round-trip functionality complete and ready for end-to-end testing
 

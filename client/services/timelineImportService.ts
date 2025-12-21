@@ -7,23 +7,23 @@ import { uploadCoverImageBinary } from './mediaLibraryService';
  */
 interface ParsedTimelineEntry {
   entryName: string;
-  title: string;
-  description: string;
-  mediaType: string;
+  Title: string;
+  Description: string;
+  MediaType: string;
   mediaId: string;
   coverImageFilename: string;
-  date: string;
-  position: number;
-  notes: string;
-  entryLabel: string;
-  importance: string;
-  chronologicalDescription: string;
-  author: string;
-  publisher: string;
-  isbn: string;
-  publicationYear: number;
-  genre: string[];
-  tags: string[];
+  ChronologicalDate: string;
+  Position: number;
+  Notes: string;
+  EntryLabel: string;
+  Importance: string;
+  ChronologicalDescription: string;
+  Author: string;
+  Publisher: string;
+  ISBN: string;
+  PublicationYear: number;
+  Genre: string[];
+  Tags: string[];
 }
 
 /**
@@ -85,23 +85,23 @@ function parseTSV(content: string): { timelineName: string; entries: ParsedTimel
 
     entries.push({
       entryName: unescapeTSVField(fields[1]),
-      title: unescapeTSVField(fields[2]),
-      description: unescapeTSVField(fields[3]),
-      mediaType: unescapeTSVField(fields[4]),
+      Title: unescapeTSVField(fields[2]),
+      Description: unescapeTSVField(fields[3]),
+      MediaType: unescapeTSVField(fields[4]),
       mediaId: fields[5],
       coverImageFilename: unescapeTSVField(fields[6]),
-      date: unescapeTSVField(fields[7]),
-      position: parseInt(fields[8]) || 0,
-      notes: unescapeTSVField(fields[9]),
-      entryLabel: unescapeTSVField(fields[10]),
-      importance: unescapeTSVField(fields[11]),
-      chronologicalDescription: unescapeTSVField(fields[12]),
-      author: unescapeTSVField(fields[13]),
-      publisher: unescapeTSVField(fields[14]),
-      isbn: unescapeTSVField(fields[15]),
-      publicationYear: parseInt(fields[16]) || 0,
-      genre: stringToArray(unescapeTSVField(fields[17])),
-      tags: stringToArray(unescapeTSVField(fields[18])),
+      ChronologicalDate: unescapeTSVField(fields[7]),
+      Position: parseInt(fields[8]) || 0,
+      Notes: unescapeTSVField(fields[9]),
+      EntryLabel: unescapeTSVField(fields[10]),
+      Importance: unescapeTSVField(fields[11]),
+      ChronologicalDescription: unescapeTSVField(fields[12]),
+      Author: unescapeTSVField(fields[13]),
+      Publisher: unescapeTSVField(fields[14]),
+      ISBN: unescapeTSVField(fields[15]),
+      PublicationYear: parseInt(fields[16]) || 0,
+      Genre: stringToArray(unescapeTSVField(fields[17])),
+      Tags: stringToArray(unescapeTSVField(fields[18])),
     });
   }
 
@@ -156,11 +156,11 @@ export async function importTimelineFromZip(
         // Prepare entry data, excluding empty choice fields
         const entryData: Omit<TimelineEntry, 'id'> = {
           name: entry.entryName,
-          displayName: entry.title,
-          chronologicalDate: entry.date,
-          position: entry.position,
-          notes: entry.notes,
-          chronologicalDescription: entry.chronologicalDescription,
+          displayName: entry.Title,
+          chronologicalDate: entry.ChronologicalDate,
+          position: entry.Position,
+          notes: entry.Notes,
+          chronologicalDescription: entry.ChronologicalDescription,
           timelineId,
           mediaItem: null, // Will be set if we have a media ID
         };
@@ -172,17 +172,17 @@ export async function importTimelineFromZip(
             entryData.mediaItem = {
               Id: mediaIdNum,
               Name: entry.entryName, // Fallback to entry name
-              DisplayName: entry.title,
+              DisplayName: entry.Title,
             };
           }
         }
 
         // Add choice fields only if they have valid values
-        if (entry.entryLabel && entry.entryLabel.trim() !== '') {
-          entryData.entryLabel = entry.entryLabel;
+        if (entry.EntryLabel && entry.EntryLabel.trim() !== '') {
+          entryData.entryLabel = entry.EntryLabel;
         }
-        if (entry.importance && entry.importance.trim() !== '') {
-          entryData.importance = entry.importance;
+        if (entry.Importance && entry.Importance.trim() !== '') {
+          entryData.importance = entry.Importance;
         }
 
         if (existingEntry) {
@@ -192,11 +192,11 @@ export async function importTimelineFromZip(
           const entryPath = `${parentPath}/${entry.entryName}`;
           await TimelineEntryService.updateTimelineEntry(entryPath, {
             name: entry.entryName,
-            displayName: entry.title,
-            chronologicalDate: entry.date,
-            position: entry.position,
-            notes: entry.notes,
-            chronologicalDescription: entry.chronologicalDescription,
+            displayName: entry.Title,
+            chronologicalDate: entry.ChronologicalDate,
+            position: entry.Position,
+            notes: entry.Notes,
+            chronologicalDescription: entry.ChronologicalDescription,
             entryLabel: entryData.entryLabel,
             importance: entryData.importance,
           });
