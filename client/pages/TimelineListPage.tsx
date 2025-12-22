@@ -32,7 +32,7 @@ export const TimelineListPage: React.FC = () => {
 
   useEffect(() => {
     console.log('TimelineListPage: Starting to load timelines...');
-    getTimelines()
+    getTimelines(!!user)
       .then(timelines => {
         console.log('TimelineListPage: Successfully loaded timelines:', timelines);
         setTimelines(timelines);
@@ -233,7 +233,7 @@ export const TimelineListPage: React.FC = () => {
             {timelines
               .slice()
               // Filter out private timelines unless user is logged in (admin)
-              .filter(timeline => timeline.isPublic !== false || user)
+              .filter(timeline => timeline.isVisible !== false || user)
               .sort((a, b) => {
                 if (sortOrder === 'alphabetical') {
                   return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
@@ -275,7 +275,7 @@ export const TimelineListPage: React.FC = () => {
                       }}
                     >
                     {/* PRIVATE indicator if not public */}
-                    {timeline.isPublic === false && (
+                    {timeline.isVisible === false && (
                       <div style={{
                         position: 'absolute',
                         top: 12,

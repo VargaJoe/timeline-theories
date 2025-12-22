@@ -467,7 +467,7 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **ADDED: Admin validation function** - Created isAdmin() helper function for consistent admin checking across components
 - [x] **SECURED: Direct URL access protection** - Users cannot access media library by URL without admin privileges
 - [x] **ENHANCED: SenseNet group membership check** - Added administrators group membership validation for admin access
-- [x] **ADDED: IsPublic field handling** - Enhanced timeline loading to include privacy status
+- [x] **ADDED: IsVisible field handling** - Enhanced timeline loading to include privacy status
 - [x] **MAINTAINED: Backward compatibility** - All existing public timeline functionality preserved
 
 ### Technical Task - DisplayName/Title/Year Handling
@@ -545,25 +545,14 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
 - [x] **READY: Testing phase** - JWT authentication flow and user state management ready for testing in both modes
 
-### Story 28 - Export/Import Timeline Data (Complete)
-- [x] **IMPLEMENTED: Professional export service** - Created timelineExportService.ts using repository.fetch() pattern for authenticated binary downloads
-- [x] **ENHANCED: Cover image downloads** - Proper authenticated fetch with SenseNet's __mediaresource pattern for binary fields
-- [x] **ADDED: TSV format with 19 columns** - Complete field mapping including timeline_name, entry_name, media fields, dates, notes, labels, etc.
-- [x] **IMPLEMENTED: Special character escaping** - Proper handling of tabs, newlines, and special characters in TSV fields
-- [x] **CREATED: ZIP packaging** - timeline_data.tsv + covers/ folder with numbered images (cover_0.jpg, cover_1.jpg, etc.)
-- [x] **ENHANCED: UI with loading states** - Export button shows spinner during operation, disables during export, displays success/failure messages
-- [x] **ADDED: Graceful image handling** - Continues export even if images fail to download (empty binary fields), tracks skipped images count
-- [x] **INTEGRATED: Both auth providers** - Uses repository instance with token from useSharedAuth() for OIDC and JWT compatibility
-- [x] **IMPLEMENTED: Import functionality** - Created timelineImportService.ts for ZIP/TSV parsing with full round-trip support
-- [x] **ADDED: Create/Update logic** - Import can both create new entries and update existing ones based on entry name matching
-- [x] **ENHANCED: MediaItem reference support** - Proper MediaItem reference creation from media_id in TSV during import
-- [x] **IMPLEMENTED: Duplicate detection** - Detects existing entries by name and updates them instead of creating duplicates
-- [x] **ADDED: Choice field validation** - Excludes empty values for EntryLabel/Importance fields during import
-- [x] **ENHANCED: Cover image upload** - Uploads cover images to MediaItem during import with proper authentication
-- [x] **FIXED: Field name consistency** - Updated export/import to use SenseNet field names (Title, Description, Notes, etc.) instead of generic names
-- [x] **FIXED: Description vs Notes mapping** - Export now always exports MediaItem.Description in Description column, TimelineEntry.Notes in Notes column
-- [x] **TESTED: TypeScript compilation** - Zero errors, all types properly resolved
-- [x] **READY: For testing** - Full export/import round-trip functionality complete and ready for end-to-end testing
-- [x] **DOCUMENTATION: Complete user guide** - Created comprehensive export/import guide in English (docs/export-import-guide.md) with usage examples, error handling, and admin workflows
+### Technical Task - Timeline Loading Optimization (Public/Private Access Control)
+- [x] **IDENTIFIED: Performance issue** - Timeline list page was downloading all timelines (public + private) from API regardless of user authentication status
+- [x] **ANALYZED: Network traffic** - User reported seeing all timeline elements downloaded in browser network tab even when not visible
+- [x] **IMPLEMENTED: Server-side filtering** - Modified getTimelines() function to accept includePrivate parameter and filter at API level
+- [x] **ENHANCED: Query logic** - Added `+IsVisible:true` condition to SenseNet OData query when includePrivate=false
+- [x] **UPDATED: TimelineListPage** - Modified to pass user authentication status to getTimelines(!!user)
+- [x] **MAINTAINED: Backward compatibility** - Default behavior (includePrivate=false) ensures public-only access for unauthenticated users
+- [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
+- [x] **RESULT: Optimized network usage** - Unauthenticated users now only download public timelines, reducing unnecessary data transfer and improving performance
 
 ---

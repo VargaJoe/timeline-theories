@@ -405,7 +405,7 @@ export interface Timeline {
   sort_order?: string;
   created_at?: string;
   coverImageUrl?: string;
-  isPublic?: boolean;
+  isVisible?: boolean;
   timelineType?: string;
 }
 
@@ -416,7 +416,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
       parentPath: timelinesPath,
       contentType: TIMELINE_CONTENT_TYPE,
       oDataOptions: {
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic', 'TimelineType'],
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsVisible', 'TimelineType'],
       },
       content: {
         Name: data.name,
@@ -434,7 +434,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
       description: result.d.Description || data.description,
       sort_order: result.d.SortOrder || data.sortOrder,
       created_at: result.d.CreationDate,
-      isPublic: typeof result.d.IsPublic === 'boolean' ? result.d.IsPublic : false,
+      isVisible: typeof result.d.IsVisible === 'boolean' ? result.d.IsVisible : false,
       timelineType: result.d.TimelineType || data.timelineType || 'chronological',
     };
   } catch (error) {
@@ -443,14 +443,20 @@ export async function createTimeline(data: { name: string; displayName?: string;
   }
 }
 
-export async function getTimelines(): Promise<Timeline[]> {
+export async function getTimelines(includePrivate = false): Promise<Timeline[]> {
   try {
+    // Build query based on whether to include private timelines
+    let query = `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`;
+    if (!includePrivate) {
+      query += ` +IsVisible:true`;
+    }
+
     // List Timeline contents under the configured path
     const result = await repository.loadCollection({
       path: timelinesPath,
       oDataOptions: {
-        query: `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`,
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsPublic', 'TimelineType'],
+        query: query,
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsVisible', 'TimelineType'],
         orderby: ['DisplayName'],
       },
     });
@@ -463,7 +469,7 @@ export async function getTimelines(): Promise<Timeline[]> {
       SortOrder?: string | string[];
       CreationDate: string;
       CoverImageUrl?: string;
-      IsPublic?: boolean;
+      IsVisible?: boolean;
       TimelineType?: string;
     }) => {
       // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
@@ -482,7 +488,7 @@ export async function getTimelines(): Promise<Timeline[]> {
         sort_order: sortOrder,
         created_at: item.CreationDate,
         coverImageUrl: item.CoverImageUrl,
-        isPublic: typeof item.IsPublic === 'boolean' ? item.IsPublic : false,
+        isVisible: typeof item.IsVisible === 'boolean' ? item.IsVisible : false,
         timelineType: item.TimelineType || 'chronological',
       };
     });
@@ -517,7 +523,7 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
       const mediaItem = item.MediaItem;
       if (mediaItem) {
         // Use the helper function to get cover URL (either from URL or binary field)
-        const coverUrl = getCoverImageUrl(mediaItem);
+        const coverUrl = null;//getCoverImageUrl(mediaItem);
         if (coverUrl) {
           allCoverUrls.push(coverUrl);
         }
