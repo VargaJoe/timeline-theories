@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
@@ -6,7 +6,6 @@ import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TimelineEntryEditModal } from '../components/TimelineEntryEditModal';
 import { PageHeader } from '../components/PageHeader';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
@@ -15,6 +14,7 @@ import { repository } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { loadBackgroundImage } from '../services/sensenet';
 import { siteConfig, repositoryUrl } from '../configuration';
+import { useSharedAuth } from '../context/useSharedAuth';
 import type { Timeline } from '../services/timelineService';
 import type { TimelineEntry, MediaItemRef } from '../services/timelineEntryService';
 
@@ -64,11 +64,86 @@ interface DroppableProvided {
 }
 
 export const TimelineViewPage: React.FC = () => {
+  const auth = useSharedAuth();
+  const isUserAuthenticated = auth.isAuthenticated;
+
+  // Export handler
+  const [isExporting, setIsExporting] = useState(false);
+  const handleExportTimeline = async () => {
+    if (!timeline) return;
+    const parentPath = `${timelinesPath}/${timeline.name}`;
+    
+    setIsExporting(true);
+    try {
+      const { exportTimelineAsZip } = await import('../services/timelineExportService');
+      const result = await exportTimelineAsZip(
+        Number(timeline.id),
+        timeline.name,
+        parentPath,
+        repository
+      );
+      
+      // Trigger ZIP download
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.filename;
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 100);
+      
+      console.log(`[TimelineViewPage] Export complete. Skipped images: ${result.skippedImagesCount}`);
+    } catch (err) {
+      console.error('Export error:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  
+  // Import handler
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const handleImportTimeline = async (file: File) => {
+    if (!timeline) return;
+    const parentPath = `${timelinesPath}/${timeline.name}`;
+    
+    setIsImporting(true);
+    try {
+      const { importTimelineFromZip } = await import('../services/timelineImportService');
+      const result = await importTimelineFromZip(
+        file,
+        Number(timeline.id),
+        parentPath,
+        repository
+      );
+      
+      console.log(`[TimelineViewPage] Import complete. Created: ${result.entriesCreated}, Updated: ${result.entriesUpdated}, Skipped: ${result.entriesSkipped}`);
+      
+      // Reload entries after import
+      setEntriesLoading(true);
+      const entries = await TimelineEntryService.listTimelineEntries(Number(timeline.id), parentPath);
+      setEntries(entries);
+      setEntriesLoading(false);
+    } catch (err) {
+      console.error('Import error:', err);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      handleImportTimeline(file);
+    }
+  };
+
   const DESCRIPTION_ROW_LIMIT = 3;
   const [showFullDescription, setShowFullDescription] = useState(false);
   const { id: timelineName } = useParams<{ id: string }>();
-  const { oidcUser } = useOidcAuthentication();
-
+  
   console.log('[TimelineViewPage] Component mounted with timelineName:', timelineName);
 
   const [timeline, setTimeline] = useState<Timeline | null>(null);
@@ -137,7 +212,7 @@ export const TimelineViewPage: React.FC = () => {
         };
         
         // Check if this is a private timeline and user is not logged in (admin)
-        if (timelineData.isPublic === false && !oidcUser) {
+        if (timelineData.isPublic === false && !isUserAuthenticated) {
           setError('This timeline is private and only accessible to administrators.');
           return;
         }
@@ -175,7 +250,7 @@ export const TimelineViewPage: React.FC = () => {
       }
     };
     loadTimeline();
-  }, [timelineName, oidcUser]);
+  }, [timelineName, isUserAuthenticated]);
 
   // Load background image from SenseNet
   useEffect(() => {
@@ -293,6 +368,12 @@ export const TimelineViewPage: React.FC = () => {
 
   return (
     <>
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
       <PageHeader 
         title={timeline.displayName || timeline.name || 'Timeline'}
         subtitle="Timeline Entries"
@@ -301,7 +382,7 @@ export const TimelineViewPage: React.FC = () => {
         showSiteTitle={false}
       >
         {/* Header Actions */}
-        {oidcUser && (
+        {isUserAuthenticated && (
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={() => setEditMode(m => !m)}
@@ -457,6 +538,108 @@ export const TimelineViewPage: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </button>
+            <button
+              onClick={handleExportTimeline}
+              disabled={isExporting}
+              title={isExporting ? "Exporting timeline..." : "Export Timeline (ZIP with TSV + Images)"}
+              style={{
+                background: isExporting ? '#6c757d' : '#17a2b8',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: isExporting ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                opacity: isExporting ? 0.7 : 1
+              }}
+              onMouseEnter={e => {
+                if (!isExporting) {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+                }
+              }}
+              onMouseLeave={e => {
+                if (!isExporting) {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                }
+              }}
+            >
+              {isExporting ? (
+                <>
+                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ animation: 'spin 1s linear infinite' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span style={{ marginLeft: 8 }}>Exporting...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  <span style={{ marginLeft: 8 }}>Export Timeline</span>
+                </>
+              )}
+            </button>
+            <label
+              title={isImporting ? "Importing timeline..." : "Import Timeline (ZIP with TSV + Images)"}
+              style={{
+                background: isImporting ? '#6c757d' : '#28a745',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '12px',
+                cursor: isImporting ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                margin: 0,
+                opacity: isImporting ? 0.7 : 1,
+                pointerEvents: isImporting ? 'none' : 'auto'
+              }}
+              onMouseEnter={(e) => {
+                if (!isImporting) {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isImporting) {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                }
+              }}
+            >
+              {isImporting ? (
+                <>
+                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ animation: 'spin 1s linear infinite' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span style={{ marginLeft: 8 }}>Importing...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <span style={{ marginLeft: 8 }}>Import Timeline</span>
+                </>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".zip"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+                disabled={isImporting}
+              />
+            </label>
             <div title="Import from Trakt List" style={{ display: 'inline-block' }}>
               <TraktImportDialog
                 timelineName={timeline.name}
@@ -727,7 +910,7 @@ export const TimelineViewPage: React.FC = () => {
         ) : entries.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 32, color: '#666' }}>
             <p style={{ marginBottom: 16 }}>No entries in this timeline yet.</p>
-            {oidcUser && (
+            {isUserAuthenticated && (
               <Link 
                 to={`/timelines/${timelineName}/add-entry`}
                 style={{
@@ -933,7 +1116,7 @@ export const TimelineViewPage: React.FC = () => {
               <div key={entry.id} className="entry-card" style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
                 <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
                   {/* Delete Entry Button (admin only) */}
-                  {oidcUser && (
+                  {isUserAuthenticated && (
                     <button
                       title="Edit Entry"
                       style={{
@@ -961,7 +1144,7 @@ export const TimelineViewPage: React.FC = () => {
                     </button>
                   )}
                   {/* Delete Entry Button (admin only) */}
-                  {oidcUser && (
+                  {isUserAuthenticated && (
                     <button
                       title="Delete Entry"
                       style={{

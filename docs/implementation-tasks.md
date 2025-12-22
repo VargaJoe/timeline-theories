@@ -5,12 +5,11 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 ## In Progress
 
 
-
 ---
 
 ## Planned
 
-### Story 32 - Book Reading Progress and Personal Library Integration
+### Story 30 - Book Reading Progress and Personal Library Integration
 - [ ] Implement reading status tracking ("Want to Read", "Currently Reading", "Read", "Did Not Finish")
 - [ ] Add personal rating system separate from general media ratings
 - [ ] Create reading notes functionality separate from general timeline entry notes
@@ -88,6 +87,18 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Update UI to handle multiple instances
 - [ ] Implement instance-specific note handling
 - [ ] Update timeline view for multiple instances
+
+### Technical Task - Fix Docker Compose Healthchecks for Local SenseNet Repository
+- [ ] Restore appropriate healthchecks for SQL Server, Auth, and API services
+- [ ] Ensure proper startup order with healthcheck conditions
+- [ ] Test that containers start in correct sequence without manual intervention
+- [ ] Verify that services are fully ready before depending services start
+
+### Technical Task - Automate Development Certificate Generation in Docker Compose
+- [ ] Implement certificate generation within Docker Compose (e.g., using OpenSSL in a init container)
+- [ ] Ensure generated certificates are trusted on Windows host (import to trusted root store)
+- [ ] Remove dependency on external scripts for certificate creation
+- [ ] Test certificate auto-generation and trust setup
 - [ ] Add instance differentiation labels
 - [ ] Test multiple instance functionality
 
@@ -183,6 +194,67 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Create series overview pages showing all books in a series
 - [ ] Add series completion tracking and progress indicators
 - [ ] Implement series-based sorting and filtering options
+
+### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
+- [ ] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
+- [ ] Lazy loading images load correctly without errors or broken displays
+- [ ] Performance metrics (e.g., query response time) meet acceptable thresholds
+- [ ] No regressions in existing media browsing functionality
+- [ ] Implement query optimization (e.g., debouncing, batching) in media services
+- [ ] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
+- [ ] Add error handling and fallbacks for failed image loads
+- [ ] Test with various media types and network conditions
+
+### Story 06 - Organize Timeline Entries
+- [ ] User can drag and drop timeline entries to reorder them
+- [ ] User can manually set position numbers for entries
+- [ ] User can group entries by story arcs or themes
+- [ ] User can set dates for entries (for chronological sorting)
+- [ ] Changes are saved automatically
+- [ ] Timeline view reflects the new order immediately
+- [ ] Implement drag-and-drop functionality
+- [ ] Add position field management
+- [ ] Create grouping/arc functionality
+- [ ] Add date field for chronological sorting
+- [ ] Implement auto-save for position changes
+- [ ] Update timeline display logic
+
+### Story 26 - Timeline Entry Tagging for Loops, Universes, and Parallel Events
+- [ ] User can assign tags to timeline entries (e.g., "Prime Timeline", "Alternate Timeline", "Time Loop", "Character A", "City X")
+- [ ] Tags can be used to filter or group entries in the timeline view
+- [ ] UI supports tag selection, creation, and removal for entries
+- [ ] Tags are visible on timeline entries
+- [ ] Timeline can be rendered by tag grouping (e.g., show only "Prime Timeline" or alternate arcs)
+- [ ] Tags can be used for advanced rendering logic (e.g., alternating, grouped, or separated views)
+- [ ] Extend tag system to support timeline entry tags (not just media items)
+- [ ] Update TimelineEntry model and UI for tag assignment
+- [ ] Implement tag-based filtering and grouping in timeline view
+- [ ] Add rendering logic for different tag-based views (universe order, binge order, etc.)
+- [ ] Test tag assignment and filtering/grouping
+
+### Story 27 - Multi-Timeline Rendering and Viewing Modes
+- [ ] User can select different timeline rendering modes
+- [ ] Timeline entries from multiple timelines can be shown in a combined view
+- [ ] UI allows switching between rendering modes
+- [ ] Entries are grouped/alternated according to selected mode
+- [ ] Tag and cross-reference logic is respected in rendering
+- [ ] Implement rendering logic for each mode
+- [ ] Update timeline view UI to allow mode selection
+- [ ] Combine entries from multiple timelines as needed
+- [ ] Respect tags and cross-references in rendering
+- [ ] Test all rendering modes for correctness
+
+### Story 29 - Publisher Series Import and Management
+- [ ] Add timeline type option to mark as "Publisher Series" vs chronological timeline
+- [ ] Enhance media item creation for books with book-specific metadata fields
+- [ ] Implement default sort by publication date for publisher series
+- [ ] Add bulk book import from publisher data sources (Open Library, Google Books)
+- [ ] Create book-specific import workflows with appropriate field mapping
+- [ ] Add series metadata inheritance to auto-fill publisher/series info for subsequent books
+- [ ] Refactor content types for proper inheritance (Book inherits from MediaItem)
+- [ ] Update media item creation forms with book-specific fields
+- [ ] Implement bulk import services for book data sources
+- [ ] Add timeline type selection and sorting logic
 
 ---
 
@@ -387,6 +459,14 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **ENHANCED: TimelineViewPage access control** - Added authentication check for direct URL access to private timelines
 - [x] **IMPROVED: Error messaging** - Clear "administrators only" message for unauthorized access attempts
 - [x] **UPDATED: UI labels** - Changed "TEST" indicator to "PRIVATE" for better user understanding
+
+### Technical Task - Admin-only Media Library Access
+- [x] **IMPLEMENTED: Admin-only menu visibility** - Media Library menu item only appears for authenticated admin users
+- [x] **IMPLEMENTED: Admin-only page access** - MediaLibraryPage redirects non-admin users to home page
+- [x] **ENHANCED: Admin email configuration** - Added VITE_ADMIN_EMAILS environment variable for configurable admin access
+- [x] **ADDED: Admin validation function** - Created isAdmin() helper function for consistent admin checking across components
+- [x] **SECURED: Direct URL access protection** - Users cannot access media library by URL without admin privileges
+- [x] **ENHANCED: SenseNet group membership check** - Added administrators group membership validation for admin access
 - [x] **ADDED: IsPublic field handling** - Enhanced timeline loading to include privacy status
 - [x] **MAINTAINED: Backward compatibility** - All existing public timeline functionality preserved
 
@@ -436,3 +516,54 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] Add book-specific fields (author, publisher, ISBN, publication year, series info) to edit dialog
 - [x] Test the complete edit functionality with various media types and ensure data persistence
 
+### Technical Task - Admin-only Media Library Access
+- [x] **IMPLEMENTED: Admin-only visibility for Media Library menu** - Media Library link only appears for authenticated users
+- [x] **UPDATED: TopNavigationBar component** - Added oidcUser conditional rendering for Media Library link
+- [x] **UPDATED: Mobile navigation** - Applied same admin-only logic to mobile menu Media Library link
+- [x] **MAINTAINED: Consistent behavior** - Admin access control matches other admin functions in the application
+- [x] **ENHANCED: SenseNet group membership validation** - Added administrators group check with case-insensitive matching
+- [x] **FIXED: Admin user special case** - Added special handling for 'Admin' user (Name/LoginName) to bypass group membership requirement
+- [x] **MAINTAINED: Email fallback** - Preserved email-based admin validation for backward compatibility
+- [x] **UPDATED: Admin function visibility** - Modified all admin function buttons (Add Media Item, Import Books, Edit) to use isAdmin(user) condition instead of just user existence
+- [x] **FIXED: Auth loading timing** - Added isLoading check to admin access control useEffect to prevent premature redirects
+- [x] **SYNCHRONIZED: isAdmin functions** - Updated TopNavigationBar isAdmin function to match MediaLibraryPage implementation with Admin user special case
+- [x] **TESTED: Build verification** - All changes compile successfully with zero errors
+
+### Technical Task - Maintenance Mode Implementation
+- [x] **IMPLEMENTED: Environment variable-based maintenance mode** - VITE_MAINTENANCE_MODE environment variable controls site availability
+- [x] **CREATED: MaintenanceMode component** - Professional maintenance page with clear messaging and visual design
+- [x] **UPDATED: AppProviders component** - Added maintenance mode check before rendering main application
+- [x] **ENHANCED: Error handling** - Graceful fallback when API is unavailable or security issues require quick shutdown
+- [x] **TESTED: Build verification** - All changes compile successfully with zero errors
+- [x] **DOCUMENTED: Usage** - Environment variable configuration documented for deployment scenarios
+
+### Technical Task - Dual Authentication Support (OIDC/JWT)
+- [x] **IMPLEMENTED: Environment-based auth switching** - VITE_AUTH_TYPE variable controls OIDC vs JWT mode selection
+- [x] **ENHANCED: AppProviders conditional rendering** - AuthenticationProvider only rendered for OIDC mode
+- [x] **FIXED: Safe hook usage in components** - Added try-catch blocks around useOidcAuthentication calls for JWT compatibility
+- [x] **UPDATED: Key components** - TopNavigationBar, OidcTokenInjector, TimelineListPage updated for dual auth support
+- [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
+- [x] **READY: Testing phase** - JWT authentication flow and user state management ready for testing in both modes
+
+### Story 28 - Export/Import Timeline Data (Complete)
+- [x] **IMPLEMENTED: Professional export service** - Created timelineExportService.ts using repository.fetch() pattern for authenticated binary downloads
+- [x] **ENHANCED: Cover image downloads** - Proper authenticated fetch with SenseNet's __mediaresource pattern for binary fields
+- [x] **ADDED: TSV format with 19 columns** - Complete field mapping including timeline_name, entry_name, media fields, dates, notes, labels, etc.
+- [x] **IMPLEMENTED: Special character escaping** - Proper handling of tabs, newlines, and special characters in TSV fields
+- [x] **CREATED: ZIP packaging** - timeline_data.tsv + covers/ folder with numbered images (cover_0.jpg, cover_1.jpg, etc.)
+- [x] **ENHANCED: UI with loading states** - Export button shows spinner during operation, disables during export, displays success/failure messages
+- [x] **ADDED: Graceful image handling** - Continues export even if images fail to download (empty binary fields), tracks skipped images count
+- [x] **INTEGRATED: Both auth providers** - Uses repository instance with token from useSharedAuth() for OIDC and JWT compatibility
+- [x] **IMPLEMENTED: Import functionality** - Created timelineImportService.ts for ZIP/TSV parsing with full round-trip support
+- [x] **ADDED: Create/Update logic** - Import can both create new entries and update existing ones based on entry name matching
+- [x] **ENHANCED: MediaItem reference support** - Proper MediaItem reference creation from media_id in TSV during import
+- [x] **IMPLEMENTED: Duplicate detection** - Detects existing entries by name and updates them instead of creating duplicates
+- [x] **ADDED: Choice field validation** - Excludes empty values for EntryLabel/Importance fields during import
+- [x] **ENHANCED: Cover image upload** - Uploads cover images to MediaItem during import with proper authentication
+- [x] **FIXED: Field name consistency** - Updated export/import to use SenseNet field names (Title, Description, Notes, etc.) instead of generic names
+- [x] **FIXED: Description vs Notes mapping** - Export now always exports MediaItem.Description in Description column, TimelineEntry.Notes in Notes column
+- [x] **TESTED: TypeScript compilation** - Zero errors, all types properly resolved
+- [x] **READY: For testing** - Full export/import round-trip functionality complete and ready for end-to-end testing
+- [x] **DOCUMENTATION: Complete user guide** - Created comprehensive export/import guide in English (docs/export-import-guide.md) with usage examples, error handling, and admin workflows
+
+---

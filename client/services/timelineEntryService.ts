@@ -12,6 +12,12 @@ export interface MediaItemRef {
   CoverImageUrl?: string;
   ReleaseDate?: string;
   Description?: string;
+  Author?: string;
+  Publisher?: string;
+  ISBN?: string;
+  PublicationYear?: number;
+  Genre?: string | string[];
+  Tags?: string | string[];
   CoverImageBin?: {
     __mediaresource?: {
       media_src: string;
@@ -21,6 +27,7 @@ export interface MediaItemRef {
 
 export interface TimelineEntry {
   id: string;
+  name?: string;
   displayName: string;
   mediaItem: MediaItemRef | null;
   timelineId: number;
@@ -55,6 +62,7 @@ export class TimelineEntryService {
         query: `+TypeIs:TimelineEntry +Hidden:0`,
         select: [
           'Id',
+          'Name',
           'DisplayName',
           // 'MediaItem',
           'MediaItem/Id',
@@ -81,6 +89,7 @@ export class TimelineEntryService {
     });
     return result.d.results.map((item: Record<string, unknown>) => ({
       id: String(item.Id),
+      name: item.Name as string,
       displayName: item.DisplayName as string,
       mediaItem: item.MediaItem || null, // Expanded MediaItem object or null
       timelineId,
@@ -103,13 +112,13 @@ export class TimelineEntryService {
    * @param data TimelineEntry data (excluding id)
    * @param parentPath Path of the parent timeline (required)
    */
-  static async createTimelineEntry(data: Omit<TimelineEntry, 'id'>, parentPath: string): Promise<TimelineEntry> {
+  static async createTimelineEntry(data: Omit<TimelineEntry, 'id'>, parentPath: string): Promise<TimelineEntry & { mediaItemPath?: string }> {
     const result = await repository.post({
       parentPath,
       contentType: TIMELINE_ENTRY_CONTENT_TYPE,
       content: {
-        Name: data.mediaItem?.Name,
-        DisplayName: data.mediaItem?.DisplayName,
+        Name: data.name || data.mediaItem?.Name || 'Entry',
+        DisplayName: data.displayName || data.mediaItem?.DisplayName || 'Unnamed Entry',
         MediaItem: data.mediaItem?.Id, // Reference field (id)
         Position: data.position,
         ChronologicalDate: data.chronologicalDate,
@@ -123,9 +132,14 @@ export class TimelineEntryService {
         CreatedBy: data.createdBy,
       },
     });
+    
+    // Return the created entry with path for media item
+    const mediaItemPath = data.mediaItem?.Id ? `/Root/Content/MediaLibrary/${data.mediaItem.Id}` : undefined;
+    
     return {
       id: String(result.d.Id),
       ...data,
+      mediaItemPath,
     };
   }
 
@@ -135,6 +149,8 @@ export class TimelineEntryService {
       await repository.patch({
         idOrPath: entryId,
         content: {
+          Name: updates.name,
+          DisplayName: updates.displayName,
           Position: updates.position,
           ChronologicalDate: updates.chronologicalDate,
           ChronologicalDescription: updates.chronologicalDescription,

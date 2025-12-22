@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { TraktListItem } from '../services/traktService';
 import { fetchTraktList } from '../services/traktService';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { useSharedAuth } from '../context/useSharedAuth';
 import MediaLibraryService from '../services/mediaLibraryService';
 import type { MediaItem } from '../services/mediaLibraryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
@@ -31,7 +31,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   const [error, setError] = useState('');
   const [summary, setSummary] = useState<string|null>(null);
 
-  const { oidcUser } = useOidcAuthentication();
+  const { user, accessToken } = useSharedAuth();
 
   const parseTraktUrl = (url: string) => {
     try {
@@ -82,13 +82,13 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
       console.log('[TraktImportDialog] Starting import with:', { 
         username: parsed.username, 
         list: parsed.list, 
-        hasAccessToken: !!oidcUser?.access_token,
-        accessTokenLength: oidcUser?.access_token?.length,
-        oidcUserKeys: oidcUser ? Object.keys(oidcUser) : 'no oidcUser'
+        hasAccessToken: !!accessToken,
+        accessTokenLength: accessToken?.length,
+        hasUser: !!user
       });
       
       // Always use fetchTraktList for consistent mapping
-      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list, oidcUser?.access_token);
+      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list, accessToken);
       
       // If fetchOnly mode, just return the items for review
       if (fetchOnly) {

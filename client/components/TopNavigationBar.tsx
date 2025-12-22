@@ -1,12 +1,42 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { useSharedAuth } from '../context/useSharedAuth';
 import { LoginButton } from './LoginButton';
 import { siteConfig } from '../configuration';
 
+function isAdmin(user: any): boolean {
+  if (!user) return false;
+  
+  // Special case: Admin user is always admin
+  if (user.Name === 'Admin' || user.LoginName === 'Admin') {
+    return true;
+  }
+  
+  // Check SenseNet group membership first
+  if (user.Groups && Array.isArray(user.Groups)) {
+    // Check if user is member of 'administrators' group
+    const isInAdminGroup = user.Groups.some((group: any) => {
+      // Group can be an object with Name property or just a string
+      const groupName = typeof group === 'string' ? group : group?.Name || group?.DisplayName;
+      return groupName === 'administrators' || groupName === 'Administrators';
+    });
+    if (isInAdminGroup) return true;
+  }
+  
+  // Fallback to email-based admin check
+  const userEmail = user.email || user.Email || user.preferred_username || user.name;
+  return siteConfig.adminEmails.length === 0 || siteConfig.adminEmails.includes(userEmail);
+}
+
 export const TopNavigationBar: React.FC = () => {
-  const { oidcUser } = useOidcAuthentication();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Use unified auth context
+  const { user } = useSharedAuth();
+
+  // Determine if user is authenticated
+  const isAuthenticated = !!user;
+  const userProfile = user;
 
   return (
     <nav style={{
@@ -76,22 +106,24 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          <Link 
-            to="/media-library" 
-            style={{
-              color: '#fff',
-              textDecoration: 'none',
-              fontSize: '16px',
-              fontWeight: 500,
-              padding: '8px 12px',
-              borderRadius: 6,
-              transition: 'background 0.2s'
-            }}
-            onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-            onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-          >
-            Media Library
-          </Link>
+          {isAuthenticated && isAdmin(userProfile) && (
+            <Link 
+              to="/media-library" 
+              style={{
+                color: '#fff',
+                textDecoration: 'none',
+                fontSize: '16px',
+                fontWeight: 500,
+                padding: '8px 12px',
+                borderRadius: 6,
+                transition: 'background 0.2s'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+              onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              Media Library
+            </Link>
+          )}
 
           {/* Desktop User Profile/Login */}
           <div style={{
@@ -99,7 +131,7 @@ export const TopNavigationBar: React.FC = () => {
             alignItems: 'center',
             gap: 12
           }}>
-            {oidcUser ? (
+            {isAuthenticated ? (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -118,10 +150,10 @@ export const TopNavigationBar: React.FC = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {(oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email || 'U').charAt(0)?.toUpperCase()}
+                  {(userProfile?.DisplayName || userProfile?.Name || userProfile?.Email || 'U').charAt(0)?.toUpperCase()}
                 </div>
                 <span style={{ fontSize: '14px' }}>
-                  {oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email?.split('@')[0] || 'User'}
+                  {userProfile?.DisplayName || userProfile?.Name || userProfile?.Email?.split('@')[0] || 'User'}
                 </span>
                 <LoginButton />
               </div>
@@ -181,27 +213,29 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          <Link 
-            to="/media-library" 
-            style={{
-              color: '#fff',
-              textDecoration: 'none',
-              fontSize: '16px',
-              fontWeight: 500,
-              padding: '12px 20px',
-              display: 'block',
-              borderBottom: '1px solid rgba(255,255,255,0.1)'
-            }}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            Media Library
-          </Link>
+          {isAuthenticated && isAdmin(userProfile) && (
+            <Link 
+              to="/media-library" 
+              style={{
+                color: '#fff',
+                textDecoration: 'none',
+                fontSize: '16px',
+                fontWeight: 500,
+                padding: '12px 20px',
+                display: 'block',
+                borderBottom: '1px solid rgba(255,255,255,0.1)'
+              }}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Media Library
+            </Link>
+          )}
 
           {/* Mobile User Profile/Login */}
           <div style={{
             padding: '12px 20px'
           }}>
-            {oidcUser ? (
+            {isAuthenticated ? (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -220,10 +254,10 @@ export const TopNavigationBar: React.FC = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {(oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email || 'U').charAt(0)?.toUpperCase()}
+                  {(userProfile?.name || userProfile?.preferred_username || userProfile?.email || 'U').charAt(0)?.toUpperCase()}
                 </div>
                 <span style={{ fontSize: '14px', flex: 1 }}>
-                  {oidcUser.profile?.name || oidcUser.profile?.preferred_username || oidcUser.profile?.email?.split('@')[0] || 'User'}
+                  {userProfile?.name || userProfile?.preferred_username || userProfile?.email?.split('@')[0] || 'User'}
                 </span>
                 <LoginButton />
               </div>

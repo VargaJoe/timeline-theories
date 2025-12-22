@@ -1,23 +1,23 @@
 import { useEffect } from 'react';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { useSharedAuth } from '../context/useSharedAuth';
 import { setRepositoryAccessToken } from '../services/sensenet';
 
 export const OidcTokenInjector: React.FC = () => {
-  const { oidcUser } = useOidcAuthentication();
+  // Use unified auth context
+  const { user, accessToken } = useSharedAuth();
 
   useEffect(() => {
-    console.log('[OidcTokenInjector] OIDC user state changed:', {
-      hasUser: !!oidcUser,
-      hasAccessToken: oidcUser?.access_token ? 'yes' : 'no',
-      tokenLength: oidcUser?.access_token?.length || 0
+    console.log('[OidcTokenInjector] Auth state changed:', {
+      hasUser: !!user,
+      hasAccessToken: !!accessToken
     });
-    
-    if (oidcUser && oidcUser.access_token) {
-      setRepositoryAccessToken(oidcUser.access_token);
+
+    if (accessToken) {
+      setRepositoryAccessToken(accessToken);
     } else {
       setRepositoryAccessToken('');
     }
-  }, [oidcUser]);
+  }, [user, accessToken]);
 
   return null;
 };

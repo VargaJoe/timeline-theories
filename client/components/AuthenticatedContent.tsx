@@ -1,5 +1,5 @@
 import React from 'react';
-import { useOidcAuthentication } from '@sensenet/authentication-oidc-react';
+import { useSharedAuth } from '../context/useSharedAuth';
 
 interface AuthenticatedContentProps {
   children: React.ReactNode;
@@ -10,13 +10,13 @@ export const AuthenticatedContent: React.FC<AuthenticatedContentProps> = ({
   children, 
   fallback 
 }) => {
-  const { oidcUser, isLoading } = useOidcAuthentication();
+  const { user, isLoading } = useSharedAuth();
 
   if (isLoading) {
     return <div>Loading...</div>;
   }
 
-  if (!oidcUser) {
+  if (!user) {
     return (
       <div style={{ textAlign: 'center', padding: '2rem' }}>
         {fallback || (

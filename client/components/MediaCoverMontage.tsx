@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { LazyImage } from './LazyImage';
 
 interface MediaCoverMontageProps {
@@ -7,6 +7,8 @@ interface MediaCoverMontageProps {
 }
 
 export const MediaCoverMontage: React.FC<MediaCoverMontageProps> = ({ coverUrls, timelineName }) => {
+  const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
+
   // If no covers available, show the clock icon fallback
   if (!coverUrls || coverUrls.length === 0) {
     return (
@@ -18,6 +20,24 @@ export const MediaCoverMontage: React.FC<MediaCoverMontageProps> = ({ coverUrls,
 
   // For 1 cover, show it centered
   if (coverUrls.length === 1) {
+    const hasFailed = failedImages.has(0);
+    if (hasFailed) {
+      return (
+        <div style={{
+          width: 120,
+          height: 160,
+          borderRadius: 8,
+          border: '2px solid rgba(255,255,255,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <svg width="48" height="48" fill="none" stroke="rgba(255,255,255,0.7)" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+      );
+    }
     return (
       <div style={{
         width: 120,
@@ -34,16 +54,8 @@ export const MediaCoverMontage: React.FC<MediaCoverMontageProps> = ({ coverUrls,
             height: '100%',
             objectFit: 'cover'
           }}
-          onError={(e) => {
-            // Fallback to clock icon if image fails to load
-            e.currentTarget.style.display = 'none';
-            const parent = e.currentTarget.parentElement;
-            if (parent) {
-              parent.innerHTML = '<svg width="48" height="48" fill="none" stroke="rgba(255,255,255,0.7)" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
-              parent.style.display = 'flex';
-              parent.style.alignItems = 'center';
-              parent.style.justifyContent = 'center';
-            }
+          onError={() => {
+            setFailedImages(prev => new Set(prev).add(0));
           }}
         />
       </div>
@@ -120,11 +132,11 @@ export const MediaCoverMontage: React.FC<MediaCoverMontageProps> = ({ coverUrls,
             style={{
               width: '100%',
               height: '100%',
-              objectFit: 'cover'
+              objectFit: 'cover',
+              display: failedImages.has(index) ? 'none' : 'block'
             }}
-            onError={(e) => {
-              // Hide broken images gracefully
-              e.currentTarget.style.display = 'none';
+            onError={() => {
+              setFailedImages(prev => new Set(prev).add(index));
             }}
           />
         </div>
