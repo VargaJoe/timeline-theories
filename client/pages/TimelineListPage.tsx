@@ -38,13 +38,16 @@ export const TimelineListPage: React.FC = () => {
   };
 
   const handleCharacterFilterChange = (character: string) => {
-    setCharacterFilter(character);
-    setLoading(true); // Show loading while fetching new data
-    // Reset pagination state when changing filters
-    setLoadedTimelines([]);
-    setHasMore(false);
-    setLoadingMore(false);
-    
+    // Only set loading if the filter is actually changing
+    if (character !== characterFilter) {
+      setCharacterFilter(character);
+      setLoading(true); // Show loading while fetching new data
+      // Reset pagination state when changing filters
+      setLoadedTimelines([]);
+      setHasMore(false);
+      setLoadingMore(false);
+    }
+
     // Update URL parameter
     const newParams = new URLSearchParams(searchParams);
     if (character === '') {

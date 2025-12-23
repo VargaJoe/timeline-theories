@@ -249,33 +249,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ## Completed 
 
-### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
-- [x] Implement localStorage caching with configurable TTL and error handling to avoid refetching cover URLs
-- [x] Add configurable concurrency-limited preloading in LazyImage.tsx using AbortController to cancel on navigation
-- [x] Integrate virtualized rendering with react-window in MediaLibraryPage.tsx to render only visible items
-- [x] Add pagination to OData queries with top and skip for chunked loading of large lists
-- [x] Add pagination support to TimelineEntryService.listTimelineEntries() with top and skip parameters
-- [x] Limit initial timeline entries load to 50 items for performance
-- [x] Configure image concurrency limit (VITE_IMAGE_CONCURRENCY_LIMIT=2) and cache TTL (VITE_LOCAL_STORAGE_TTL=3600000) in .env
-- [x] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
-- [x] Lazy loading images load correctly without errors or broken displays
-- [x] Performance metrics (e.g., query response time) meet acceptable thresholds
-- [x] No regressions in existing media browsing functionality
-- [x] Implement query optimization (e.g., debouncing, batching) in media services
-- [x] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
-- [x] Add error handling and fallbacks for failed image loads
-- [x] character-based filtering (A-Z, #) with server-side OData queries and load more functionality
-- [x] Update MediaLibraryService.getMediaItems() with characterFilter, searchQuery, skip, top parameters
-- [x] incremental loading with configurable page size and proper state management
-- [x] search trigger only on explicit user action instead of automatic filtering
-- [x] browse media items efficiently with ABC pagination and incremental loading
-- [x] **FIXED: CORS errors in LazyImage** - Switched from canvas-based loading to authenticated fetch approach using Bearer token
-- [x] **FIXED: Browser cache interference** - Always use cache-busting (?cb=1) to ensure consistent behavior regardless of browser cache state
-- [x] **FIXED: Cache invalidation on navigation** - Made loadImage useCallback stable by using useRef for accessToken instead of including it in dependencies
-- [x] **ADDED: Access token validation** - Added check for valid access token before making authenticated requests
-- [x] **MAINTAINED: Caching functionality** - Preserved localStorage base64 caching with TTL and concurrency control
-- [x] **DISABLED: localStorage image caching** - Due to persistent quota issues, disabled localStorage caching for images; browser HTTP caching provides sufficient performance
-
 ### Story 01 - Create New Timeline
 - [x] Design timeline database schema
 - [x] Create timeline data model
@@ -599,5 +572,34 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **CONFIGURED: Feature toggling** - Configuration-based enable/disable for easy management via environment variables
 - [x] **ADDED: Server-side sorting** - getTimelines() function now accepts sortOrder parameter for proper server-side ordering (CreationDate desc for newest, DisplayName for alphabetical)
 - [x] **REMOVED: Client-side sorting** - Eliminated redundant client-side sorting since server handles ordering correctly across pagination
+
+### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
+- [x] Implement localStorage caching with configurable TTL and error handling to avoid refetching cover URLs
+- [x] Add configurable concurrency-limited preloading in LazyImage.tsx using AbortController to cancel on navigation
+- [x] Integrate virtualized rendering with react-window in MediaLibraryPage.tsx to render only visible items
+- [x] Add pagination to OData queries with top and skip for chunked loading of large lists
+- [x] Add pagination support to TimelineEntryService.listTimelineEntries() with top and skip parameters
+- [x] Limit initial timeline entries load to 50 items for performance
+- [x] Configure image concurrency limit (VITE_IMAGE_CONCURRENCY_LIMIT=2) and cache TTL (VITE_LOCAL_STORAGE_TTL=3600000) in .env
+- [x] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
+- [x] Lazy loading images load correctly without errors or broken displays
+- [x] Performance metrics (e.g., query response time) meet acceptable thresholds
+- [x] No regressions in existing media browsing functionality
+- [x] Implement query optimization (e.g., debouncing, batching) in media services
+- [x] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
+- [x] Add error handling and fallbacks for failed image loads
+- [x] character-based filtering (A-Z, #) with server-side OData queries and load more functionality
+- [x] Update MediaLibraryService.getMediaItems() with characterFilter, searchQuery, skip, top parameters
+- [x] incremental loading with configurable page size and proper state management
+- [x] search trigger only on explicit user action instead of automatic filtering
+- [x] browse media items efficiently with ABC pagination and incremental loading
+- [x] Switched from canvas-based loading to authenticated fetch approach using Bearer token
+- [x] Always use cache-busting (?cb=1) to ensure consistent behavior regardless of browser cache state
+- [x] Made loadImage useCallback stable by using useRef for accessToken instead of including it in dependencies
+- [x] Check for valid access token before making authenticated requests
+- [x] Preserve localStorage base64 caching with TTL and concurrency control
+- [x] Due to persistent quota issues, disabled localStorage caching for images; browser HTTP caching provides sufficient performance
+- [x] Prevent loading state when clicking same letter by only setting loading=true when character filter actually changes
+
 
 ---
