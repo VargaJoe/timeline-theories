@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSharedAuth } from '../context/useSharedAuth';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
@@ -21,7 +21,6 @@ const MEDIA_TYPES = [
   { value: 'documentary', label: 'Documentary' },
   { value: 'other', label: 'Other' },
 ];
-const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'Other'];
 
 function isAdmin(user: any): boolean {
   if (!user) return false;
@@ -49,29 +48,26 @@ function isAdmin(user: any): boolean {
 
 export default function MediaLibraryPage() {
   // Use unified auth context
-  const { user, isLoading } = useSharedAuth();
+  const { user } = useSharedAuth();
   const navigate = useNavigate();
-  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-
-  // Check authentication and admin access - redirect if not admin
-  useEffect(() => {
-    // Wait for auth to finish loading before checking admin status
-    if (isLoading) return;
-    
-    if (!isAdmin(user)) {
-      navigate('/');
-      return;
-    }
-  }, [user, isLoading, navigate]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedType, setSelectedType] = useState('');
-  const [selectedGenre, setSelectedGenre] = useState('');
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
-  const [showBookImportDialog, setShowBookImportDialog] = useState(false);
+
+  // ABC pagination state
+  const [characterFilter, setCharacterFilter] = useState<string>('a');
+  const [loadedMediaItems, setLoadedMediaItems] = useState<MediaItem[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
+
+  // Edit dialog state
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
+  const [showBookImportDialog, setShowBookImportDialog] = useState(false);
 
   // Load background image (same as timeline/media item pages)
   useEffect(() => {
@@ -94,68 +90,91 @@ export default function MediaLibraryPage() {
     loadBackground();
   }, []);
 
-  useEffect(() => {
-    loadMediaItems();
-  }, []);
-
-  const loadMediaItems = async () => {
+  const loadMediaItems = useCallback(async (reset: boolean = false, customSkip?: number) => {
     try {
-      setLoading(true);
+      if (reset) {
+        setLoading(true);
+      }
       setError('');
-      const items = await MediaLibraryService.getMediaItems();
-      setMediaItems(items);
+      
+      const skip = customSkip !== undefined ? customSkip : (reset ? 0 : loadedMediaItems.length);
+      const items = await MediaLibraryService.getMediaItems(
+        characterFilter, 
+        appliedSearchQuery, 
+        skip, 
+        siteConfig.timelineList.allViewPageSize
+      );
+      
+      if (reset) {
+        setLoadedMediaItems(items);
+      } else {
+        setLoadedMediaItems(prev => [...prev, ...items]);
+      }
+      setHasMore(items.length === siteConfig.timelineList.allViewPageSize);
     } catch (err) {
       console.error('Error loading media items:', err);
       setError('Failed to load media items. Please check your connection and try again.');
     } finally {
-      setLoading(false);
+      if (reset) {
+        setLoading(false);
+      }
+    }
+  }, [characterFilter, appliedSearchQuery, siteConfig.timelineList.allViewPageSize]);
+
+  useEffect(() => {
+    loadMediaItems(true);
+  }, [loadMediaItems]);
+
+  const loadMoreMediaItems = async () => {
+    if (loadingMore || !hasMore) return;
+    
+    setLoadingMore(true);
+    try {
+      await loadMediaItems(false, loadedMediaItems.length);
+    } catch (error) {
+      console.error('Failed to load more media items:', error);
+      setError('Failed to load more media items');
+    } finally {
+      setLoadingMore(false);
     }
   };
 
-  // Filtered media items based on search and filters
-  // Normalize MediaType to string for filtering and display
-  function normalizeMediaType(val: unknown): string {
-    if (Array.isArray(val)) return val[0] || '';
-    if (typeof val === 'string') return val;
-    return '';
-  }
-
-  // Normalize Genre to string for filtering
-  function normalizeGenre(val: unknown): string {
-    if (Array.isArray(val)) return val[0] || '';
-    if (typeof val === 'string') return val;
-    return '';
-  }
-
-  const getFilteredMediaItems = () => {
-    return mediaItems.filter((item) => {
-      // Search by title or description (case-insensitive)
-      const query = searchQuery.trim().toLowerCase();
-      const matchesQuery =
-        !query ||
-        (item.DisplayName && item.DisplayName.toLowerCase().includes(query)) ||
-        (item.Title && item.Title.toLowerCase().includes(query)) ||
-        (item.Description && item.Description.toLowerCase().includes(query));
-      // Filter by type (normalize both sides)
-      const itemType = normalizeMediaType(item.MediaType).toLowerCase();
-      const filterType = (selectedType || '').toLowerCase();
-      const matchesType = !filterType || itemType === filterType;
-      // Filter by genre (case-insensitive, normalize both sides)
-      const itemGenre = normalizeGenre(item.Genre).toLowerCase();
-      const filterGenre = (selectedGenre || '').toLowerCase();
-      const matchesGenre = !filterGenre || itemGenre === filterGenre;
-      return matchesQuery && matchesType && matchesGenre;
-    });
+  const handleCharacterFilterChange = (character: string) => {
+    setCharacterFilter(character);
+    setAppliedSearchQuery(''); // Clear search when changing character filter
+    setSearchQuery('');
+    setLoadedMediaItems([]);
+    setHasMore(false);
+    setLoadingMore(false);
+    loadMediaItems(true);
   };
 
   const handleSearch = () => {
-    // No-op: filtering is now client-side and reactive
+    setAppliedSearchQuery(searchQuery);
+    setCharacterFilter(''); // Clear character filter when searching
+    setLoadedMediaItems([]);
+    setHasMore(false);
+    setLoadingMore(false);
+    loadMediaItems(true);
   };
 
-  const clearFilters = () => {
-    setSearchQuery('');
-    setSelectedType('');
-    setSelectedGenre('');
+  const handleSearchKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
+  const handleEditItem = (item: MediaItem, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent navigation to item detail page
+    setEditingItem(item);
+    setShowEditDialog(true);
+  };
+
+  const handleEditSave = (updatedItem: MediaItem) => {
+    // Update the item in the local state
+    setLoadedMediaItems(prev => prev.map(item => 
+      item.Id === updatedItem.Id ? updatedItem : item
+    ));
   };
 
   const formatDate = (dateString: string) => {
@@ -175,21 +194,22 @@ export default function MediaLibraryPage() {
     }
   };
 
-  const handleEditItem = (item: MediaItem, e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent navigation to item detail page
-    setEditingItem(item);
-    setShowEditDialog(true);
-  };
+  // Normalize MediaType to string for filtering and display
+  function normalizeMediaType(val: unknown): string {
+    if (Array.isArray(val)) return val[0] || '';
+    if (typeof val === 'string') return val;
+    return '';
+  }
 
-  const handleEditSave = (updatedItem: MediaItem) => {
-    // Update the item in the local state
-    setMediaItems(prev => prev.map(item => 
-      item.Id === updatedItem.Id ? updatedItem : item
-    ));
-  };
+  // Normalize Genre to string for filtering
+  function normalizeGenre(val: unknown): string {
+    if (Array.isArray(val)) return val[0] || '';
+    if (typeof val === 'string') return val;
+    return '';
+  }
 
 
-  if (loading && mediaItems.length === 0) {
+  if (loading && loadedMediaItems.length === 0) {
     return (
       <>
         <PageHeader
@@ -258,7 +278,7 @@ export default function MediaLibraryPage() {
       </PageHeader>
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
 
-      {/* Search and Filters */}
+      {/* Search and ABC Navigation */}
       <div style={{
         background: '#fff',
         border: '1px solid #e9ecef',
@@ -267,14 +287,42 @@ export default function MediaLibraryPage() {
         marginBottom: 24,
         boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
       }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-          <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
+          {/* ABC Navigation */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 500, color: '#495057', marginRight: 8 }}>Browse:</span>
+            {['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(char => (
+              <button
+                key={char}
+                onClick={() => handleCharacterFilterChange(char.toLowerCase())}
+                style={{
+                  background: characterFilter === char.toLowerCase() ? '#2a4d8f' : '#f8f9fa',
+                  color: characterFilter === char.toLowerCase() ? '#fff' : '#495057',
+                  border: characterFilter === char.toLowerCase() ? '1px solid #2a4d8f' : '1px solid #e9ecef',
+                  borderRadius: 6,
+                  padding: '6px 10px',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  minWidth: 32,
+                  textAlign: 'center'
+                }}
+              >
+                {char}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ flex: 1 }}>
             <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: '#495057', marginBottom: 8 }}>Search</label>
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              onKeyPress={handleSearchKeyPress}
               style={{
                 width: '100%',
                 padding: '8px 12px',
@@ -286,54 +334,14 @@ export default function MediaLibraryPage() {
               placeholder="Search titles, descriptions..."
             />
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: '#495057', marginBottom: 8 }}>Media Type</label>
-            <select
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: '1px solid #ced4da',
-                borderRadius: 6,
-                fontSize: 14,
-                outline: 'none'
-              }}
-            >
-              <option value="">All Types</option>
-              {MEDIA_TYPES.map(type => (
-                <option key={type.value} value={type.value}>{type.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 14, fontWeight: 500, color: '#495057', marginBottom: 8 }}>Genre</label>
-            <select
-              value={selectedGenre}
-              onChange={(e) => setSelectedGenre(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: '1px solid #ced4da',
-                borderRadius: 6,
-                fontSize: 14,
-                outline: 'none'
-              }}
-            >
-              <option value="">All Genres</option>
-              {GENRES.map(genre => (
-                <option key={genre} value={genre}>{genre}</option>
-              ))}
-            </select>
-          </div>
           <div style={{ display: 'flex', alignItems: 'end', gap: 8 }}>
             <button
-              onClick={clearFilters}
+              onClick={handleSearch}
               disabled={loading}
               style={{
-                background: loading ? '#f1f5f9' : '#f8f9fa',
-                color: loading ? '#94a3b8' : '#495057',
-                border: '1px solid #e9ecef',
+                background: loading ? '#f1f5f9' : '#2a4d8f',
+                color: loading ? '#94a3b8' : '#fff',
+                border: 'none',
                 borderRadius: 6,
                 padding: '8px 16px',
                 cursor: loading ? 'not-allowed' : 'pointer',
@@ -341,8 +349,33 @@ export default function MediaLibraryPage() {
                 fontWeight: 500
               }}
             >
-              Clear
+              Search
             </button>
+            {(appliedSearchQuery || characterFilter) && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setAppliedSearchQuery('');
+                  setCharacterFilter('a');
+                  setLoadedMediaItems([]);
+                  setHasMore(false);
+                  setLoadingMore(false);
+                }}
+                disabled={loading}
+                style={{
+                  background: loading ? '#f1f5f9' : '#f8f9fa',
+                  color: loading ? '#94a3b8' : '#495057',
+                  border: '1px solid #e9ecef',
+                  borderRadius: 6,
+                  padding: '8px 16px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  fontSize: 14,
+                  fontWeight: 500
+                }}
+              >
+                Clear
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -362,7 +395,7 @@ export default function MediaLibraryPage() {
       )}
 
       {/* Media Items Grid */}
-      {getFilteredMediaItems().length === 0 && !loading ? (
+      {loadedMediaItems.length === 0 && !loading ? (
         <div style={{
           background: '#f8f9fa',
           border: '1px solid #e9ecef',
@@ -372,7 +405,7 @@ export default function MediaLibraryPage() {
         }}>
           <h3 style={{ marginBottom: 16, color: '#495057', fontSize: 18, fontWeight: 600 }}>No media items found</h3>
           <p style={{ color: '#6c757d', marginBottom: 24 }}>
-            {searchQuery || selectedType || selectedGenre 
+            {appliedSearchQuery || characterFilter !== 'a'
               ? 'Try adjusting your search criteria.' 
               : 'Get started by adding your first media item.'}
           </p>
@@ -394,53 +427,54 @@ export default function MediaLibraryPage() {
           )}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
-          {getFilteredMediaItems().map((item) => {
-            const externalLinks = getExternalLinks(item.ExternalLinks);
-            return (
-              // MagicUI card effect placeholder (replace with real import/use)
-              <div key={item.Id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }} onClick={() => navigate(`/media-library/${item.Name}`)}>
-                <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
-                  {/* Cover image top, portrait aspect ratio */}
-                  {MediaLibraryService.getCoverImageUrl(item) && (
-                    <LazyImage
-                      src={MediaLibraryService.getCoverImageUrl(item)!}
-                      alt={item.DisplayName + ' cover'}
-                      style={{
-                        width: 120,
-                        height: 180,
-                        objectFit: 'cover',
-                        borderTopLeftRadius: 16,
-                        borderTopRightRadius: 16,
-                        borderBottomLeftRadius: 0,
-                        borderBottomRightRadius: 0,
-                        boxShadow: '0 2px 8px rgba(42,77,143,0.10)',
-                        background: '#f8f9fa',
-                        marginBottom: 0
-                      }}
-                      onError={e => (e.currentTarget.style.display = 'none')}
-                    />
-                  )}
-                  <div style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-                    <h3 style={{
-                      marginBottom: 6,
-                      color: '#2a4d8f',
-                      fontSize: 16,
-                      fontWeight: 700,
-                      textAlign: 'center',
-                      marginTop: 0,
-                      wordBreak: 'break-word',
-                      lineHeight: 1.2
-                    }}>
-                      {item.Title || item.DisplayName}
-                    </h3>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                      <span style={{
-                        background: '#e3f2fd',
-                        color: '#1976d2',
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: 12,
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
+            {loadedMediaItems.map((item) => {
+              const externalLinks = getExternalLinks(item.ExternalLinks);
+              return (
+                // MagicUI card effect placeholder (replace with real import/use)
+                <div key={item.Id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }} onClick={() => navigate(`/media-library/${item.Name}`)}>
+                  <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
+                    {/* Cover image top, portrait aspect ratio */}
+                    {MediaLibraryService.getCoverImageUrl(item) && (
+                      <LazyImage
+                        src={MediaLibraryService.getCoverImageUrl(item)!}
+                        alt={item.DisplayName + ' cover'}
+                        style={{
+                          width: 120,
+                          height: 180,
+                          objectFit: 'cover',
+                          borderTopLeftRadius: 16,
+                          borderTopRightRadius: 16,
+                          borderBottomLeftRadius: 0,
+                          borderBottomRightRadius: 0,
+                          boxShadow: '0 2px 8px rgba(42,77,143,0.10)',
+                          background: '#f8f9fa',
+                          marginBottom: 0
+                        }}
+                        onError={e => (e.currentTarget.style.display = 'none')}
+                      />
+                    )}
+                    <div style={{ padding: '16px 12px 12px 12px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+                      <h3 style={{
+                        marginBottom: 6,
+                        color: '#2a4d8f',
+                        fontSize: 16,
+                        fontWeight: 700,
+                        textAlign: 'center',
+                        marginTop: 0,
+                        wordBreak: 'break-word',
+                        lineHeight: 1.2
+                      }}>
+                        {item.Title || item.DisplayName}
+                      </h3>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                        <span style={{
+                          background: '#e3f2fd',
+                          color: '#1976d2',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: 12,
                         fontWeight: 500
                       }}>
                         {(() => {
@@ -531,7 +565,40 @@ export default function MediaLibraryPage() {
               </div>
             );
           })}
-        </div>
+          </div>
+
+          {/* Load More Button */}
+          {hasMore && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>
+              <button
+                onClick={loadMoreMediaItems}
+                disabled={loadingMore}
+                style={{
+                  background: loadingMore ? '#f1f5f9' : '#2a4d8f',
+                  color: loadingMore ? '#94a3b8' : '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '12px 24px',
+                  cursor: loadingMore ? 'not-allowed' : 'pointer',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                {loadingMore ? (
+                  <>
+                    <div style={{ width: 16, height: 16, border: '2px solid #94a3b8', borderTop: '2px solid transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                    Loading...
+                  </>
+                ) : (
+                  'Load More'
+                )}
+              </button>
+            </div>
+          )}
+        </>
       )}
       </div>
 
@@ -541,7 +608,7 @@ export default function MediaLibraryPage() {
         onImportComplete={() => {
           setShowBookImportDialog(false);
           // Refresh the media library
-          loadMediaItems();
+          loadMediaItems(true);
         }}
       />
       <MediaItemEditDialog
