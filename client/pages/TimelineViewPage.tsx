@@ -184,7 +184,7 @@ export const TimelineViewPage: React.FC = () => {
         const result = await repository.load({
           idOrPath: parentPath,
           oDataOptions: {
-            select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic', 'TimelineType'],
+            select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsVisible', 'TimelineType'],
           },
         });
         // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
@@ -207,12 +207,12 @@ export const TimelineViewPage: React.FC = () => {
           description: result.d.Description || '',
           sort_order: sortOrder,
           created_at: result.d.CreationDate,
-          isPublic: typeof result.d.IsPublic === 'boolean' ? result.d.IsPublic : false,
+          isVisible: typeof result.d.IsVisible === 'boolean' ? result.d.IsVisible : false,
           timelineType: result.d.TimelineType || 'chronological',
         };
         
         // Check if this is a private timeline and user is not logged in (admin)
-        if (timelineData.isPublic === false && !isUserAuthenticated) {
+        if (timelineData.isVisible === false && !isUserAuthenticated) {
           setError('This timeline is private and only accessible to administrators.');
           return;
         }

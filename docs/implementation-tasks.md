@@ -4,18 +4,9 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ## In Progress
 
-
 ---
 
-## Planned
-
-### Story 30 - Book Reading Progress and Personal Library Integration
-- [ ] Implement reading status tracking ("Want to Read", "Currently Reading", "Read", "Did Not Finish")
-- [ ] Add personal rating system separate from general media ratings
-- [ ] Create reading notes functionality separate from general timeline entry notes
-- [ ] Add reading date tracking (when user read each book vs publication date)
-- [ ] Implement reading progress statistics and analytics
-- [ ] Create personal reading timeline views alongside publication order
+## Planned 
 
 ### Story 15 - Create Media Item by Trakt
 - [ ] Add a "Search Trakt" button or field to the Media Item Create Page.
@@ -195,16 +186,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Add series completion tracking and progress indicators
 - [ ] Implement series-based sorting and filtering options
 
-### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
-- [ ] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
-- [ ] Lazy loading images load correctly without errors or broken displays
-- [ ] Performance metrics (e.g., query response time) meet acceptable thresholds
-- [ ] No regressions in existing media browsing functionality
-- [ ] Implement query optimization (e.g., debouncing, batching) in media services
-- [ ] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
-- [ ] Add error handling and fallbacks for failed image loads
-- [ ] Test with various media types and network conditions
-
 ### Story 06 - Organize Timeline Entries
 - [ ] User can drag and drop timeline entries to reorder them
 - [ ] User can manually set position numbers for entries
@@ -255,6 +236,14 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Update media item creation forms with book-specific fields
 - [ ] Implement bulk import services for book data sources
 - [ ] Add timeline type selection and sorting logic
+
+### Story 30 - Book Reading Progress and Personal Library Integration
+- [ ] Implement reading status tracking ("Want to Read", "Currently Reading", "Read", "Did Not Finish")
+- [ ] Add personal rating system separate from general media ratings
+- [ ] Create reading notes functionality separate from general timeline entry notes
+- [ ] Add reading date tracking (when user read each book vs publication date)
+- [ ] Implement reading progress statistics and analytics
+- [ ] Create personal reading timeline views alongside publication order
 
 ---
 
@@ -467,7 +456,7 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **ADDED: Admin validation function** - Created isAdmin() helper function for consistent admin checking across components
 - [x] **SECURED: Direct URL access protection** - Users cannot access media library by URL without admin privileges
 - [x] **ENHANCED: SenseNet group membership check** - Added administrators group membership validation for admin access
-- [x] **ADDED: IsPublic field handling** - Enhanced timeline loading to include privacy status
+- [x] **ADDED: IsVisible field handling** - Enhanced timeline loading to include privacy status
 - [x] **MAINTAINED: Backward compatibility** - All existing public timeline functionality preserved
 
 ### Technical Task - DisplayName/Title/Year Handling
@@ -545,25 +534,72 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
 - [x] **READY: Testing phase** - JWT authentication flow and user state management ready for testing in both modes
 
-### Story 28 - Export/Import Timeline Data (Complete)
-- [x] **IMPLEMENTED: Professional export service** - Created timelineExportService.ts using repository.fetch() pattern for authenticated binary downloads
-- [x] **ENHANCED: Cover image downloads** - Proper authenticated fetch with SenseNet's __mediaresource pattern for binary fields
-- [x] **ADDED: TSV format with 19 columns** - Complete field mapping including timeline_name, entry_name, media fields, dates, notes, labels, etc.
-- [x] **IMPLEMENTED: Special character escaping** - Proper handling of tabs, newlines, and special characters in TSV fields
-- [x] **CREATED: ZIP packaging** - timeline_data.tsv + covers/ folder with numbered images (cover_0.jpg, cover_1.jpg, etc.)
-- [x] **ENHANCED: UI with loading states** - Export button shows spinner during operation, disables during export, displays success/failure messages
-- [x] **ADDED: Graceful image handling** - Continues export even if images fail to download (empty binary fields), tracks skipped images count
-- [x] **INTEGRATED: Both auth providers** - Uses repository instance with token from useSharedAuth() for OIDC and JWT compatibility
-- [x] **IMPLEMENTED: Import functionality** - Created timelineImportService.ts for ZIP/TSV parsing with full round-trip support
-- [x] **ADDED: Create/Update logic** - Import can both create new entries and update existing ones based on entry name matching
-- [x] **ENHANCED: MediaItem reference support** - Proper MediaItem reference creation from media_id in TSV during import
-- [x] **IMPLEMENTED: Duplicate detection** - Detects existing entries by name and updates them instead of creating duplicates
-- [x] **ADDED: Choice field validation** - Excludes empty values for EntryLabel/Importance fields during import
-- [x] **ENHANCED: Cover image upload** - Uploads cover images to MediaItem during import with proper authentication
-- [x] **FIXED: Field name consistency** - Updated export/import to use SenseNet field names (Title, Description, Notes, etc.) instead of generic names
-- [x] **FIXED: Description vs Notes mapping** - Export now always exports MediaItem.Description in Description column, TimelineEntry.Notes in Notes column
-- [x] **TESTED: TypeScript compilation** - Zero errors, all types properly resolved
-- [x] **READY: For testing** - Full export/import round-trip functionality complete and ready for end-to-end testing
-- [x] **DOCUMENTATION: Complete user guide** - Created comprehensive export/import guide in English (docs/export-import-guide.md) with usage examples, error handling, and admin workflows
+### Technical Task - Timeline Loading Optimization (Public/Private Access Control)
+- [x] **IDENTIFIED: Performance issue** - Timeline list page was downloading all timelines (public + private) from API regardless of user authentication status
+- [x] **ANALYZED: Network traffic** - User reported seeing all timeline elements downloaded in browser network tab even when not visible
+- [x] **IMPLEMENTED: Server-side filtering** - Modified getTimelines() function to accept includePrivate parameter and filter at API level
+- [x] **ENHANCED: Query logic** - Added `+IsVisible:true` condition to SenseNet OData query when includePrivate=false
+- [x] **UPDATED: TimelineListPage** - Modified to pass user authentication status to getTimelines(!!user)
+- [x] **MAINTAINED: Backward compatibility** - Default behavior (includePrivate=false) ensures public-only access for unauthenticated users
+- [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
+- [x] **RESULT: Optimized network usage** - Unauthenticated users now only download public timelines, reducing unnecessary data transfer and improving performance
+
+### Story 32 - ABC-based Timeline Pagination
+- [x] **IMPLEMENTED: Character-based filtering** - Modified getTimelines() function to accept optional characterFilter parameter
+- [x] **ENHANCED: SenseNet OData queries** - Added DisplayName filtering with wildcard patterns for alphabetic characters and regex for non-alphabetic (#)
+- [x] **UPDATED: TimelineListPage component** - Added characterFilter state with default 'a' value and ABC navigation UI
+- [x] **CREATED: ABC navigation controls** - Added character selection buttons (A-Z + # + All) at top and bottom of timeline list page
+- [x] **IMPLEMENTED: Smart sorting logic** - Alphabetical sorting for character-filtered views, alphabetical + newest options for "All" view
+- [x] **ENHANCED: UI feedback** - Active character button is highlighted with different styling and visual indicators
+- [x] **MAINTAINED: Responsive design** - ABC navigation wraps properly on smaller screens and maintains accessibility
+- [x] **ADDED: Configurable "All" view** - Environment variable VITE_ENABLE_ALL_TIMELINE_VIEW controls "All" button visibility (default: true)
+- [x] **IMPLEMENTED: Pagination for "All" view** - Load more functionality with configurable page size (VITE_ALL_TIMELINE_PAGE_SIZE, default: 20)
+- [x] **ENHANCED: Performance optimization** - Only "All" view uses pagination to avoid loading all timelines at once
+- [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
+- [x] **RESULT: Improved user experience** - Users can browse timelines by starting character or view all with flexible sorting and pagination
+- [x] **ENHANCED: "All" navigation option** - Added "All" button that shows all timelines without character filtering
+- [x] **ENHANCED: Smart sorting logic** - Character-filtered views (A-Z, #) only allow alphabetical sorting, "All" view allows both alphabetical and newest-first sorting
+- [x] **ENHANCED: Query handling** - Updated getTimelines() to properly handle empty characterFilter for "All" option
+- [x] **ENHANCED: UI improvements** - Added "All" button to both top and bottom navigation with consistent styling
+- [x] **TECHNICAL: Empty string bypass** - Empty string characterFilter bypasses server-side character filtering
+- [x] **TECHNICAL: Adaptive sorting** - Client-side sorting logic adapts based on active filter (character vs all)
+- [x] **TECHNICAL: Conditional UI** - "Newest First" option only appears in dropdown when "All" is selected
+- [x] **TECHNICAL: Default behavior** - Maintains default 'a' character filter on page load as originally requested
+- [x] **RESULT: Complete functionality** - ABC pagination fully functional with character filtering, "All" option provides access to all timelines with flexible sorting
+- [x] **ENHANCED: Configurable pagination system** - Added environment variable configuration for "All" view with pagination support
+- [x] **IMPLEMENTED: Load More functionality** - Added loading spinner and proper state management for incremental loading
+- [x] **OPTIMIZED: Performance** - Character-filtered views load all at once, "All" view loads incrementally with skip/top parameters
+- [x] **CONFIGURED: Feature toggling** - Configuration-based enable/disable for easy management via environment variables
+- [x] **ADDED: Server-side sorting** - getTimelines() function now accepts sortOrder parameter for proper server-side ordering (CreationDate desc for newest, DisplayName for alphabetical)
+- [x] **REMOVED: Client-side sorting** - Eliminated redundant client-side sorting since server handles ordering correctly across pagination
+
+### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
+- [x] Implement localStorage caching with configurable TTL and error handling to avoid refetching cover URLs
+- [x] Add configurable concurrency-limited preloading in LazyImage.tsx using AbortController to cancel on navigation
+- [x] Integrate virtualized rendering with react-window in MediaLibraryPage.tsx to render only visible items
+- [x] Add pagination to OData queries with top and skip for chunked loading of large lists
+- [x] Add pagination support to TimelineEntryService.listTimelineEntries() with top and skip parameters
+- [x] Limit initial timeline entries load to 50 items for performance
+- [x] Configure image concurrency limit (VITE_IMAGE_CONCURRENCY_LIMIT=2) and cache TTL (VITE_LOCAL_STORAGE_TTL=3600000) in .env
+- [x] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
+- [x] Lazy loading images load correctly without errors or broken displays
+- [x] Performance metrics (e.g., query response time) meet acceptable thresholds
+- [x] No regressions in existing media browsing functionality
+- [x] Implement query optimization (e.g., debouncing, batching) in media services
+- [x] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
+- [x] Add error handling and fallbacks for failed image loads
+- [x] character-based filtering (A-Z, #) with server-side OData queries and load more functionality
+- [x] Update MediaLibraryService.getMediaItems() with characterFilter, searchQuery, skip, top parameters
+- [x] incremental loading with configurable page size and proper state management
+- [x] search trigger only on explicit user action instead of automatic filtering
+- [x] browse media items efficiently with ABC pagination and incremental loading
+- [x] Switched from canvas-based loading to authenticated fetch approach using Bearer token
+- [x] Always use cache-busting (?cb=1) to ensure consistent behavior regardless of browser cache state
+- [x] Made loadImage useCallback stable by using useRef for accessToken instead of including it in dependencies
+- [x] Check for valid access token before making authenticated requests
+- [x] Preserve localStorage base64 caching with TTL and concurrency control
+- [x] Due to persistent quota issues, disabled localStorage caching for images; browser HTTP caching provides sufficient performance
+- [x] Prevent loading state when clicking same letter by only setting loading=true when character filter actually changes
+
 
 ---

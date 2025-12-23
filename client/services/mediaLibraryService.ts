@@ -131,25 +131,6 @@ export interface MediaItem {
   SortOrder?: string; // Internal field for metadata storage
 }
 
-interface MediaMetadata {
-  MediaType?: string;
-  ReleaseDate?: string;
-  Year?: number;
-  ChronologicalDate?: string;
-  CoverImageUrl?: string;
-  Duration?: number;
-  Genre?: string;
-  Rating?: number;
-  ExternalLinks?: string;
-  Tags?: string;
-  // Book-specific fields
-  Author?: string;
-  Publisher?: string;
-  ISBN?: string;
-  PublicationYear?: number;
-  BookSeriesNumber?: number;
-}
-
 interface SenseNetContent {
   Id: number;
   Name: string;
@@ -326,31 +307,6 @@ export class MediaLibraryService {
     } catch (error) {
       console.error('Error creating media item:', error);
       throw new Error('Failed to create media item. Please check your connection and try again.');
-    }
-  }
-
-  /**
-   * Gets all media items from the global library
-   */
-  static async getMediaItems(): Promise<MediaItem[]> {
-    try {
-      console.log('Fetching media items from:', this.MEDIA_LIBRARY_PATH);
-
-      const response = await repository.loadCollection({
-        path: this.MEDIA_LIBRARY_PATH,
-        oDataOptions: {
-          query: `+(TypeIs:${MEDIA_ITEM_CONTENT_TYPE} OR TypeIs:${BOOK_CONTENT_TYPE}) +Hidden:0`,
-          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
-          expand: ['CreatedBy'],
-          orderby: ['CreationDate desc']
-        }
-      });
-
-      console.log('Media items fetched successfully:', response);
-      return response.d.results.map((item: SenseNetContent) => this.mapMemoToMediaItem(item));
-    } catch (error) {
-      console.error('Error fetching media items:', error);
-      throw new Error('Failed to load media items. Please check your connection and try again.');
     }
   }
 
@@ -539,46 +495,55 @@ export class MediaLibraryService {
   }
 
   /**
-   * Searches media items by query
+   * Gets media items with optional filtering and pagination
    */
-  static async searchMediaItems(query: string, mediaType?: string, genre?: string): Promise<MediaItem[]> {
+  static async getMediaItems(characterFilter?: string, searchQuery?: string, skip?: number, top?: number): Promise<MediaItem[]> {
     try {
-      console.log('Searching media items:', { query, mediaType, genre });
+      console.log('Fetching media items:', { characterFilter, searchQuery, skip, top });
 
-      let filter = `TypeIs:'${MEDIA_ITEM_CONTENT_TYPE}'`;
-      
-      if (query) {
-        filter += ` and (substringof('${query}', DisplayName) or substringof('${query}', Description))`;
+      let query = `+TypeIs:${MEDIA_ITEM_CONTENT_TYPE} +Hidden:0`;
+
+      // Add character filter if specified
+      if (characterFilter && characterFilter.trim() !== '') {
+        if (characterFilter === '#') {
+          // For non-alphabetic characters, use regex to match anything that doesn't start with a letter
+          query += ` +DisplayName:<'a'`;
+        } else {
+          // For alphabetic characters, use wildcard search
+          query += ` +DisplayName:'${characterFilter.toLowerCase()}*'`;
+        }
       }
 
-      const response = await repository.executeAction({
-        name: 'GetChildren',
-        idOrPath: this.MEDIA_LIBRARY_PATH,
-        oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CreatedBy/DisplayName'],
-          expand: ['CreatedBy'],
-          filter,
-          orderby: [['CreationDate', 'desc']]
-        }
+      // Add search query if specified
+      if (searchQuery && searchQuery.trim() !== '') {
+        query += ` +(DisplayName:'*${searchQuery.toLowerCase()}*' OR Description:'*${searchQuery.toLowerCase()}*')`;
+      }
+
+      const oDataOptions: any = {
+        query: query,
+        select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
+        expand: ['CreatedBy'],
+        orderby: ['DisplayName']
+      };
+
+      // Add pagination
+      if (skip !== undefined && skip > 0) {
+        oDataOptions.skip = skip;
+      }
+      if (top !== undefined && top > 0) {
+        oDataOptions.top = top;
+      }
+
+      const response = await repository.loadCollection({
+        path: mediaLibraryPath,
+        oDataOptions: oDataOptions
       });
 
-      let results = response.d.results.map((item: SenseNetContent) => this.mapMemoToMediaItem(item));
-
-      // Client-side filtering for metadata stored in SortOrder
-      if (mediaType || genre) {
-        results = results.filter((item: MediaItem) => {
-          const metadata = this.parseMediaMetadata(item.SortOrder || '{}');
-          if (mediaType && metadata.MediaType !== mediaType) return false;
-          if (genre && metadata.Genre !== genre) return false;
-          return true;
-        });
-      }
-
-      console.log('Media items search completed:', results);
-      return results;
+      console.log('Media items fetched successfully:', response.d.results.length);
+      return response.d.results.map((item: SenseNetContent) => this.mapMemoToMediaItem(item));
     } catch (error) {
-      console.error('Error searching media items:', error);
-      throw new Error('Failed to search media items. Please check your connection and try again.');
+      console.error('Error fetching media items:', error);
+      throw new Error('Failed to load media items. Please check your connection and try again.');
     }
   }
 
@@ -652,16 +617,6 @@ export class MediaLibraryService {
     return null;
   }
 
-  /**
-   * Parses media metadata from SortOrder JSON string
-   */
-  private static parseMediaMetadata(sortOrder: string): MediaMetadata {
-    try {
-      return JSON.parse(sortOrder) as MediaMetadata;
-    } catch {
-      return {};
-    }
-  }
 }
 
 export default MediaLibraryService;

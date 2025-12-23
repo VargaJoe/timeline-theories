@@ -35,12 +35,9 @@
         </Options>
       </Configuration>
     </Field>
-    <Field name="IsPublic" type="Boolean">
-      <DisplayName>Is Public</DisplayName>
-      <Description>Public sharing (default: false)</Description>
-      <Configuration>
-        <DefaultValue>0</DefaultValue>
-      </Configuration>
+    <Field name="IsVisible" type="Boolean">
+      <DisplayName>Is Visible</DisplayName>
+      <Description>Public to visitors (default: false)</Description>
     </Field>
     <Field name="TimelineType" type="Choice">
       <DisplayName>Timeline Type</DisplayName>

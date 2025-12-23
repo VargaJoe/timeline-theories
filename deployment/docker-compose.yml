@@ -6,6 +6,10 @@ networks:
     name: sensenet-auth
     driver: bridge
 
+volumes:
+  sensenet-appdata:
+    driver: local
+
 services:
   # SQL Server Database
   sensenet-insql-cdb-snsql:
@@ -92,6 +96,7 @@ services:
   sensenet-insql-cdb-snapp:
     # image: sensenetcsp/sn-api-sql:preview
     image: vargajoe/sn-api-sql:cors-test 
+    # image: vargajoe/sn-api-sql:boolean-index
     container_name: sensenet-insql-cdb-snapp
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
@@ -118,6 +123,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./temp/certificates:/https:ro
+      - sensenet-appdata:/app/App_Data
     depends_on:
       - sensenet-insql-cdb-snsql
       - sensenet-db-init

@@ -34,7 +34,7 @@ Timeline {
   DisplayName: ShortText           // Timeline title
   Description: RichText            // Timeline description
   SortOrder: Choice               // Values: "Chronological", "Release"
-  IsPublic: Boolean               // Public sharing (default: false)
+  IsVisible: Boolean               // Public to visitors (default: false)
   Category: Choice                // Values: "SciFi", "Fantasy", "Historical", "Horror", "Action", "Drama", "Comedy", "Documentary", "Other"
   CoverImageUrl: ShortText        // Cover image URL
   Tags: ShortText                 // Comma-separated tags
@@ -212,7 +212,7 @@ When migrating from Memo to custom Timeline type:
 | Story 04: Reuse Media Items | MediaItem + TimelineEntry | Phase 3 |
 | Story 05: External Links | MediaItem.ExternalLinks | Phase 4 |
 | Story 06: Organize Entries | TimelineEntry.Position, ArcGroup | Phase 4 |
-| Story 07: View and Share | Timeline.IsPublic | Phase 4 |
+| Story 07: View and Share | Timeline.IsVisible | Phase 4 |
 | Story 08: Authentication | User (existing) | ✅ Complete |
 | Story 09: Tag Media | MediaItem.Tags, Timeline.Tags | Phase 4 |
 | Story 10: Search and Filter | All types | Phase 4 |

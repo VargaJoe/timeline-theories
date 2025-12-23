@@ -25,7 +25,23 @@ export const siteConfig = {
   coverImageDefaultHeight: 480,
 
   // Admin emails for restricted access
-  adminEmails: (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((email: string) => email.trim()).filter(Boolean)
+  adminEmails: (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((email: string) => email.trim()).filter(Boolean),
+
+  // Timeline list configuration
+  timelineList: {
+    // Enable/disable ABC pagination (character-based filtering)
+    enableAbcPagination: import.meta.env.VITE_ENABLE_ABC_PAGINATION !== 'false', // Default: true
+    // Enable/disable "All" view with pagination (can be disabled for performance reasons)
+    enableAllView: import.meta.env.VITE_ENABLE_ALL_TIMELINE_VIEW !== 'false', // Default: true
+    // Number of timelines to load per page in "All" view
+    allViewPageSize: parseInt(import.meta.env.VITE_ALL_TIMELINE_PAGE_SIZE || '20'), // Default: 20
+  },
+
+  // Image caching configuration
+  imageCache: {
+    ttl: parseInt(import.meta.env.VITE_LOCAL_STORAGE_TTL || '3600000'), // 1 hour default
+    concurrencyLimit: parseInt(import.meta.env.VITE_IMAGE_CONCURRENCY_LIMIT || '2'),
+  }
 };
 
 export const configuration = {

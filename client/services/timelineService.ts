@@ -1,4 +1,5 @@
 import { TimelineEntryService } from './timelineEntryService';
+import { MediaLibraryService } from './mediaLibraryService';
 
 /**
  * Export a timeline and its entries to TSV format (Notepad++-friendly)
@@ -372,30 +373,6 @@ import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl, contentPaths } from '../configuration';
 
-// Helper function to get cover image URL from MediaItem reference
-function getCoverImageUrl(mediaItem: {
-  CoverImageUrl?: string;
-  CoverImageBin?: {
-    __mediaresource?: {
-      media_src: string;
-    };
-  };
-}): string | null {
-  // If URL is set, use it
-  // Temporary off to avoid use images from other sites
-  // if (mediaItem.CoverImageUrl) {
-  //   return mediaItem.CoverImageUrl;
-  // }
-  
-  // Otherwise, check if we have a binary image
-  if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
-    const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
-    return `${repositoryUrl}${relativePath}`;
-  }
-  
-  return null;
-}
-
 // Timeline service for frontend API calls
 export interface Timeline {
   id: string;
@@ -405,7 +382,7 @@ export interface Timeline {
   sort_order?: string;
   created_at?: string;
   coverImageUrl?: string;
-  isPublic?: boolean;
+  isVisible?: boolean;
   timelineType?: string;
 }
 
@@ -416,7 +393,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
       parentPath: timelinesPath,
       contentType: TIMELINE_CONTENT_TYPE,
       oDataOptions: {
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsPublic', 'TimelineType'],
+        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsVisible', 'TimelineType'],
       },
       content: {
         Name: data.name,
@@ -434,7 +411,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
       description: result.d.Description || data.description,
       sort_order: result.d.SortOrder || data.sortOrder,
       created_at: result.d.CreationDate,
-      isPublic: typeof result.d.IsPublic === 'boolean' ? result.d.IsPublic : false,
+      isVisible: typeof result.d.IsVisible === 'boolean' ? result.d.IsVisible : false,
       timelineType: result.d.TimelineType || data.timelineType || 'chronological',
     };
   } catch (error) {
@@ -443,16 +420,53 @@ export async function createTimeline(data: { name: string; displayName?: string;
   }
 }
 
-export async function getTimelines(): Promise<Timeline[]> {
+export async function getTimelines(includePrivate = false, characterFilter?: string, skip?: number, top?: number, sortOrder?: 'alphabetical' | 'created_desc'): Promise<Timeline[]> {
   try {
+    // Build query based on whether to include private timelines
+    let query = `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`;
+    if (!includePrivate) {
+      query += ` +IsVisible:true`;
+    }
+
+    // Add character filter if specified
+    if (characterFilter && characterFilter.trim() !== '') {
+      if (characterFilter === '#') {
+        // For non-alphabetic characters, use regex to match anything that doesn't start with a letter
+        query += ` +DisplayName:<'a'`;
+      } else {
+        // For alphabetic characters, use wildcard search
+        query += ` +DisplayName:'${characterFilter.toLowerCase()}*'`;
+      }
+    }
+
+    // Determine orderby based on sortOrder
+    let orderby: string[];
+    if (sortOrder === 'created_desc') {
+      orderby = ['CreationDate desc'];
+    } else {
+      // Default to alphabetical for all cases
+      orderby = ['DisplayName'];
+    }
+
+    // Build oData options
+    const oDataOptions: any = {
+      query: query,
+      select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsVisible', 'TimelineType'],
+      orderby: orderby,
+    };
+
+    // Add pagination for all views to limit initial load and enable load more functionality
+    if (skip !== undefined && skip > 0) {
+      oDataOptions.skip = skip;
+    }
+    if (top !== undefined && top > 0) {
+      oDataOptions.top = top;
+    }
+
     // List Timeline contents under the configured path
     const result = await repository.loadCollection({
       path: timelinesPath,
-      oDataOptions: {
-        query: `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`,
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsPublic', 'TimelineType'],
-        orderby: ['DisplayName'],
-      },
+      oDataOptions: oDataOptions,
     });
     
     return result.d.results.map((item: { 
@@ -463,7 +477,7 @@ export async function getTimelines(): Promise<Timeline[]> {
       SortOrder?: string | string[];
       CreationDate: string;
       CoverImageUrl?: string;
-      IsPublic?: boolean;
+      IsVisible?: boolean;
       TimelineType?: string;
     }) => {
       // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
@@ -482,7 +496,7 @@ export async function getTimelines(): Promise<Timeline[]> {
         sort_order: sortOrder,
         created_at: item.CreationDate,
         coverImageUrl: item.CoverImageUrl,
-        isPublic: typeof item.IsPublic === 'boolean' ? item.IsPublic : false,
+        isVisible: typeof item.IsVisible === 'boolean' ? item.IsVisible : false,
         timelineType: item.TimelineType || 'chronological',
       };
     });
@@ -517,7 +531,7 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
       const mediaItem = item.MediaItem;
       if (mediaItem) {
         // Use the helper function to get cover URL (either from URL or binary field)
-        const coverUrl = getCoverImageUrl(mediaItem);
+        const coverUrl = MediaLibraryService.getCoverImageUrl(mediaItem);
         if (coverUrl) {
           allCoverUrls.push(coverUrl);
         }
