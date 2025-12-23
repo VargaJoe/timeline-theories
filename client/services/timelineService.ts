@@ -1,4 +1,5 @@
 import { TimelineEntryService } from './timelineEntryService';
+import { MediaLibraryService } from './mediaLibraryService';
 
 /**
  * Export a timeline and its entries to TSV format (Notepad++-friendly)
@@ -532,7 +533,7 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
       const mediaItem = item.MediaItem;
       if (mediaItem) {
         // Use the helper function to get cover URL (either from URL or binary field)
-        const coverUrl = null;//getCoverImageUrl(mediaItem);
+        const coverUrl = MediaLibraryService.getCoverImageUrl(mediaItem);
         if (coverUrl) {
           allCoverUrls.push(coverUrl);
         }
