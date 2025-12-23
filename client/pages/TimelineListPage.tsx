@@ -26,6 +26,7 @@ export const TimelineListPage: React.FC = () => {
     return (saved === 'alphabetical' || saved === 'created_desc') ? saved : 'alphabetical';
   });
   const [characterFilter, setCharacterFilter] = useState<string>('');
+  const [isInitialized, setIsInitialized] = useState<boolean>(false);
   
   // Pagination state for "All" view
   const [loadedTimelines, setLoadedTimelines] = useState<Timeline[]>([]);
@@ -98,6 +99,8 @@ export const TimelineListPage: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!isInitialized) return;
+    
     console.log('TimelineListPage: Starting to load timelines...');
     
     // For "All" view, use pagination
@@ -162,7 +165,7 @@ export const TimelineListPage: React.FC = () => {
         })
         .finally(() => setLoading(false));
     }
-  }, [characterFilter, sortOrder]);
+  }, [characterFilter, sortOrder, isInitialized]);
 
   // Sync characterFilter with URL parameters
   useEffect(() => {
@@ -170,6 +173,7 @@ export const TimelineListPage: React.FC = () => {
       if (characterFilter !== '') {
         setCharacterFilter('');
       }
+      setIsInitialized(true);
       return;
     }
     
@@ -188,7 +192,8 @@ export const TimelineListPage: React.FC = () => {
       setHasMore(false);
       setLoadingMore(false);
     }
-  }, [searchParams, siteConfig.timelineList.enableAbcPagination, characterFilter]);
+    setIsInitialized(true);
+  }, [searchParams, siteConfig.timelineList.enableAbcPagination]);
 
   // Load background image from SenseNet
   useEffect(() => {

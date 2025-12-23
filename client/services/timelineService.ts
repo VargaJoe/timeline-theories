@@ -434,7 +434,7 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
         // For non-alphabetic characters, use regex to match anything that doesn't start with a letter
         query += ` +DisplayName:<'a'`;
       } else {
-        // For alphabetic characters, use startsWith
+        // For alphabetic characters, use wildcard search
         query += ` +DisplayName:'${characterFilter.toLowerCase()}*'`;
       }
     }
