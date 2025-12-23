@@ -24,15 +24,21 @@ export const TimelineListPage: React.FC = () => {
     const saved = localStorage.getItem('timeline-sort-order');
     return (saved === 'alphabetical' || saved === 'created_desc') ? saved : 'alphabetical';
   });
+  const [characterFilter, setCharacterFilter] = useState<string>('a'); // Default to 'a'
 
   const handleSortOrderChange = (newSortOrder: 'alphabetical' | 'created_desc') => {
     setSortOrder(newSortOrder);
     localStorage.setItem('timeline-sort-order', newSortOrder);
   };
 
+  const handleCharacterFilterChange = (character: string) => {
+    setCharacterFilter(character);
+    setLoading(true); // Show loading while fetching new data
+  };
+
   useEffect(() => {
     console.log('TimelineListPage: Starting to load timelines...');
-    getTimelines(!!user)
+    getTimelines(!!user, characterFilter)
       .then(timelines => {
         console.log('TimelineListPage: Successfully loaded timelines:', timelines);
         setTimelines(timelines);
@@ -60,7 +66,7 @@ export const TimelineListPage: React.FC = () => {
         setError('Failed to load timelines');
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [characterFilter]);
 
   // Load background image from SenseNet
   useEffect(() => {
@@ -134,6 +140,42 @@ export const TimelineListPage: React.FC = () => {
         showSiteTitle={false}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+          {/* ABC Navigation */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 500, color: '#fff', marginRight: 8 }}>Browse:</span>
+            {['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(char => (
+              <button
+                key={char}
+                onClick={() => handleCharacterFilterChange(char.toLowerCase())}
+                style={{
+                  background: characterFilter === char.toLowerCase() ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)',
+                  color: '#fff',
+                  border: characterFilter === char.toLowerCase() ? '1px solid rgba(255,255,255,0.5)' : '1px solid rgba(255,255,255,0.3)',
+                  borderRadius: 6,
+                  padding: '6px 10px',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  minWidth: 32,
+                  textAlign: 'center'
+                }}
+                onMouseOver={e => {
+                  if (characterFilter !== char.toLowerCase()) {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.2)';
+                  }
+                }}
+                onMouseOut={e => {
+                  if (characterFilter !== char.toLowerCase()) {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  }
+                }}
+              >
+                {char}
+              </button>
+            ))}
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <label htmlFor="timeline-sort" style={{ fontWeight: 500, color: '#fff' }}>Sort by:</label>
             <select
@@ -232,7 +274,7 @@ export const TimelineListPage: React.FC = () => {
           >
             {timelines
               .slice()
-              // Filter out private timelines unless user is logged in (admin)
+              // Filter out private timelines unless user is logged in (admin) - server-side filtering now handles character filter
               .filter(timeline => timeline.isVisible !== false || user)
               .sort((a, b) => {
                 if (sortOrder === 'alphabetical') {
@@ -400,6 +442,47 @@ export const TimelineListPage: React.FC = () => {
               })}
           </div>
         )}
+      </div>
+
+      {/* ABC Navigation at bottom */}
+      <div style={{ maxWidth: 1200, margin: '20px auto 0 auto', padding: '0 20px', textAlign: 'center' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: '#f8f9fa', padding: '16px 24px', borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+          <span style={{ fontWeight: 500, color: '#495057', marginRight: 8 }}>Browse:</span>
+          {['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(char => (
+            <button
+              key={char}
+              onClick={() => handleCharacterFilterChange(char.toLowerCase())}
+              style={{
+                background: characterFilter === char.toLowerCase() ? '#2a4d8f' : '#fff',
+                color: characterFilter === char.toLowerCase() ? '#fff' : '#495057',
+                border: characterFilter === char.toLowerCase() ? '1px solid #2a4d8f' : '1px solid #dee2e6',
+                borderRadius: 6,
+                padding: '8px 12px',
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                minWidth: 36,
+                textAlign: 'center',
+                boxShadow: characterFilter === char.toLowerCase() ? '0 2px 4px rgba(42, 77, 143, 0.2)' : 'none'
+              }}
+              onMouseOver={e => {
+                if (characterFilter !== char.toLowerCase()) {
+                  e.currentTarget.style.background = '#f8f9fa';
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                }
+              }}
+              onMouseOut={e => {
+                if (characterFilter !== char.toLowerCase()) {
+                  e.currentTarget.style.background = '#fff';
+                  e.currentTarget.style.boxShadow = 'none';
+                }
+              }}
+            >
+              {char}
+            </button>
+          ))}
+        </div>
       </div>
     </>
   );

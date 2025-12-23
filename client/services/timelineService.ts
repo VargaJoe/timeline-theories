@@ -372,30 +372,6 @@ import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl, contentPaths } from '../configuration';
 
-// Helper function to get cover image URL from MediaItem reference
-function getCoverImageUrl(mediaItem: {
-  CoverImageUrl?: string;
-  CoverImageBin?: {
-    __mediaresource?: {
-      media_src: string;
-    };
-  };
-}): string | null {
-  // If URL is set, use it
-  // Temporary off to avoid use images from other sites
-  // if (mediaItem.CoverImageUrl) {
-  //   return mediaItem.CoverImageUrl;
-  // }
-  
-  // Otherwise, check if we have a binary image
-  if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
-    const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
-    return `${repositoryUrl}${relativePath}`;
-  }
-  
-  return null;
-}
-
 // Timeline service for frontend API calls
 export interface Timeline {
   id: string;
@@ -443,12 +419,23 @@ export async function createTimeline(data: { name: string; displayName?: string;
   }
 }
 
-export async function getTimelines(includePrivate = false): Promise<Timeline[]> {
+export async function getTimelines(includePrivate = false, characterFilter?: string): Promise<Timeline[]> {
   try {
     // Build query based on whether to include private timelines
     let query = `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`;
     if (!includePrivate) {
       query += ` +IsVisible:true`;
+    }
+
+    // Add character filter if specified
+    if (characterFilter) {
+      if (characterFilter === '#') {
+        // For non-alphabetic characters, use regex to match anything that doesn't start with a letter
+        query += ` +DisplayName:<'a'`;
+      } else {
+        // For alphabetic characters, use startsWith
+        query += ` +DisplayName:'${characterFilter.toLowerCase()}*'`;
+      }
     }
 
     // List Timeline contents under the configured path

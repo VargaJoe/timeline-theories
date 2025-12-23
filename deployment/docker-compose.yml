@@ -94,8 +94,8 @@ services:
 
   # SenseNet Application with Custom Auth
   sensenet-insql-cdb-snapp:
-    image: sensenetcsp/sn-api-sql:preview
-    # image: vargajoe/sn-api-sql:cors-test 
+    # image: sensenetcsp/sn-api-sql:preview
+    image: vargajoe/sn-api-sql:cors-test 
     # image: vargajoe/sn-api-sql:boolean-index
     container_name: sensenet-insql-cdb-snapp
     environment:

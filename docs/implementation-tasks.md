@@ -4,18 +4,28 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ## In Progress
 
+### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
+- [ ] Implement localStorage caching with configurable TTL and error handling to avoid refetching cover URLs
+- [ ] Add configurable concurrency-limited preloading in LazyImage.tsx using AbortController to cancel on navigation 
+- [ ] Integrate virtualized rendering with react-window in MediaLibraryPage.tsx to render only visible items
+- [ ] Add pagination to OData queries with top and skip for chunked loading of large lists
+- [ ] Add pagination support to TimelineEntryService.listTimelineEntries() with top and skip parameters
+- [ ] Limit initial timeline entries load to 50 items for performance
+- [ ] Configure image concurrency limit (VITE_IMAGE_CONCURRENCY_LIMIT=2) and cache TTL (VITE_LOCAL_STORAGE_TTL=3600000) in .env
+- [ ] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
+- [ ] Lazy loading images load correctly without errors or broken displays
+- [ ] Performance metrics (e.g., query response time) meet acceptable thresholds
+- [ ] No regressions in existing media browsing functionality
+- [ ] Implement query optimization (e.g., debouncing, batching) in media services
+- [ ] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
+- [ ] Add error handling and fallbacks for failed image loads
+- [ ] Test with various media types and network conditions
 
 ---
 
 ## Planned
 
-### Story 30 - Book Reading Progress and Personal Library Integration
-- [ ] Implement reading status tracking ("Want to Read", "Currently Reading", "Read", "Did Not Finish")
-- [ ] Add personal rating system separate from general media ratings
-- [ ] Create reading notes functionality separate from general timeline entry notes
-- [ ] Add reading date tracking (when user read each book vs publication date)
-- [ ] Implement reading progress statistics and analytics
-- [ ] Create personal reading timeline views alongside publication order
+
 
 ### Story 15 - Create Media Item by Trakt
 - [ ] Add a "Search Trakt" button or field to the Media Item Create Page.
@@ -195,16 +205,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Add series completion tracking and progress indicators
 - [ ] Implement series-based sorting and filtering options
 
-### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
-- [ ] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
-- [ ] Lazy loading images load correctly without errors or broken displays
-- [ ] Performance metrics (e.g., query response time) meet acceptable thresholds
-- [ ] No regressions in existing media browsing functionality
-- [ ] Implement query optimization (e.g., debouncing, batching) in media services
-- [ ] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
-- [ ] Add error handling and fallbacks for failed image loads
-- [ ] Test with various media types and network conditions
-
 ### Story 06 - Organize Timeline Entries
 - [ ] User can drag and drop timeline entries to reorder them
 - [ ] User can manually set position numbers for entries
@@ -255,6 +255,14 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [ ] Update media item creation forms with book-specific fields
 - [ ] Implement bulk import services for book data sources
 - [ ] Add timeline type selection and sorting logic
+
+### Story 30 - Book Reading Progress and Personal Library Integration
+- [ ] Implement reading status tracking ("Want to Read", "Currently Reading", "Read", "Did Not Finish")
+- [ ] Add personal rating system separate from general media ratings
+- [ ] Create reading notes functionality separate from general timeline entry notes
+- [ ] Add reading date tracking (when user read each book vs publication date)
+- [ ] Implement reading progress statistics and analytics
+- [ ] Create personal reading timeline views alongside publication order
 
 ---
 
@@ -554,5 +562,16 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **MAINTAINED: Backward compatibility** - Default behavior (includePrivate=false) ensures public-only access for unauthenticated users
 - [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
 - [x] **RESULT: Optimized network usage** - Unauthenticated users now only download public timelines, reducing unnecessary data transfer and improving performance
+
+### Story 32 - ABC-based Timeline Pagination
+- [x] **IMPLEMENTED: Character-based filtering** - Modified getTimelines() function to accept optional characterFilter parameter
+- [x] **ENHANCED: SenseNet OData queries** - Added DisplayName filtering with startsWith for alphabetic characters and regex for non-alphabetic (#)
+- [x] **UPDATED: TimelineListPage component** - Added characterFilter state with default 'a' value and ABC navigation UI
+- [x] **CREATED: ABC navigation controls** - Added character selection buttons (A-Z + #) at top and bottom of timeline list page
+- [x] **IMPLEMENTED: Server-side filtering** - Moved character filtering from client-side to server-side for better performance
+- [x] **ENHANCED: UI feedback** - Active character button is highlighted with different styling and visual indicators
+- [x] **MAINTAINED: Responsive design** - ABC navigation wraps properly on smaller screens and maintains accessibility
+- [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
+- [x] **RESULT: Improved user experience** - Users can now quickly browse timelines by starting character with intuitive navigation
 
 ---
