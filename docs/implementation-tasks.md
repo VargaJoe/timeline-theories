@@ -602,5 +602,6 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **ENHANCED: useSearchParams integration** - Added React Router URL parameter handling for bookmarkable navigation
 - [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
 - [x] **RESULT: Flexible navigation** - Users can configure ABC pagination behavior and share direct links to filtered views
+- [x] **FIXED: Double query issue** - Modified initial characterFilter state to empty string to avoid premature queries, added isInitialized state to prevent timeline loading before URL params are synced, updated useEffect to wait for initialization before fetching data, preventing the issue where all timelines were fetched first followed by filtered results
 
 ---

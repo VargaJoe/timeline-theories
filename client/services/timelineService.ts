@@ -455,14 +455,12 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
       orderby: orderby,
     };
 
-    // Add pagination only for "All" view (empty characterFilter) to avoid performance issues
-    if (!characterFilter || characterFilter.trim() === '') {
-      if (skip !== undefined && skip > 0) {
-        oDataOptions.skip = skip;
-      }
-      if (top !== undefined && top > 0) {
-        oDataOptions.top = top;
-      }
+    // Add pagination for all views to limit initial load and enable load more functionality
+    if (skip !== undefined && skip > 0) {
+      oDataOptions.skip = skip;
+    }
+    if (top !== undefined && top > 0) {
+      oDataOptions.top = top;
     }
 
     // List Timeline contents under the configured path

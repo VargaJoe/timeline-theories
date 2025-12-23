@@ -15,7 +15,6 @@ export const TimelineListPage: React.FC = () => {
   const { user } = useSharedAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   
-  const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
@@ -135,11 +134,12 @@ export const TimelineListPage: React.FC = () => {
         })
         .finally(() => setLoading(false));
     } else {
-      // For character-filtered views, load all at once
-      getTimelines(!!user, characterFilter, undefined, undefined, sortOrder)
+      // For character-filtered views, load initial page
+      getTimelines(!!user, characterFilter, 0, siteConfig.timelineList.allViewPageSize, sortOrder)
         .then(timelines => {
           console.log('TimelineListPage: Successfully loaded timelines:', timelines);
-          setTimelines(timelines);
+          setLoadedTimelines(timelines);
+          setHasMore(timelines.length === siteConfig.timelineList.allViewPageSize);
           
           // Fetch media covers for each timeline
           const fetchMediaCovers = async () => {
@@ -392,7 +392,7 @@ export const TimelineListPage: React.FC = () => {
       </PageHeader>
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 20px 40px 20px' }}>
-        {((characterFilter === '' ? loadedTimelines : timelines).length === 0) ? (
+        {(loadedTimelines.length === 0) ? (
           <div style={{
             background: '#fff',
             border: '1px solid #e9ecef',
@@ -440,7 +440,7 @@ export const TimelineListPage: React.FC = () => {
                 maxWidth: '100%'
               }}
             >
-              {(characterFilter === '' ? loadedTimelines : timelines)
+              {loadedTimelines
                 .slice()
                 // Filter out private timelines unless user is logged in (admin) - server-side filtering now handles character filter
                 .filter(timeline => timeline.isVisible !== false || user)
@@ -602,8 +602,8 @@ export const TimelineListPage: React.FC = () => {
               })}
             </div>
 
-            {/* Load More button for "All" view */}
-            {characterFilter === '' && siteConfig.timelineList.enableAllView && hasMore && (
+            {/* Load More button */}
+            {hasMore && (
               <div style={{ textAlign: 'center', marginTop: 40, marginBottom: 20 }}>
                 <button
                   onClick={loadMoreTimelines}
