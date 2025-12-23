@@ -6,26 +6,28 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ### Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
 - [ ] Implement localStorage caching with configurable TTL and error handling to avoid refetching cover URLs
-- [ ] Add configurable concurrency-limited preloading in LazyImage.tsx using AbortController to cancel on navigation 
+- [ ] Add configurable concurrency-limited preloading in LazyImage.tsx using AbortController to cancel on navigation
 - [ ] Integrate virtualized rendering with react-window in MediaLibraryPage.tsx to render only visible items
-- [ ] Add pagination to OData queries with top and skip for chunked loading of large lists
+- [x] Add pagination to OData queries with top and skip for chunked loading of large lists
 - [ ] Add pagination support to TimelineEntryService.listTimelineEntries() with top and skip parameters
-- [ ] Limit initial timeline entries load to 50 items for performance
-- [ ] Configure image concurrency limit (VITE_IMAGE_CONCURRENCY_LIMIT=2) and cache TTL (VITE_LOCAL_STORAGE_TTL=3600000) in .env
+- [x] Limit initial timeline entries load to 50 items for performance
+- [x] Configure image concurrency limit (VITE_IMAGE_CONCURRENCY_LIMIT=2) and cache TTL (VITE_LOCAL_STORAGE_TTL=3600000) in .env
 - [ ] Media API queries are optimized (e.g., reduced calls, caching, pagination) to improve load times
-- [ ] Lazy loading images load correctly without errors or broken displays
+- [x] Lazy loading images load correctly without errors or broken displays
 - [ ] Performance metrics (e.g., query response time) meet acceptable thresholds
-- [ ] No regressions in existing media browsing functionality
+- [x] No regressions in existing media browsing functionality
 - [ ] Implement query optimization (e.g., debouncing, batching) in media services
-- [ ] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
-- [ ] Add error handling and fallbacks for failed image loads
-- [ ] Test with various media types and network conditions
+- [x] Fix lazy loading component (e.g., `LazyImage.tsx`) for proper image rendering
+- [x] Add error handling and fallbacks for failed image loads
+- [x] character-based filtering (A-Z, #) with server-side OData queries and load more functionality
+- [x] Update MediaLibraryService.getMediaItems() with characterFilter, searchQuery, skip, top parameters
+- [x] incremental loading with configurable page size and proper state management
+- [x] search trigger only on explicit user action instead of automatic filtering
+- [x] browse media items efficiently with ABC pagination and incremental loading
 
 ---
 
-## Planned
-
-
+## Planned 
 
 ### Story 15 - Create Media Item by Trakt
 - [ ] Add a "Search Trakt" button or field to the Media Item Create Page.
@@ -591,18 +593,5 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] **CONFIGURED: Feature toggling** - Configuration-based enable/disable for easy management via environment variables
 - [x] **ADDED: Server-side sorting** - getTimelines() function now accepts sortOrder parameter for proper server-side ordering (CreationDate desc for newest, DisplayName for alphabetical)
 - [x] **REMOVED: Client-side sorting** - Eliminated redundant client-side sorting since server handles ordering correctly across pagination
-
-### Story - Implement ABC Pagination and Load More for Media Library
-- [x] **IMPLEMENTED: Server-side filtering** - Updated MediaLibraryService.getMediaItems() with characterFilter, searchQuery, skip, top parameters for OData queries
-- [x] **ADDED: ABC navigation UI** - Added character selection buttons (A-Z, #) in MediaLibraryPage header similar to TimelineListPage
-- [x] **IMPLEMENTED: Load more functionality** - Added loadMoreMediaItems() function with pagination logic and configurable page size
-- [x] **FIXED: Load more state management** - Resolved useCallback dependency issues causing infinite re-renders and incorrect skip calculations
-- [x] **MODIFIED: Search behavior** - Changed search to trigger only on explicit user action (Enter key or Search button) instead of automatic filtering
-- [x] **UPDATED: State management** - Replaced client-side filtering with server-side pagination using loadedMediaItems, hasMore, loadingMore states
-- [x] **CONFIGURED: Default filter** - Set 'a' as default character filter on initial load
-- [x] **REMOVED: Client-side filtering** - Eliminated getFilteredMediaItems() function and related client-side logic for better performance
-- [x] **MAINTAINED: Edit functionality** - Preserved media item editing capabilities with updated state management
-- [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
-- [x] **RESULT: Enhanced Media Library** - Users can now browse media items by character filter with incremental loading and explicit search triggering
 
 ---
