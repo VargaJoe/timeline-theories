@@ -419,7 +419,7 @@ export async function createTimeline(data: { name: string; displayName?: string;
   }
 }
 
-export async function getTimelines(includePrivate = false, characterFilter?: string): Promise<Timeline[]> {
+export async function getTimelines(includePrivate = false, characterFilter?: string, skip?: number, top?: number, sortOrder?: 'alphabetical' | 'created_desc'): Promise<Timeline[]> {
   try {
     // Build query based on whether to include private timelines
     let query = `+TypeIs:${TIMELINE_CONTENT_TYPE} +Hidden:0`;
@@ -428,7 +428,7 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
     }
 
     // Add character filter if specified
-    if (characterFilter) {
+    if (characterFilter && characterFilter.trim() !== '') {
       if (characterFilter === '#') {
         // For non-alphabetic characters, use regex to match anything that doesn't start with a letter
         query += ` +DisplayName:<'a'`;
@@ -438,14 +438,36 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
       }
     }
 
+    // Determine orderby based on sortOrder
+    let orderby: string[];
+    if (sortOrder === 'created_desc') {
+      orderby = ['CreationDate desc'];
+    } else {
+      // Default to alphabetical for all cases
+      orderby = ['DisplayName'];
+    }
+
+    // Build oData options
+    const oDataOptions: any = {
+      query: query,
+      select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsVisible', 'TimelineType'],
+      orderby: orderby,
+    };
+
+    // Add pagination only for "All" view (empty characterFilter) to avoid performance issues
+    if (!characterFilter || characterFilter.trim() === '') {
+      if (skip !== undefined && skip > 0) {
+        oDataOptions.skip = skip;
+      }
+      if (top !== undefined && top > 0) {
+        oDataOptions.top = top;
+      }
+    }
+
     // List Timeline contents under the configured path
     const result = await repository.loadCollection({
       path: timelinesPath,
-      oDataOptions: {
-        query: query,
-        select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsVisible', 'TimelineType'],
-        orderby: ['DisplayName'],
-      },
+      oDataOptions: oDataOptions,
     });
     
     return result.d.results.map((item: { 

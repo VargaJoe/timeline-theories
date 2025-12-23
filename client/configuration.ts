@@ -25,7 +25,15 @@ export const siteConfig = {
   coverImageDefaultHeight: 480,
 
   // Admin emails for restricted access
-  adminEmails: (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((email: string) => email.trim()).filter(Boolean)
+  adminEmails: (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((email: string) => email.trim()).filter(Boolean),
+
+  // Timeline list configuration
+  timelineList: {
+    // Enable/disable "All" view with pagination (can be disabled for performance reasons)
+    enableAllView: import.meta.env.VITE_ENABLE_ALL_TIMELINE_VIEW !== 'false', // Default: true
+    // Number of timelines to load per page in "All" view
+    allViewPageSize: parseInt(import.meta.env.VITE_ALL_TIMELINE_PAGE_SIZE || '20'), // Default: 20
+  }
 };
 
 export const configuration = {

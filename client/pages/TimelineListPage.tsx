@@ -25,6 +25,11 @@ export const TimelineListPage: React.FC = () => {
     return (saved === 'alphabetical' || saved === 'created_desc') ? saved : 'alphabetical';
   });
   const [characterFilter, setCharacterFilter] = useState<string>('a'); // Default to 'a'
+  
+  // Pagination state for "All" view
+  const [loadedTimelines, setLoadedTimelines] = useState<Timeline[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const handleSortOrderChange = (newSortOrder: 'alphabetical' | 'created_desc') => {
     setSortOrder(newSortOrder);
@@ -34,39 +39,120 @@ export const TimelineListPage: React.FC = () => {
   const handleCharacterFilterChange = (character: string) => {
     setCharacterFilter(character);
     setLoading(true); // Show loading while fetching new data
+    // Reset pagination state when changing filters
+    setLoadedTimelines([]);
+    setHasMore(false);
+    setLoadingMore(false);
+  };
+
+  const loadMoreTimelines = async () => {
+    if (loadingMore || !hasMore) return;
+    
+    setLoadingMore(true);
+    try {
+      const currentCount = loadedTimelines.length;
+      const newTimelines = await getTimelines(
+        !!user, 
+        characterFilter, 
+        currentCount, 
+        siteConfig.timelineList.allViewPageSize,
+        sortOrder
+      );
+      
+      if (newTimelines.length > 0) {
+        setLoadedTimelines(prev => [...prev, ...newTimelines]);
+        setHasMore(newTimelines.length === siteConfig.timelineList.allViewPageSize);
+        
+        // Fetch media covers for new timelines
+        const covers: Record<string, string[]> = {};
+        for (const timeline of newTimelines) {
+          try {
+            const timelinePath = `${timelinesPath}/${timeline.name}`;
+            const timelineCovers = await getTimelineMediaCovers(timelinePath, 4);
+            covers[timeline.id] = timelineCovers;
+          } catch (error) {
+            console.error(`Failed to load covers for timeline ${timeline.name}:`, error);
+            covers[timeline.id] = [];
+          }
+        }
+        setMediaCovers(prev => ({ ...prev, ...covers }));
+      } else {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error('Failed to load more timelines:', error);
+      setError('Failed to load more timelines');
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   useEffect(() => {
     console.log('TimelineListPage: Starting to load timelines...');
-    getTimelines(!!user, characterFilter)
-      .then(timelines => {
-        console.log('TimelineListPage: Successfully loaded timelines:', timelines);
-        setTimelines(timelines);
-        
-        // Fetch media covers for each timeline
-        const fetchMediaCovers = async () => {
-          const covers: Record<string, string[]> = {};
-          for (const timeline of timelines) {
-            try {
-              const timelinePath = `${timelinesPath}/${timeline.name}`;
-              const timelineCovers = await getTimelineMediaCovers(timelinePath, 4);
-              covers[timeline.id] = timelineCovers;
-            } catch (error) {
-              console.error(`Failed to load covers for timeline ${timeline.name}:`, error);
-              covers[timeline.id] = [];
+    
+    // For "All" view, use pagination
+    if (characterFilter === '') {
+      getTimelines(!!user, characterFilter, 0, siteConfig.timelineList.allViewPageSize, sortOrder)
+        .then(timelines => {
+          console.log('TimelineListPage: Successfully loaded initial timelines:', timelines);
+          setLoadedTimelines(timelines);
+          setHasMore(timelines.length === siteConfig.timelineList.allViewPageSize);
+          
+          // Fetch media covers for each timeline
+          const fetchMediaCovers = async () => {
+            const covers: Record<string, string[]> = {};
+            for (const timeline of timelines) {
+              try {
+                const timelinePath = `${timelinesPath}/${timeline.name}`;
+                const timelineCovers = await getTimelineMediaCovers(timelinePath, 4);
+                covers[timeline.id] = timelineCovers;
+              } catch (error) {
+                console.error(`Failed to load covers for timeline ${timeline.name}:`, error);
+                covers[timeline.id] = [];
+              }
             }
-          }
-          setMediaCovers(covers);
-        };
-        
-        fetchMediaCovers();
-      })
-      .catch(err => {
-        console.error('TimelineListPage: Failed to load timelines:', err);
-        setError('Failed to load timelines');
-      })
-      .finally(() => setLoading(false));
-  }, [characterFilter]);
+            setMediaCovers(covers);
+          };
+          
+          fetchMediaCovers();
+        })
+        .catch(err => {
+          console.error('TimelineListPage: Failed to load timelines:', err);
+          setError('Failed to load timelines');
+        })
+        .finally(() => setLoading(false));
+    } else {
+      // For character-filtered views, load all at once
+      getTimelines(!!user, characterFilter, undefined, undefined, sortOrder)
+        .then(timelines => {
+          console.log('TimelineListPage: Successfully loaded timelines:', timelines);
+          setTimelines(timelines);
+          
+          // Fetch media covers for each timeline
+          const fetchMediaCovers = async () => {
+            const covers: Record<string, string[]> = {};
+            for (const timeline of timelines) {
+              try {
+                const timelinePath = `${timelinesPath}/${timeline.name}`;
+                const timelineCovers = await getTimelineMediaCovers(timelinePath, 4);
+                covers[timeline.id] = timelineCovers;
+              } catch (error) {
+                console.error(`Failed to load covers for timeline ${timeline.name}:`, error);
+                covers[timeline.id] = [];
+              }
+            }
+            setMediaCovers(covers);
+          };
+          
+          fetchMediaCovers();
+        })
+        .catch(err => {
+          console.error('TimelineListPage: Failed to load timelines:', err);
+          setError('Failed to load timelines');
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [characterFilter, sortOrder]);
 
   // Load background image from SenseNet
   useEffect(() => {
@@ -132,6 +218,14 @@ export const TimelineListPage: React.FC = () => {
 
   return (
     <>
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
       <PageHeader 
         title="Timeline Library" 
         subtitle="Discover chronological timelines for your favorite universes"
@@ -143,6 +237,36 @@ export const TimelineListPage: React.FC = () => {
           {/* ABC Navigation */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 500, color: '#fff', marginRight: 8 }}>Browse:</span>
+            {siteConfig.timelineList.enableAllView && (
+              <button
+                onClick={() => handleCharacterFilterChange('')}
+                style={{
+                  background: characterFilter === '' ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)',
+                  color: '#fff',
+                  border: characterFilter === '' ? '1px solid rgba(255,255,255,0.5)' : '1px solid rgba(255,255,255,0.3)',
+                  borderRadius: 6,
+                  padding: '6px 10px',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  minWidth: 32,
+                  textAlign: 'center'
+                }}
+                onMouseOver={e => {
+                  if (characterFilter !== '') {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.2)';
+                  }
+                }}
+                onMouseOut={e => {
+                  if (characterFilter !== '') {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  }
+                }}
+              >
+                All
+              </button>
+            )}
             {['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(char => (
               <button
                 key={char}
@@ -192,7 +316,9 @@ export const TimelineListPage: React.FC = () => {
               }}
             >
               <option value="alphabetical" style={{ color: '#333' }}>Alphabetical</option>
-              <option value="created_desc" style={{ color: '#333' }}>Newest First</option>
+              {siteConfig.timelineList.enableAllView && characterFilter === '' && (
+                <option value="created_desc" style={{ color: '#333' }}>Newest First</option>
+              )}
             </select>
           </div>
           {user && (
@@ -225,7 +351,7 @@ export const TimelineListPage: React.FC = () => {
       </PageHeader>
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 20px 40px 20px' }}>
-        {timelines.length === 0 ? (
+        {((characterFilter === '' ? loadedTimelines : timelines).length === 0) ? (
           <div style={{
             background: '#fff',
             border: '1px solid #e9ecef',
@@ -263,27 +389,20 @@ export const TimelineListPage: React.FC = () => {
             )}
           </div>
         ) : (
-          <div 
-            className="timeline-list-grid"
-            style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
-              gap: 24,
-              maxWidth: '100%'
-            }}
-          >
-            {timelines
-              .slice()
-              // Filter out private timelines unless user is logged in (admin) - server-side filtering now handles character filter
-              .filter(timeline => timeline.isVisible !== false || user)
-              .sort((a, b) => {
-                if (sortOrder === 'alphabetical') {
-                  return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
-                } else if (sortOrder === 'created_desc') {
-                  return (b.created_at ? new Date(b.created_at).getTime() : 0) - (a.created_at ? new Date(a.created_at).getTime() : 0);
-                }
-                return 0;
-              })
+          <>
+            <div 
+              className="timeline-list-grid"
+              style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
+                gap: 24,
+                maxWidth: '100%'
+              }}
+            >
+              {(characterFilter === '' ? loadedTimelines : timelines)
+                .slice()
+                // Filter out private timelines unless user is logged in (admin) - server-side filtering now handles character filter
+                .filter(timeline => timeline.isVisible !== false || user)
               .map(timeline => {
                 const pathSegment = timeline.name.toLowerCase();
                 return (
@@ -440,7 +559,66 @@ export const TimelineListPage: React.FC = () => {
                   </div>
                 );
               })}
-          </div>
+            </div>
+
+            {/* Load More button for "All" view */}
+            {characterFilter === '' && siteConfig.timelineList.enableAllView && hasMore && (
+              <div style={{ textAlign: 'center', marginTop: 40, marginBottom: 20 }}>
+                <button
+                  onClick={loadMoreTimelines}
+                  disabled={loadingMore}
+                  style={{
+                    background: loadingMore ? '#6c757d' : '#2a4d8f',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '16px 32px',
+                    fontSize: 16,
+                    fontWeight: 600,
+                    cursor: loadingMore ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: loadingMore ? 'none' : '0 4px 12px rgba(42, 77, 143, 0.3)',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={e => {
+                    if (!loadingMore) {
+                      e.currentTarget.style.background = '#1e3b73';
+                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(42, 77, 143, 0.4)';
+                    }
+                  }}
+                  onMouseOut={e => {
+                    if (!loadingMore) {
+                      e.currentTarget.style.background = '#2a4d8f';
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(42, 77, 143, 0.3)';
+                    }
+                  }}
+                >
+                  {loadingMore ? (
+                    <>
+                      <div style={{
+                        width: 16,
+                        height: 16,
+                        border: '2px solid #fff',
+                        borderTop: '2px solid transparent',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                      }}></div>
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      Load More Timelines
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -448,6 +626,39 @@ export const TimelineListPage: React.FC = () => {
       <div style={{ maxWidth: 1200, margin: '20px auto 0 auto', padding: '0 20px', textAlign: 'center' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: '#f8f9fa', padding: '16px 24px', borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
           <span style={{ fontWeight: 500, color: '#495057', marginRight: 8 }}>Browse:</span>
+          {siteConfig.timelineList.enableAllView && (
+            <button
+              onClick={() => handleCharacterFilterChange('')}
+              style={{
+                background: characterFilter === '' ? '#2a4d8f' : '#fff',
+                color: characterFilter === '' ? '#fff' : '#495057',
+                border: characterFilter === '' ? '1px solid #2a4d8f' : '1px solid #dee2e6',
+                borderRadius: 6,
+                padding: '8px 12px',
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                minWidth: 36,
+                textAlign: 'center',
+                boxShadow: characterFilter === '' ? '0 2px 4px rgba(42, 77, 143, 0.2)' : 'none'
+              }}
+              onMouseOver={e => {
+                if (characterFilter !== '') {
+                  e.currentTarget.style.background = '#f8f9fa';
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                }
+              }}
+              onMouseOut={e => {
+                if (characterFilter !== '') {
+                  e.currentTarget.style.background = '#fff';
+                  e.currentTarget.style.boxShadow = 'none';
+                }
+              }}
+            >
+              All
+            </button>
+          )}
           {['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(char => (
             <button
               key={char}
