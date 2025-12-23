@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify';
 import { useSharedAuth } from '../context/useSharedAuth';
 import { getTimelines, getTimelineMediaCovers } from '../services/timelineService';
 import type { Timeline } from '../services/timelineService';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { MediaCoverMontage } from '../components/MediaCoverMontage';
 import { loadBackgroundImage } from '../services/sensenet';
@@ -13,6 +13,7 @@ import { timelinesPath } from '../projectPaths';
 export const TimelineListPage: React.FC = () => {
   // Handle authentication state - unified auth context
   const { user } = useSharedAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const [timelines, setTimelines] = useState<Timeline[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,7 +25,7 @@ export const TimelineListPage: React.FC = () => {
     const saved = localStorage.getItem('timeline-sort-order');
     return (saved === 'alphabetical' || saved === 'created_desc') ? saved : 'alphabetical';
   });
-  const [characterFilter, setCharacterFilter] = useState<string>('a'); // Default to 'a'
+  const [characterFilter, setCharacterFilter] = useState<string>('');
   
   // Pagination state for "All" view
   const [loadedTimelines, setLoadedTimelines] = useState<Timeline[]>([]);
@@ -43,6 +44,15 @@ export const TimelineListPage: React.FC = () => {
     setLoadedTimelines([]);
     setHasMore(false);
     setLoadingMore(false);
+    
+    // Update URL parameter
+    const newParams = new URLSearchParams(searchParams);
+    if (character === '') {
+      newParams.set('filter', 'all');
+    } else {
+      newParams.set('filter', character);
+    }
+    setSearchParams(newParams);
   };
 
   const loadMoreTimelines = async () => {
@@ -153,6 +163,32 @@ export const TimelineListPage: React.FC = () => {
         .finally(() => setLoading(false));
     }
   }, [characterFilter, sortOrder]);
+
+  // Sync characterFilter with URL parameters
+  useEffect(() => {
+    if (!siteConfig.timelineList.enableAbcPagination) {
+      if (characterFilter !== '') {
+        setCharacterFilter('');
+      }
+      return;
+    }
+    
+    const filterParam = searchParams.get('filter');
+    let expectedFilter = 'a'; // Default
+    if (filterParam === 'all') {
+      expectedFilter = '';
+    } else if (filterParam && filterParam.length === 1) {
+      expectedFilter = filterParam;
+    }
+    
+    if (characterFilter !== expectedFilter) {
+      setCharacterFilter(expectedFilter);
+      setLoading(true);
+      setLoadedTimelines([]);
+      setHasMore(false);
+      setLoadingMore(false);
+    }
+  }, [searchParams, siteConfig.timelineList.enableAbcPagination, characterFilter]);
 
   // Load background image from SenseNet
   useEffect(() => {
@@ -267,7 +303,7 @@ export const TimelineListPage: React.FC = () => {
                 All
               </button>
             )}
-            {['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(char => (
+            {siteConfig.timelineList.enableAbcPagination && ['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(char => (
               <button
                 key={char}
                 onClick={() => handleCharacterFilterChange(char.toLowerCase())}

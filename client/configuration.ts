@@ -29,6 +29,8 @@ export const siteConfig = {
 
   // Timeline list configuration
   timelineList: {
+    // Enable/disable ABC pagination (character-based filtering)
+    enableAbcPagination: import.meta.env.VITE_ENABLE_ABC_PAGINATION !== 'false', // Default: true
     // Enable/disable "All" view with pagination (can be disabled for performance reasons)
     enableAllView: import.meta.env.VITE_ENABLE_ALL_TIMELINE_VIEW !== 'false', // Default: true
     // Number of timelines to load per page in "All" view

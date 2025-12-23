@@ -565,13 +565,42 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 
 ### Story 32 - ABC-based Timeline Pagination
 - [x] **IMPLEMENTED: Character-based filtering** - Modified getTimelines() function to accept optional characterFilter parameter
-- [x] **ENHANCED: SenseNet OData queries** - Added DisplayName filtering with startsWith for alphabetic characters and regex for non-alphabetic (#)
+- [x] **ENHANCED: SenseNet OData queries** - Added DisplayName filtering with wildcard patterns for alphabetic characters and regex for non-alphabetic (#)
 - [x] **UPDATED: TimelineListPage component** - Added characterFilter state with default 'a' value and ABC navigation UI
-- [x] **CREATED: ABC navigation controls** - Added character selection buttons (A-Z + #) at top and bottom of timeline list page
-- [x] **IMPLEMENTED: Server-side filtering** - Moved character filtering from client-side to server-side for better performance
+- [x] **CREATED: ABC navigation controls** - Added character selection buttons (A-Z + # + All) at top and bottom of timeline list page
+- [x] **IMPLEMENTED: Smart sorting logic** - Alphabetical sorting for character-filtered views, alphabetical + newest options for "All" view
 - [x] **ENHANCED: UI feedback** - Active character button is highlighted with different styling and visual indicators
 - [x] **MAINTAINED: Responsive design** - ABC navigation wraps properly on smaller screens and maintains accessibility
+- [x] **ADDED: Configurable "All" view** - Environment variable VITE_ENABLE_ALL_TIMELINE_VIEW controls "All" button visibility (default: true)
+- [x] **IMPLEMENTED: Pagination for "All" view** - Load more functionality with configurable page size (VITE_ALL_TIMELINE_PAGE_SIZE, default: 20)
+- [x] **ENHANCED: Performance optimization** - Only "All" view uses pagination to avoid loading all timelines at once
 - [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
-- [x] **RESULT: Improved user experience** - Users can now quickly browse timelines by starting character with intuitive navigation
+- [x] **RESULT: Improved user experience** - Users can browse timelines by starting character or view all with flexible sorting and pagination
+- [x] **ENHANCED: "All" navigation option** - Added "All" button that shows all timelines without character filtering
+- [x] **ENHANCED: Smart sorting logic** - Character-filtered views (A-Z, #) only allow alphabetical sorting, "All" view allows both alphabetical and newest-first sorting
+- [x] **ENHANCED: Query handling** - Updated getTimelines() to properly handle empty characterFilter for "All" option
+- [x] **ENHANCED: UI improvements** - Added "All" button to both top and bottom navigation with consistent styling
+- [x] **TECHNICAL: Empty string bypass** - Empty string characterFilter bypasses server-side character filtering
+- [x] **TECHNICAL: Adaptive sorting** - Client-side sorting logic adapts based on active filter (character vs all)
+- [x] **TECHNICAL: Conditional UI** - "Newest First" option only appears in dropdown when "All" is selected
+- [x] **TECHNICAL: Default behavior** - Maintains default 'a' character filter on page load as originally requested
+- [x] **RESULT: Complete functionality** - ABC pagination fully functional with character filtering, "All" option provides access to all timelines with flexible sorting
+- [x] **ENHANCED: Configurable pagination system** - Added environment variable configuration for "All" view with pagination support
+- [x] **IMPLEMENTED: Load More functionality** - Added loading spinner and proper state management for incremental loading
+- [x] **OPTIMIZED: Performance** - Character-filtered views load all at once, "All" view loads incrementally with skip/top parameters
+- [x] **CONFIGURED: Feature toggling** - Configuration-based enable/disable for easy management via environment variables
+- [x] **ADDED: Server-side sorting** - getTimelines() function now accepts sortOrder parameter for proper server-side ordering (CreationDate desc for newest, DisplayName for alphabetical)
+- [x] **REMOVED: Client-side sorting** - Eliminated redundant client-side sorting since server handles ordering correctly across pagination
+
+### Story 33 - Configurable ABC Pagination with URL Support
+- [x] **ADDED: Configuration option** - VITE_ENABLE_ABC_PAGINATION environment variable to enable/disable ABC pagination (default: true)
+- [x] **IMPLEMENTED: Conditional UI rendering** - ABC navigation buttons only show when ABC pagination is enabled
+- [x] **ENHANCED: Default behavior** - When ABC pagination is disabled, defaults to "All" view with load more functionality
+- [x] **ADDED: URL parameter support** - Character filter state is reflected in URL as ?filter=a, ?filter=all, etc.
+- [x] **IMPLEMENTED: URL synchronization** - Page automatically loads correct filter when URL contains filter parameter
+- [x] **MAINTAINED: Backward compatibility** - URLs without filter parameter default to 'a' when ABC is enabled, 'all' when disabled
+- [x] **ENHANCED: useSearchParams integration** - Added React Router URL parameter handling for bookmarkable navigation
+- [x] **TESTED: Build verification** - All changes compile successfully with zero TypeScript errors
+- [x] **RESULT: Flexible navigation** - Users can configure ABC pagination behavior and share direct links to filtered views
 
 ---
