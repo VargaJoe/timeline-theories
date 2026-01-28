@@ -82,21 +82,18 @@ export const LazyImage: React.FC<LazyImageProps> = ({
 
     const executeLoad = async () => {
       try {
-        // Check if we have an access token (get it fresh each time)
-        if (!accessTokenRef.current) {
-          console.warn('No access token available for image loading');
-          setHasError(true);
-          return;
-        }
-
         // Always use cache-busting to avoid browser cache CORS issues
         const cacheBustUrl = `${src}${src.includes('?') ? '&' : '?'}cb=1`;
 
-        // Use fetch with authentication to load the image
+        // Prepare headers: include Authorization only if we have an access token
+        const headers: Record<string, string> = {};
+        if (accessTokenRef.current) {
+          headers['Authorization'] = `Bearer ${accessTokenRef.current}`;
+        }
+
+        // Use fetch to load the image (with or without authentication)
         const response = await fetch(cacheBustUrl, {
-          headers: {
-            'Authorization': `Bearer ${accessTokenRef.current}`,
-          },
+          headers,
           signal: abortControllerRef.current?.signal,
         });
 

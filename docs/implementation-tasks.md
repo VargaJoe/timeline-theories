@@ -605,5 +605,9 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] Added volume mount for MSSQL server to persist database files in dbvolume folder
 - [x] Fixed insert-apikey.ps1 script to work with docker-compose setup by using mssql-tools container and correct network name
 
+### Bug Fix - Allow Anonymous Image Loading for Public Timelines
+- [x] Modified LazyImage.tsx to attempt image fetch without Authorization header when no access token is available
+- [x] Images in public timelines now load correctly for non-authenticated visitors
+- [x] Maintains authenticated loading for private content when user is logged in
 
 ---
