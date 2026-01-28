@@ -168,7 +168,7 @@ export const TimelineListPage: React.FC = () => {
         })
         .finally(() => setLoading(false));
     }
-  }, [characterFilter, sortOrder, isInitialized]);
+  }, [characterFilter, sortOrder, isInitialized, user]);
 
   // Sync characterFilter with URL parameters
   useEffect(() => {

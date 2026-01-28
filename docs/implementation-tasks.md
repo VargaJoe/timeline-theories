@@ -610,4 +610,12 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] Images in public timelines now load correctly for non-authenticated visitors
 - [x] Maintains authenticated loading for private content when user is logged in
 
+### Bug Fix - Fix ABC Pager Reload Issue
+- [x] Fixed ABC pager reload issue where page with ?filter=f showed 'No timelines found' on refresh
+- [x] Root cause was useEffect not depending on user authentication state
+- [x] On reload, loading useEffect ran before auth was ready, used includePrivate=false
+- [x] When user loaded later, effect didn't re-run because user wasn't in dependencies
+- [x] Added user to useEffect dependencies so timelines re-fetch when auth state changes
+- [x] Build verified successful with TypeScript compilation
+
 ---
