@@ -601,5 +601,9 @@ Timeline Theories is a personal application for creating, organizing, and sharin
 - [x] Due to persistent quota issues, disabled localStorage caching for images; browser HTTP caching provides sufficient performance
 - [x] Prevent loading state when clicking same letter by only setting loading=true when character filter actually changes
 
+### Technical Task - Local repository with apikey
+- [x] Added volume mount for MSSQL server to persist database files in dbvolume folder
+- [x] Fixed insert-apikey.ps1 script to work with docker-compose setup by using mssql-tools container and correct network name
+
 
 ---

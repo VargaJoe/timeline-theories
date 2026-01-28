@@ -198,3 +198,5 @@ dist/
 **/example-*.json
 docs/temp-*.md
 
+# deployment files
+deployment/dbvolume/
