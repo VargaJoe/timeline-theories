@@ -71,19 +71,28 @@ cp client/.env.example client/.env
 ```
 
 4. **Configure Environment Variables**
-Edit `client/.env`:
+Edit `client/.env.local` (create if doesn't exist):
 ```env
 # SenseNet Repository Configuration
 VITE_SENSENET_REPO_URL=https://your-sensenet-repo-url
-VITE_PROJECT_ROOT_PATH=/Root/Content
+VITE_PROJECT_ROOT_PATH=/Root/Content/timelines
 
-# OIDC Authentication
+# Authentication Options (choose one or more):
+
+# Option 1: API Key (Visitor Mode) - for public unauthenticated access
+VITE_SENSENET_API_KEY=your-api-key-here
+
+# Option 2: IdentityServer/OIDC - for SSO authentication
 VITE_OIDC_CLIENT_ID=your-client-id
 VITE_OIDC_AUTHORITY=https://your-identity-server-url
+
+# Option 3: SNAuth - auto-detected from SenseNet (no config needed)
 
 # Trakt.tv Integration (Optional)
 VITE_TRAKT_API_KEY=your-trakt-api-key
 ```
+
+**See [docs/environment-variables.md](docs/environment-variables.md) for complete configuration guide.**
 
 5. **Start Development Server**
 ```bash
@@ -105,9 +114,40 @@ Visit `http://localhost:5173` to see the application.
 
 ### Backend & Services
 - **SenseNet ECM** - Content management and storage
-- **OIDC Authentication** - Secure user authentication
+- **Multi-Layer Authentication**:
+  - **Visitor Mode (API Key)** - Unauthenticated public access
+  - **SNAuth** - Native SenseNet authentication
+  - **OIDC/IdentityServer** - External identity provider (SSO)
 - **Netlify Functions** - Serverless API endpoints
 - **Trakt.tv API** - Media data and list imports
+
+### Authentication Architecture
+
+Timeline Theories supports **three authentication layers** that work together:
+
+1. **Visitor Mode (API Key)**
+   - Allows unauthenticated users to browse public content
+   - Query parameter-based authentication
+   - Automatically used when user is not logged in
+   - Optional - app works without it
+
+2. **SNAuth (Native SenseNet)**
+   - JWT-based authentication via SenseNet auth service
+   - Bearer tokens stored in localStorage
+   - Auto-detected from SenseNet configuration
+   - No additional setup required
+
+3. **IdentityServer OIDC (External SSO)**
+   - Integration with company SSO or third-party identity providers
+   - Token-based authentication
+   - Requires OIDC configuration in environment
+
+**Key Feature:** Images work correctly in all modes, even in SNAuth mode where browsers cannot send Bearer tokens in `<img>` tags.
+
+**Documentation:**
+- Complete guide: [docs/dual-authentication-implementation.md](docs/dual-authentication-implementation.md)
+- Environment setup: [docs/environment-variables.md](docs/environment-variables.md)
+- OIDC specifics: [docs/authentication-guide.md](docs/authentication-guide.md)
 
 ### Project Structure
 ```

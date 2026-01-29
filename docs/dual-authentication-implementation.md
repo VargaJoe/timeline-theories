@@ -1,8 +1,141 @@
-# Dual Authentication Implementation Guide
+# Multi-Layer Authentication Implementation Guide
 
 ## Overview
 
-This document describes the implementation of dual authentication support (SNAuth and IdentityServer OIDC) in the Timeline Theories application. It covers critical pitfalls, solutions, and lessons learned during development.
+This document describes the implementation of **three-layer authentication support** in the Timeline Theories application:
+
+1. **Visitor Mode (API Key)** - Unauthenticated access with API key for public viewing
+2. **SNAuth** - SenseNet authentication with Bearer tokens stored in localStorage
+3. **IdentityServer OIDC** - External identity provider with token-based authentication
+
+The system automatically detects and uses the appropriate authentication method based on configuration and user state. It covers critical pitfalls, solutions, and lessons learned during development.
+
+---
+
+## Authentication Layers
+
+### Layer 1: Visitor Mode (API Key Authentication)
+
+**Purpose:** Enable unauthenticated users to browse public content without requiring login.
+
+**Implementation:** Query parameter-based API key authentication
+
+**When Active:**
+- User is NOT logged in (no Bearer token in repository.configuration)
+- `VITE_SENSENET_API_KEY` environment variable is configured
+- All SenseNet requests automatically include apikey as query parameter
+
+**Key Features:**
+- ✅ Bypasses CORS preflight (query params don't trigger OPTIONS requests)
+- ✅ Works with both API requests and binary URLs (images, files)
+- ✅ Automatically disabled when user logs in (to preserve user permissions)
+- ✅ Completely optional - app works without it if not configured
+
+**Configuration:**
+```bash
+# .env.local
+VITE_SENSENET_API_KEY=your-api-key-here
+```
+
+**Critical Implementation Details:**
+
+1. **Binary Handler URLs (images):** Always append apikey even when authenticated
+   - Browsers cannot send Bearer tokens (SNAuth mode) in `<img>` tag requests
+   - Binary URLs like `/binaryhandler.ashx?nodeid=X` require query parameter auth
+   - Using apikey for images is safe - they're typically public content
+
+2. **OData API URLs:** Only append apikey when NOT authenticated
+   - When user is logged in, repository.fetch() sends Bearer token
+   - This preserves user permission levels
+   - Prevents security issue where apikey permissions bypass user permissions
+
+**Implementation Location:** `client/services/sensenet.ts`
+
+```typescript
+// Global fetch wrapper - injects apikey for unauthenticated API requests
+if (sensenetApiKey) {
+  const originalGlobalFetch = window.fetch;
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    let url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    
+    if (url.startsWith(repositoryUrl)) {
+      if (!isAuthenticated()) {
+        // Add apikey as query parameter for unauthenticated requests
+        const urlObj = new URL(url);
+        urlObj.searchParams.set('apikey', sensenetApiKey);
+        url = urlObj.toString();
+        // Update input...
+      }
+    }
+    return originalGlobalFetch(input, init);
+  };
+}
+
+// Helper for binary URLs (images used in <img> tags)
+export function appendApiKeyToUrl(url: string): string {
+  if (!sensenetApiKey) return url;
+  if (!url.startsWith(repositoryUrl)) return url;
+  
+  const isBinaryUrl = url.includes('/binaryhandler.ashx');
+  const hasToken = (repository.configuration as { token?: string }).token;
+  
+  // Binary URLs: always append (browsers can't send Bearer tokens in img tags)
+  // API URLs: only append when not authenticated (preserve user permissions)
+  const shouldAppendApiKey = isBinaryUrl || !hasToken;
+  
+  if (!shouldAppendApiKey) return url;
+  
+  const urlObj = new URL(url);
+  if (!urlObj.searchParams.has('apikey')) {
+    urlObj.searchParams.set('apikey', sensenetApiKey);
+  }
+  return urlObj.toString();
+}
+```
+
+**Security Considerations:**
+- API key provides limited "visitor" level permissions configured in SenseNet
+- User permissions take precedence when authenticated
+- Binary URLs safely use apikey even when authenticated (images are typically public)
+- Never exposes API key in client-side code (loaded from env variables)
+
+**Usage:**
+```typescript
+// For binary URLs used in <img> tags
+import { appendApiKeyToUrl } from './services/sensenet';
+
+const imageUrl = appendApiKeyToUrl(binaryHandlerUrl);
+// <img src={imageUrl} /> - Browser can load image with apikey parameter
+
+// For API requests
+// Global fetch wrapper handles this automatically when not authenticated
+```
+
+---
+
+### Layer 2: SNAuth Authentication
+
+**Purpose:** Native SenseNet authentication with JWT tokens.
+
+**When Active:** 
+- SenseNet server configured with SNAuth authentication mode
+- User clicks "Login with SNAuth" button
+- Tokens stored in localStorage, sent as Bearer tokens in API requests
+
+**Limitations:**
+- ⚠️ Bearer tokens in localStorage cannot be sent by browsers in `<img>` tag requests
+- This is why binary URLs need apikey even when SNAuth authenticated
+
+---
+
+### Layer 3: IdentityServer OIDC Authentication
+
+**Purpose:** External identity provider integration (e.g., company SSO, third-party auth).
+
+**When Active:**
+- SenseNet server configured with IdentityServer/OIDC authentication mode
+- User clicks "Login with IdentityServer" button
+- Tokens managed by OIDC library, sent as Bearer tokens in API requests
 
 ---
 
@@ -20,6 +153,110 @@ const authType = authConfig.authenticationMode; // "SNAuth" or "Windows"
 - Detection happens at application startup in `AppProviders.tsx`
 - Response determines which provider to render: `SNAuthProviderWrapper` or `ISAuthProviderWrapper`
 - Configuration is cached in component state, not localStorage
+- **API Key layer operates independently** - works with any auth mode or no auth at all
+
+**Authentication Priority:**
+1. **User authenticated** (SNAuth or OIDC) → Use Bearer token for API requests, apikey for images
+2. **User not authenticated + apikey configured** → Use apikey for all requests
+3. **User not authenticated + no apikey** → Requests may fail or work based on SenseNet permissions
+
+---
+
+## API Key Authentication (Visitor Mode)
+
+### Configuration
+
+Add to `.env.local`:
+```bash
+VITE_SENSENET_API_KEY=your-pre-generated-api-key-here
+```
+
+Add to `client/configuration.ts`:
+```typescript
+export const sensenetApiKey = import.meta.env.VITE_SENSENET_API_KEY || '';
+```
+
+### How It Works
+
+1. **Global Fetch Wrapper:** Intercepts all fetch requests to SenseNet
+2. **Authentication Check:** Determines if user has Bearer token
+3. **Conditional Injection:**
+   - If NOT authenticated → Append apikey to URL as query parameter
+   - If authenticated → Skip apikey (use Bearer token instead)
+4. **Binary URL Helper:** Always appends apikey to binary handler URLs (even when authenticated)
+
+### Why Query Parameters?
+
+**CORS Preflight Issue:**
+- Custom headers (like `apikey: xxx`) trigger CORS preflight OPTIONS requests
+- Preflight requests often fail or require additional server configuration
+- Query parameters bypass CORS preflight entirely
+
+**Verified Solution:**
+```bash
+# Both methods work, but query param avoids CORS:
+curl -k -H "apikey: xxx" https://localhost:41016/odata.svc/('Root')/GetCurrentUser
+curl -k "https://localhost:41016/odata.svc/('Root')/GetCurrentUser?apikey=xxx"
+```
+
+### Binary URLs and SNAuth Mode
+
+**Critical Understanding:**
+
+SNAuth authentication stores tokens in localStorage:
+```javascript
+localStorage.getItem('sn-auth-access-token'); // Bearer token
+```
+
+These tokens are sent in API requests via `Authorization: Bearer <token>` header.
+
+**Problem:** Browsers **cannot** send custom headers (including Bearer tokens) in `<img>` tag requests.
+
+**Solution:** Binary handler URLs must always include apikey parameter:
+```html
+<!-- This works - apikey in URL -->
+<img src="/binaryhandler.ashx?nodeid=123&propertyname=CoverImageBin&apikey=xxx" />
+
+<!-- This does NOT work - browser can't send Bearer token -->
+<img src="/binaryhandler.ashx?nodeid=123&propertyname=CoverImageBin" />
+```
+
+**Note:** JWT authentication mode uses HTTP-only cookies which browsers DO send automatically in `<img>` tags. However, our implementation uses SNAuth mode.
+
+### Implementation Files
+
+**Modified Files:**
+- `client/configuration.ts` - Added sensenetApiKey export
+- `client/services/sensenet.ts` - Global fetch wrapper + appendApiKeyToUrl helper
+- `client/services/mediaLibraryService.ts` - Uses appendApiKeyToUrl for cover images
+- `client/pages/TimelineViewPage.tsx` - Uses appendApiKeyToUrl for timeline entry images
+- `deployment/docker-compose.yml` - Added CORS configuration for apikey parameter
+
+### Security Model
+
+**API Key Permissions:**
+- Configured in SenseNet as a limited "visitor" user
+- Typically read-only access to public content
+- Does not expose sensitive data or admin functions
+
+**User Permissions:**
+- When authenticated, API requests use user's Bearer token
+- User sees content according to their permission level
+- API key only used for images (public content)
+
+**Permission Preservation:**
+```typescript
+// Authenticated user browsing timelines
+// API request: Uses Bearer token → sees content per user permissions
+fetch('/odata.svc/Root/Content/timelines', { 
+  headers: { Authorization: 'Bearer user_token' } 
+});
+
+// Image in timeline: Uses apikey → loads image with visitor permissions
+<img src="/binaryhandler.ashx?nodeid=123&apikey=xxx" />
+```
+
+This ensures authenticated users' permissions apply to API access while images remain accessible.
 
 ---
 
@@ -425,6 +662,21 @@ https://github.com/SenseNet/sn-client/blob/feature/sn-auth-package-extraimprovem
 
 ## Testing Checklist
 
+### API Key (Visitor Mode) Flow
+- [ ] Set `VITE_SENSENET_API_KEY` in `.env.local`
+- [ ] Start app without logging in
+- [ ] Open Network tab in browser DevTools
+- [ ] Navigate to timeline list page
+- [ ] Verify OData requests include `?apikey=xxx` in URL
+- [ ] Verify images load successfully with `?apikey=xxx` in URL
+- [ ] No CORS errors in console
+- [ ] No 404 errors for images or API calls
+- [ ] Login with SNAuth or OIDC
+- [ ] After login, verify OData requests use `Authorization: Bearer` header (no apikey in URL)
+- [ ] After login, verify images still include `?apikey=xxx` in URL
+- [ ] Remove `VITE_SENSENET_API_KEY` from config
+- [ ] Restart app - verify it works normally (with authentication required)
+
 ### SNAuth Flow
 - [ ] Login button triggers externalLogin()
 - [ ] SNAuth server page loads
@@ -531,6 +783,17 @@ For issues with:
 
 ## Changelog
 
+### 2026-01-29 - API Key Authentication Layer
+- Added visitor mode with API key authentication
+- Implemented global fetch wrapper for automatic apikey injection
+- Created `appendApiKeyToUrl()` helper for binary handler URLs
+- Added SNAuth mode binary URL handling (images always use apikey)
+- Implemented permission preservation (API requests use Bearer token when authenticated)
+- Updated security model to handle three authentication layers
+- Added CORS configuration for apikey query parameter
+- Documented query parameter approach vs header approach
+- Added comprehensive testing checklist for visitor mode
+
 ### 2025-12-21 - Context Architecture Improvements
 - Added `AuthTypeContext` for global auth type tracking
 - Refactored `LoginButton` to use `useSharedAuth()` and `useAuthType()`
@@ -550,6 +813,7 @@ For issues with:
 
 ---
 
-**Last Updated:** December 21, 2025  
+**Last Updated:** January 29, 2026  
 **Author:** Development Team  
 **Status:** Active Development
+
