@@ -88,7 +88,7 @@ export async function uploadCoverImageBinary(
 }
 
 // src/client/services/mediaLibraryService.ts
-import { repository } from './sensenet';
+import { repository, appendApiKeyToUrl } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { MEDIA_ITEM_CONTENT_TYPE, BOOK_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
@@ -606,12 +606,15 @@ export class MediaLibraryService {
     // First check if we have a binary image (preferred)
     if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
       const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
-      return `${repositoryUrl}${relativePath}`;
+      const fullUrl = `${repositoryUrl}${relativePath}`;
+      // Append apikey for unauthenticated access (needed for <img> tags)
+      return appendApiKeyToUrl(fullUrl);
     }
     
     // Otherwise, check if we have a URL
     if (mediaItem.CoverImageUrl) {
-      return mediaItem.CoverImageUrl;
+      // If it's a SenseNet URL, append apikey
+      return appendApiKeyToUrl(mediaItem.CoverImageUrl);
     }
     
     return null;

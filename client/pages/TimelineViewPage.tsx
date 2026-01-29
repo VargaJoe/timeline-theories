@@ -10,7 +10,7 @@ import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
 import { timelinesPath } from '../projectPaths';
-import { repository } from '../services/sensenet';
+import { repository, appendApiKeyToUrl } from '../services/sensenet';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { loadBackgroundImage } from '../services/sensenet';
 import { siteConfig, repositoryUrl } from '../configuration';
@@ -29,7 +29,9 @@ function getCoverImageUrl(mediaItem: MediaItemRef): string | null {
   // Otherwise, check if we have a binary image
   if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
     const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
-    return `${repositoryUrl}${relativePath}`;
+    const fullUrl = `${repositoryUrl}${relativePath}`;
+    // Append apikey for unauthenticated access (needed for <img> tags)
+    return appendApiKeyToUrl(fullUrl);
   }
   
   return null;
