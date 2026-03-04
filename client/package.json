@@ -16,7 +16,7 @@
     "@sensenet/client-core": "^4.2.0",
     "@sensenet/sn-auth-react": "^1.0.2",
     "@types/react-router-dom": "^5.3.3",
-    "dompurify": "^3.2.6",
+    "dompurify": "^3.3.1",
     "history": "^5.3.0",
     "jszip": "^3.10.1",
     "node-fetch": "^3.3.2",
@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.29.0",
-    "@types/dompurify": "^3.0.5",
+    "@types/dompurify": "^3.2.0",
     "@types/node": "^24.0.13",
     "@types/react": "^17.0.87",
     "@types/react-beautiful-dnd": "^13.1.8",
