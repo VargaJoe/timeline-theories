@@ -10,7 +10,7 @@
     "@sensenet/authentication-oidc-react": "^2.3.1",
     "@sensenet/client-core": "^4.2.0",
     "cors": "^2.8.5",
-    "dompurify": "^3.2.6",
+    "dompurify": "^3.3.2",
     "express": "^5.2.0",
     "history": "^5.3.0",
     "pg": "^8.16.3",
