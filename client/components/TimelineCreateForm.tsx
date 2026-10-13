@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { TraktImportDialog } from './TraktImportDialog';
-// import { fetchTraktList } from '../services/traktService';
-import type { TraktListItem } from '../services/traktService';
-import MediaLibraryService from '../services/mediaLibraryService';
-import type { MediaItem } from '../services/mediaLibraryService';
-import { TimelineEntryService } from '../services/timelineEntryService';
 import { useNavigate } from 'react-router-dom';
 import { createTimeline } from '../services/timelineService';
 import { timelinesPath } from '../projectPaths';
+import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
+import { assertOperations, captureOperationContext } from '../services/sensenet';
+import { usePermissions } from '../hooks/usePermissions';
 
 export const TimelineCreateForm: React.FC = () => {
   const [name, setName] = useState('');
@@ -20,18 +17,16 @@ export const TimelineCreateForm: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [importSummary, setImportSummary] = useState<string|null>(null);
   const navigate = useNavigate();
 
-  // Only keep the review items state - TraktImportDialog handles the import process
-  const [traktReviewItems, setTraktReviewItems] = useState<TraktListItem[]|null>(null);
-  const [traktProcessing, setTraktProcessing] = useState(false);
+  const operations = [{ target: timelinesPath, action: 'create' as const, contentType: TIMELINE_CONTENT_TYPE }];
+  const canCreate = usePermissions(operations);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const checkContext = captureOperationContext();
     setError('');
     setSuccess(false);
-    setImportSummary(null);
     if (!name.trim()) {
       setError('Title is required');
       return;
@@ -42,6 +37,8 @@ export const TimelineCreateForm: React.FC = () => {
     }
     setLoading(true);
     try {
+      await assertOperations(operations);
+      checkContext();
       const timeline = await createTimeline({ 
         name: name.trim(), 
         displayName: displayName.trim(),
@@ -49,60 +46,10 @@ export const TimelineCreateForm: React.FC = () => {
         sortOrder,
         timelineType
       });
-      let created = 0, reused = 0;
-      const errors: string[] = [];
-      if (traktReviewItems && traktReviewItems.length > 0) {
-        setTraktProcessing(true);
-        for (let i = 0; i < traktReviewItems.length; i++) {
-          const item = traktReviewItems[i];
-          let found: MediaItem | undefined = undefined;
-          try {
-            const allMedia = await MediaLibraryService.getMediaItems();
-            // Consistent 'title (year)' format from title for matching if year is present, like TraktImportDialog
-            const displayName = item.title;
-            found = allMedia.find(m => m.DisplayName.toLowerCase() === displayName.toLowerCase());
-          } catch {
-            // Ignore errors in searching media items
-          }
-          let mediaItem: MediaItem;
-          try {
-            if (found) {
-              mediaItem = found;
-              reused++;
-            } else {
-              // Consistent 'title (year)' format is already set in title
-              const displayName = item.title;
-              const req = {
-                DisplayName: displayName,
-                Description: '',
-                MediaType: item.type,
-                ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
-                ExternalLinks: JSON.stringify(item.ids),
-              };
-              mediaItem = await MediaLibraryService.createMediaItem(req);
-              created++;
-            }
-            await TimelineEntryService.createTimelineEntry({
-              displayName: mediaItem.DisplayName,
-              mediaItem: {
-                Name: mediaItem.DisplayName,
-                Id: mediaItem.Id,
-                DisplayName: mediaItem.DisplayName,
-                CoverImageUrl: mediaItem.CoverImageUrl,
-              },
-              timelineId: Number(timeline.id),
-              position: i + 1,
-            }, `${timelinesPath}/${timeline.name}`);
-          } catch (err) {
-            errors.push(`${item.title} (${item.year || ''}): ${err instanceof Error ? err.message : 'Unknown error'}`);
-          }
-        }
-        setTraktProcessing(false);
-        setImportSummary(`Imported ${traktReviewItems.length} items: ${created} created, ${reused} reused.${errors.length ? ' Errors: ' + errors.join('; ') : ''}`);
-      }
       setSuccess(true);
       setLoading(false);
       setTimeout(() => {
+        try { checkContext(); } catch { return; }
         navigate(`/timelines/${timeline.name}`);
       }, 1500);
     } catch (err) {
@@ -113,17 +60,7 @@ export const TimelineCreateForm: React.FC = () => {
 
   return (
     <div style={{ maxWidth: 400, margin: '0 auto' }}>
-      {/* Trakt Import Button - just for fetching items to review */}
-      <TraktImportDialog
-        disabled={loading || traktProcessing}
-        fetchOnly={true}
-        onImportComplete={(items) => {
-          // Don't create timeline here, just set items for review
-          if (Array.isArray(items)) {
-            setTraktReviewItems(items);
-          }
-        }}
-      />
+      <p style={{ color: '#6c757d' }}>Create the timeline first, then import from its page.</p>
       {success ? (
         <div style={{
           background: '#d4edda',
@@ -148,30 +85,6 @@ export const TimelineCreateForm: React.FC = () => {
           gap: 16
         }}>
           <h2 style={{ textAlign: 'center', marginBottom: 24, color: '#2a4d8f' }}>Create New Timeline</h2>
-
-          {/* Review/edit imported Trakt items before timeline creation */}
-          {traktReviewItems && (
-            <div style={{ background: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 8, padding: 16, marginBottom: 12 }}>
-              <strong>Review Imported Items ({traktReviewItems.length})</strong>
-              <ul style={{ maxHeight: 200, overflowY: 'auto', margin: 0, padding: 0, listStyle: 'none' }}>
-                {traktReviewItems.map((item, idx) => (
-                  <li key={idx} style={{ padding: 4, borderBottom: '1px solid #eee', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {item.type.toUpperCase()}: {item.title}
-                    <button type="button" style={{ marginLeft: 'auto', background: '#b71c1c', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 13, cursor: 'pointer' }} onClick={() => {
-                      setTraktReviewItems(traktReviewItems.filter((_, i) => i !== idx));
-                    }}>Remove</button>
-                  </li>
-                ))}
-              </ul>
-              <button type="button" style={{ marginTop: 10, background: '#aaa', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }} onClick={() => setTraktReviewItems(null)}>Clear Imported Items</button>
-            </div>
-          )}
-
-          {traktProcessing && (
-            <div style={{ color: '#2a4d8f', background: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 4, padding: '12px', textAlign: 'center', fontSize: 14, marginBottom: 8 }}>
-              Importing items into timeline...
-            </div>
-          )}
 
           <div>
             <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>Title *</label>
@@ -265,27 +178,22 @@ export const TimelineCreateForm: React.FC = () => {
           </div>
           <button
             type="submit"
-            disabled={loading || traktProcessing}
+            disabled={loading || !canCreate}
             style={{
-              background: loading || traktProcessing ? '#6c757d' : '#2a4d8f',
+              background: loading || !canCreate ? '#6c757d' : '#2a4d8f',
               color: '#fff',
               border: 'none',
               borderRadius: 6,
               padding: '14px 0',
               fontSize: 16,
               fontWeight: 600,
-              cursor: loading || traktProcessing ? 'not-allowed' : 'pointer',
+              cursor: loading || !canCreate ? 'not-allowed' : 'pointer',
               marginTop: 8,
               transition: 'background-color 0.2s'
             }}
           >
-            {loading || traktProcessing ? 'Creating Timeline...' : 'Create Timeline'}
+            {loading || !canCreate ? 'Creating Timeline...' : 'Create Timeline'}
           </button>
-          {importSummary && (
-            <div style={{ color: '#155724', background: '#e3fcec', border: '1px solid #c3e6cb', borderRadius: 4, padding: '12px', textAlign: 'center', fontSize: 14, marginTop: 8 }}>
-              {importSummary}
-            </div>
-          )}
           {error && (
             <div style={{ 
               color: '#721c24', 

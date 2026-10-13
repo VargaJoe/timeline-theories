@@ -1,4 +1,4 @@
-<ContentType name="BookMediaItem" parentType="MediaItem" handler="SenseNet.ContentRepository.GenericContent" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
+<ContentType name="BookMediaItem" parentType="MediaItem" handler="Timeline.Theories.M0.Security.MediaItemSecurityHandler" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
   <DisplayName>BookMediaItem</DisplayName>
   <Description>A book media item with book-specific metadata.</Description>
   <Icon>Content</Icon>
@@ -47,6 +47,7 @@
       <DisplayName>Book Series Number</DisplayName>
       <Description>Position in numbered series (e.g., 3 for book 3 in a series)</Description>
       <Configuration>
+        <MinValue>1</MinValue>
         <VisibleBrowse>Show</VisibleBrowse>
         <VisibleEdit>Show</VisibleEdit>
         <VisibleNew>Show</VisibleNew>

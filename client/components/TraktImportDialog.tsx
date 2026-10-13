@@ -1,27 +1,25 @@
 import React, { useState } from 'react';
 import type { TraktListItem } from '../services/traktService';
 import { fetchTraktList } from '../services/traktService';
-import { useSharedAuth } from '../context/useSharedAuth';
 import MediaLibraryService from '../services/mediaLibraryService';
 import type { MediaItem } from '../services/mediaLibraryService';
-import type { TimelineEntry } from '../services/timelineEntryService';
-import { timelinesPath } from '../projectPaths';
+import { timelinesPath, mediaLibraryPath } from '../projectPaths';
 import { TimelineEntryService } from '../services/timelineEntryService';
+
+import { assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import { TIMELINE_ENTRY_CONTENT_TYPE, MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface TraktImportDialogProps {
   timelineName?: string;
-  onTimelineCreated?: (timelineName: string) => void;
   onImportComplete?: (summary: string | TraktListItem[]) => void;
-  createTimelineIfMissing?: (displayName: string, description: string) => Promise<string>;
   disabled?: boolean;
   fetchOnly?: boolean; // New prop: if true, only fetch items and return them without importing
 }
 
 export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   timelineName,
-  onTimelineCreated,
   onImportComplete,
-  createTimelineIfMissing,
   disabled,
   fetchOnly = false
 }) => {
@@ -31,7 +29,9 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   const [error, setError] = useState('');
   const [summary, setSummary] = useState<string|null>(null);
 
-  const { user, accessToken } = useSharedAuth();
+  const timelinePath = timelineName ? `${timelinesPath}/${timelineName}` : '';
+  const importOperations: Operation[] = timelinePath ? [{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }, { target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }] : [];
+  const canImport = usePermissions(importOperations);
 
   const parseTraktUrl = (url: string) => {
     try {
@@ -70,6 +70,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   };
 
   const handleImport = async () => {
+    const checkContext = captureOperationContext();
     setError('');
     setSummary(null);
     const parsed = parseTraktUrl(traktUrl);
@@ -79,16 +80,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     }
     setImporting(true);
     try {
-      console.log('[TraktImportDialog] Starting import with:', { 
-        username: parsed.username, 
-        list: parsed.list, 
-        hasAccessToken: !!accessToken,
-        accessTokenLength: accessToken?.length,
-        hasUser: !!user
-      });
-      
       // Always use fetchTraktList for consistent mapping
-      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list, accessToken);
+      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list);
       
       // If fetchOnly mode, just return the items for review
       if (fetchOnly) {
@@ -97,84 +90,33 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
         return;
       }
       
-      let timeline = timelineName;
-      if (!timeline && createTimelineIfMissing) {
-        // Prompt for timeline name/desc if needed
-        const displayName = prompt('Enter timeline title:') || 'Imported Timeline';
-        const description = prompt('Enter timeline description (optional):') || '';
-        timeline = await createTimelineIfMissing(displayName, description);
-        if (onTimelineCreated) onTimelineCreated(timeline);
+      if (!timelineName) throw new Error('Create the timeline first, then import from its page.');
+      // Each provider occurrence remains a separate timeline occurrence.
+      await assertOperations(importOperations);
+      let created = 0;
+      for (const [index, item] of items.entries()) {
+        checkContext();
+        const { title, subtitle, displayName } = extractTitleAndSubtitle(item);
+        const mediaItem: MediaItem = await MediaLibraryService.createMediaItem({
+          DisplayName: displayName,
+          Title: title,
+          Subtitle: subtitle,
+          Description: '',
+          MediaType: item.type,
+          ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
+          Year: item.year,
+          ExternalLinks: JSON.stringify(item.ids),
+        });
+        created++;
+        checkContext();
+        await TimelineEntryService.createTimelineEntry({
+          displayName: mediaItem.DisplayName,
+          mediaItem: { Name: mediaItem.Name, Id: mediaItem.Id, DisplayName: mediaItem.DisplayName, CoverImageUrl: mediaItem.CoverImageUrl },
+          timelineId: 0,
+          position: index + 1,
+        }, timelinePath);
       }
-      if (!timeline) throw new Error('Timeline not specified or created');
-      // Fetch existing entries for deduplication
-      let existingEntries: TimelineEntry[] = [];
-      try {
-        existingEntries = await TimelineEntryService.listTimelineEntries(0, `${timelinesPath}/${timeline}`);
-      } catch {
-        // Ignore errors, treat as no existing entries
-      }
-      let created = 0, reused = 0, skipped = 0;
-      const errors: string[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        let found: MediaItem | undefined = undefined;
-        try {
-          const allMedia = await MediaLibraryService.getMediaItems();
-          // Use the formatted title for searching existing media items
-          const searchTitle = item.formattedTitle; // Use formatted title for consistent matching
-          found = allMedia.find(m => m.DisplayName.toLowerCase() === searchTitle.toLowerCase());
-        } catch (err) {
-          console.error('Error searching media items:', err);
-          // Ignore errors, treat as not found
-        }
-        let mediaItem: MediaItem;
-        try {
-          if (found) {
-            mediaItem = found;
-            reused++;
-          } else {
-            const { title, subtitle, displayName } = extractTitleAndSubtitle(item);
-            const req = {
-              DisplayName: displayName, // Formatted for display: "Show Title (2020) S01E01"
-              Title: title,             // Clean title for API searches: "Show Title"  
-              Subtitle: subtitle,       // Episode/season info: "S01E01" or "Season 1"
-              Description: '',
-              MediaType: item.type,
-              ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
-              Year: item.year,          // Year as a separate field
-              ExternalLinks: JSON.stringify(item.ids),
-            };
-            mediaItem = await MediaLibraryService.createMediaItem(req);
-            created++;
-          }
-          // Check if entry already exists for this media item
-          const alreadyExists = existingEntries.some(e => e.mediaItem && mediaItem && (
-            (e.mediaItem.Id === mediaItem.Id) ||
-            (e.mediaItem.DisplayName?.toLowerCase() === mediaItem.DisplayName.toLowerCase())
-          ));
-          if (alreadyExists) {
-            skipped++;
-            continue;
-          }
-          const entryData = {
-            displayName: mediaItem.DisplayName,
-            mediaItem: {
-              Name: mediaItem.DisplayName,
-              Id: mediaItem.Id,
-              DisplayName: mediaItem.DisplayName,
-              CoverImageUrl: mediaItem.CoverImageUrl,
-            },
-            timelineId: 0, // Not used by backend, but required by type
-            position: i + 1,
-          };
-          const timelinePath = `${timelinesPath}/${timeline}`;
-          await TimelineEntryService.createTimelineEntry(entryData, timelinePath);
-        } catch (err) {
-          console.error(`Error processing item ${item.title}:`, err);
-          errors.push(`${item.title} (${item.year || ''}): ${err instanceof Error ? err.message : 'Unknown error'}`);
-        }
-      }
-      const sum = `Imported ${items.length} items: ${created} created, ${reused} reused, ${skipped} skipped.${errors.length ? ' Errors: ' + errors.join('; ') : ''}`;
+      const sum = `Imported ${items.length} items: ${created} created.`;
       setSummary(sum);
       if (onImportComplete) onImportComplete(sum);
     } catch (err) {
@@ -188,7 +130,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     <div style={{ display: 'inline-block' }}>
       <button 
         onClick={() => setShow(s => !s)} 
-        disabled={disabled} 
+        disabled={disabled || (!fetchOnly && !canImport)}
         style={{ 
           background: '#6f42c1', 
           color: '#fff', 
@@ -259,7 +201,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
             </button>
             <button 
               onClick={handleImport} 
-              disabled={importing || !traktUrl.trim()} 
+              disabled={importing || !traktUrl.trim() || (!fetchOnly && !canImport)}
               style={{ 
                 background: importing || !traktUrl.trim() ? '#ccc' : '#007bff', 
                 color: '#fff', 

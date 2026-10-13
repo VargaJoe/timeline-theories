@@ -52,300 +52,65 @@ export async function exportTimelineToTSV(timeline: Timeline, parentPath: string
  * @param tsvContent TSV string content
  * @param timelineName Name of the timeline
  */
-export async function importTimelineFromTSV(tsvContent: string, timelineName: string): Promise<void> {
-  const lines = tsvContent.split('\n').filter(line => line.trim());
-  if (lines.length < 2) {
-    throw new Error('Invalid TSV format: must have at least header and one data row');
-  }
-
-  const headers = lines[0].split('\t').map(h => h.trim());
-  const requiredHeaders = ['title', 'media_type'];
-  const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-  if (missingHeaders.length > 0) {
-    throw new Error(`Missing required columns: ${missingHeaders.join(', ')}`);
-  }
-
-  // Verify timeline exists
-  const timelinePath = `${contentPaths.timelines}/Timelines/${timelineName}`;
-  try {
-    await repository.load({ idOrPath: timelinePath });
-  } catch {
-    throw new Error(`Timeline '${timelineName}' not found or inaccessible`);
-  }
-
-  const parentPath = `${timelinePath}`;
-
-  // Process each data row
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split('\t').map(v => v.trim());
-    if (values.length !== headers.length) {
-      console.warn(`Skipping row ${i + 1}: column count mismatch`);
-      continue;
+async function preflightLegacyRows(tsvContent: string, timelineName: string) {
+  const checkContext=captureOperationContext();
+  if (!timelineName || /[/\\]/.test(timelineName)) throw new Error('Invalid timeline name');
+  const lines=tsvContent.split('\n').filter(line=>line.trim());
+  if(lines.length<2) throw new Error('TSV must contain a header and data');
+  const headers=lines[0].split('\t').map(h=>h.trim());
+  if(!headers.includes('title') || !headers.includes('media_type')) throw new Error('Missing TSV columns');
+  const parentPath=timelinesPath+'/'+timelineName;
+  const existing=await TimelineEntryService.listTimelineEntries(0,parentPath);
+  const byName=new Map(existing.map(item=>[item.name,item]));
+  const rows=lines.slice(1).map((line,i)=>{
+    const values=line.split('\t');
+    if(values.length!==headers.length) throw new Error('Invalid TSV row '+(i+2));
+    return Object.fromEntries(headers.map((header,index)=>[header,values[index]]));
+  });
+  const operations: import('./sensenet').Operation[]=[];
+  const names=new Set<string>();
+  for(const row of rows) {
+    if(!row.title || !row.media_type) throw new Error('Missing required data');
+    if(row.entry_name && (names.has(row.entry_name) || /[/\\]/.test(row.entry_name))) throw new Error('Duplicate or invalid occurrence name');
+    if(row.entry_name) names.add(row.entry_name);
+    const previous=byName.get(row.entry_name);
+    operations.push(previous?{target:previous.id,action:'update'}:{target:parentPath,action:'create',contentType:'TimelineEntry'});
+    if(row.media_id) {
+      const id=Number(row.media_id);
+      if(!Number.isSafeInteger(id) || id<1) throw new Error('Invalid media reference');
+      const media=await repository.load({idOrPath:id,oDataOptions:{select:['Path']}});
+      if(!media.d.Path?.startsWith(mediaLibraryPath+'/')) throw new Error('Media reference is outside the project library');
     }
-
-    const rowData: Record<string, string> = {};
-    headers.forEach((header, index) => {
-      rowData[header] = values[index] || '';
-    });
-
-    // Validate required fields
-    if (!rowData.title || !rowData.media_type) {
-      console.warn(`Skipping row ${i + 1}: missing required fields`);
-      continue;
-    }
-
-    try {
-      // Check if entry already exists by path
-      let existingEntryPath: string | undefined;
-      if (rowData.entry_name) {
-        // Try to find existing entry by path
-        try {
-          const entryPath = `${parentPath}/${rowData.entry_name}`;
-          await repository.load({
-            idOrPath: entryPath,
-          });
-          existingEntryPath = entryPath;
-        } catch {
-          // Entry doesn't exist, will create new one
-        }
-      }
-
-      // Create media item if needed
-      let mediaItemId: number | undefined;
-      if (rowData.media_id) {
-        mediaItemId = parseInt(rowData.media_id);
-      } else {
-        // For now, create a basic media item
-        // TODO: Enhance with more fields and better media item creation
-        const mediaResult = await repository.post({
-          parentPath: '/Root/Content/MediaLibrary',
-          contentType: 'MediaItem',
-          content: {
-            Name: rowData.title.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase(),
-            DisplayName: rowData.title,
-            Title: rowData.title,
-            Description: rowData.description || '',
-            MediaType: rowData.media_type,
-            CoverImageUrl: rowData.cover_image || undefined,
-          },
-        });
-        mediaItemId = mediaResult.d.Id;
-      }
-
-      // Generate unique name for the entry
-      const generateEntryName = (baseName: string, index: number): string => {
-        const cleanName = baseName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
-        return `entry-${index}-${cleanName}`.substring(0, 50); // Limit length
-      };
-
-      const entryName = rowData.entry_name || generateEntryName(rowData.title, i);
-
-      if (existingEntryPath) {
-        // Update existing entry
-        await repository.patch({
-          idOrPath: existingEntryPath,
-          content: {
-            DisplayName: rowData.title,
-            MediaItem: mediaItemId,
-            Position: rowData.position ? parseInt(rowData.position) : i,
-            ChronologicalDate: rowData.date || undefined,
-            Notes: rowData.description || rowData.notes || undefined,
-          },
-        });
-      } else {
-        // Create new timeline entry
-        await repository.post({
-          parentPath,
-          contentType: 'TimelineEntry',
-          content: {
-            Name: entryName,
-            DisplayName: rowData.title,
-            MediaItem: mediaItemId,
-            Position: rowData.position ? parseInt(rowData.position) : i,
-            ChronologicalDate: rowData.date || undefined,
-            Notes: rowData.notes || undefined,
-          },
-        });
-      }
-    } catch (error) {
-      console.error(`Failed to import row ${i + 1}:`, error);
-      throw new Error(`Failed to import row ${i + 1}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    else operations.push({target:mediaLibraryPath,action:'create',contentType:row.media_type.toLowerCase()==='book'?'BookMediaItem':'MediaItem'});
+  }
+  checkContext();
+  await assertOperations(operations);
+  return {rows,parentPath,byName,checkContext};
+}
+export async function importTimelineFromTSV(tsvContent:string,timelineName:string):Promise<void> {
+  const {rows,parentPath,byName,checkContext}=await preflightLegacyRows(tsvContent,timelineName);
+  for(const [index,row] of rows.entries()) {
+    checkContext();
+    const book=row.media_type.toLowerCase()==='book';
+    const mediaId=row.media_id?Number(row.media_id):(await repository.post({parentPath:mediaLibraryPath,contentType:book?'BookMediaItem':'MediaItem',content:{
+      Name:crypto.randomUUID(),DisplayName:row.title,Title:row.title,Description:row.description||'',MediaType:row.media_type,CoverImageUrl:row.cover_image||undefined,
+      Genre:row.genre?row.genre.split(/[;,]/):undefined,Tags:row.tags?row.tags.split(/[;,]/):undefined,
+      ...(book?{Author:row.author,Publisher:row.publisher,ISBN:row.isbn,PublicationYear:row.publication_year?Number(row.publication_year):undefined}:{})
+    }})).d.Id;
+    checkContext();
+    const content={Name:row.entry_name||'entry-'+crypto.randomUUID(),DisplayName:row.title,MediaItem:mediaId,Position:row.position?Number(row.position):index+1,Notes:row.notes||'',ChronologicalDate:row.date||undefined,
+      EntryLabel:row.entry_label,Importance:row.importance,ChronologicalDescription:row.chronological_description};
+    const previous=byName.get(row.entry_name);
+    if(previous) await repository.patch({idOrPath:previous.id,content});
+    else await repository.post({parentPath,contentType:'TimelineEntry',content});
   }
 }
-
-/**
- * Import timeline entries from ZIP file containing TSV data and cover images
- * @param zipFile ZIP file to import
- * @param timelineName Name of the timeline to import into
- */
-export async function importTimelineFromZIP(zipFile: File, timelineName: string): Promise<void> {
-  try {
-    // Dynamically import JSZip only when needed
-    const JSZip = (await import('jszip')).default;
-    const zip = new JSZip();
-    
-    // Load the ZIP file
-    await zip.loadAsync(zipFile);
-    
-    // Read the TSV data
-    const tsvFile = zip.file('data.tsv');
-    if (!tsvFile) {
-      throw new Error('ZIP file does not contain data.tsv');
-    }
-    
-    const tsvContent = await tsvFile.async('text');
-    
-    // Parse TSV
-    const lines = tsvContent.split('\n').filter(line => line.trim());
-    if (lines.length < 2) {
-      throw new Error('Invalid TSV format: must have at least header and one data row');
-    }
-    
-    const headers = lines[0].split('\t').map(h => h.trim());
-    const requiredHeaders = ['title', 'media_type'];
-    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-    if (missingHeaders.length > 0) {
-      throw new Error(`Missing required columns: ${missingHeaders.join(', ')}`);
-    }
-    
-    // Verify timeline exists
-    const timelinePath = `${contentPaths.timelines}/Timelines/${timelineName}`;
-    try {
-      await repository.load({ idOrPath: timelinePath });
-    } catch {
-      throw new Error(`Timeline '${timelineName}' not found or inaccessible`);
-    }
-    
-    const parentPath = `${timelinePath}`;
-    
-    // Process each data row
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split('\t').map(v => v.trim());
-      if (values.length !== headers.length) {
-        console.warn(`Skipping row ${i + 1}: column count mismatch`);
-        continue;
-      }
-      
-      const rowData: Record<string, string> = {};
-      headers.forEach((header, index) => {
-        rowData[header] = values[index] || '';
-      });
-      
-      // Validate required fields
-      if (!rowData.title || !rowData.media_type) {
-        console.warn(`Skipping row ${i + 1}: missing required fields`);
-        continue;
-      }
-      
-      try {
-        // Check if entry already exists by path
-        let existingEntryPath: string | undefined;
-        if (rowData.entry_name) {
-          try {
-            const entryPath = `${parentPath}/${rowData.entry_name}`;
-            await repository.load({ idOrPath: entryPath });
-            existingEntryPath = entryPath;
-          } catch {
-            // Entry doesn't exist, will create new one
-          }
-        }
-        
-        // Create or find media item
-        let mediaItemId: number | undefined;
-        
-        if (rowData.media_id) {
-          mediaItemId = parseInt(rowData.media_id);
-        } else {
-          // Create a new media item
-          const mediaContent: Record<string, unknown> = {
-            Name: rowData.title.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase(),
-            DisplayName: rowData.title,
-            Title: rowData.title,
-            Description: rowData.description || '',
-            MediaType: rowData.media_type,
-          };
-          
-          // Add optional media fields
-          if (rowData.author) mediaContent.Author = rowData.author;
-          if (rowData.publisher) mediaContent.Publisher = rowData.publisher;
-          if (rowData.isbn) mediaContent.ISBN = rowData.isbn;
-          if (rowData.publication_year) mediaContent.PublicationYear = parseInt(rowData.publication_year);
-          if (rowData.genre) mediaContent.Genre = rowData.genre.split(';').map(g => g.trim());
-          if (rowData.tags) mediaContent.Tags = rowData.tags.split(';').map(t => t.trim());
-          
-          // Add cover image URL if available
-          if (rowData.cover_image_url) {
-            mediaContent.CoverImageUrl = rowData.cover_image_url;
-          }
-          
-          const mediaResult = await repository.post({
-            parentPath: '/Root/Content/MediaLibrary',
-            contentType: 'MediaItem',
-            content: mediaContent,
-          });
-          
-          mediaItemId = mediaResult.d.Id;
-        }
-        
-        // Generate unique name for the entry
-        const generateEntryName = (baseName: string, index: number): string => {
-          const cleanName = baseName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
-          return `entry-${index}-${cleanName}`.substring(0, 50);
-        };
-        
-        const entryName = rowData.entry_name || generateEntryName(rowData.title, i);
-        
-        if (existingEntryPath) {
-          // Update existing entry
-          const updateContent: Record<string, unknown> = {
-            DisplayName: rowData.title,
-            MediaItem: mediaItemId,
-            Position: rowData.position ? parseInt(rowData.position) : i,
-            ChronologicalDate: rowData.date || undefined,
-            Notes: rowData.notes || undefined,
-          };
-          
-          // Add optional entry fields
-          if (rowData.entry_label) updateContent.EntryLabel = rowData.entry_label;
-          if (rowData.importance) updateContent.Importance = rowData.importance;
-          if (rowData.chronological_description) updateContent.ChronologicalDescription = rowData.chronological_description;
-          
-          await repository.patch({
-            idOrPath: existingEntryPath,
-            content: updateContent,
-          });
-        } else {
-          // Create new timeline entry
-          const entryContent: Record<string, unknown> = {
-            Name: entryName,
-            DisplayName: rowData.title,
-            MediaItem: mediaItemId,
-            Position: rowData.position ? parseInt(rowData.position) : i,
-            ChronologicalDate: rowData.date || undefined,
-            Notes: rowData.notes || undefined,
-          };
-          
-          // Add optional entry fields
-          if (rowData.entry_label) entryContent.EntryLabel = rowData.entry_label;
-          if (rowData.importance) entryContent.Importance = rowData.importance;
-          if (rowData.chronological_description) entryContent.ChronologicalDescription = rowData.chronological_description;
-          
-          await repository.post({
-            parentPath,
-            contentType: 'TimelineEntry',
-            content: entryContent,
-          });
-        }
-      } catch (error) {
-        console.error(`Failed to import row ${i + 1}:`, error);
-        throw new Error(`Failed to import row ${i + 1}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-  } catch (error) {
-    console.error('Failed to import timeline from ZIP:', error);
-    throw new Error(`Failed to import timeline: ${error instanceof Error ? error.message : String(error)}`);
-  }
+export async function importTimelineFromZIP(zipFile:File,timelineName:string):Promise<void> {
+  const zip=await (await import('jszip')).default.loadAsync(zipFile);
+  const file=zip.file('data.tsv');
+  if(!file) throw new Error('data.tsv not found');
+  if(Object.keys(zip.files).some(name=>name.startsWith('covers/') && !zip.files[name].dir)) throw new Error('Legacy binary archive needs the explicit ZIP import on the timeline page');
+  await importTimelineFromTSV(await file.async('string'),timelineName);
 }
 /**
  * Deletes a timeline by path segment (Name) or Id
@@ -368,10 +133,11 @@ export async function deleteTimeline(idOrPath: string | number, permanent = fals
     throw new Error('Failed to delete timeline. Please check your connection and try again.');
   }
 }
-import { repository } from './sensenet';
+import { repository, assertOperations, captureOperationContext } from './sensenet';
+import { mediaLibraryPath } from '../projectPaths';
 import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
-import { repositoryUrl, contentPaths } from '../configuration';
+import { repositoryUrl } from '../configuration';
 
 // Timeline service for frontend API calls
 export interface Timeline {
@@ -449,7 +215,7 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
     }
 
     // Build oData options
-    const oDataOptions: any = {
+    const oDataOptions: { query: string; select: string[]; orderby: string[]; skip?: number; top?: number } = {
       query: query,
       select: ['Id', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'CoverImageUrl', 'IsVisible', 'TimelineType'],
       orderby: orderby,
