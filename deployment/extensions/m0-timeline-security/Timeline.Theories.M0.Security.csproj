@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Timeline.Theories.M0.Security</AssemblyName>
+    <RootNamespace>Timeline.Theories.M0.Security</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- Exact versions in the pinned official M0 repository image. -->
+    <PackageReference Include="SenseNet.ContentRepository" Version="[7.8.2-alpha.6]" PrivateAssets="all" />
+    <PackageReference Include="SenseNet.Storage" Version="[7.8.2-alpha.6]" PrivateAssets="all" />
+    <PackageReference Include="SenseNet.Security" Version="[4.3.1]" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

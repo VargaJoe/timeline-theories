@@ -1,0 +1,35 @@
+name: M0 checks
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [feature/m0-local-foundation]
+permissions:
+  contents: read
+jobs:
+  client-and-snapshot-contracts:
+    runs-on: ubuntu-latest
+    env:
+      # Build-only public configuration. Netlify supplies its own VITE_* values.
+      VITE_SENSENET_REPO_URL: https://repository.example
+      VITE_OIDC_AUTHORITY: https://auth.example
+      VITE_OIDC_CLIENT_ID: public-ci-client
+      VITE_AUTH_TYPE: sn-auth
+      VITE_PROJECT_ROOT_PATH: /Root/Content/timelines
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build deployment/extensions/m0-timeline-security/Timeline.Theories.M0.Security.csproj --configuration Release --nologo
+      - run: npm ci --prefix client
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run build:readonly --prefix client
+      - run: npm run build:m0 --prefix client

@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSharedAuth } from '../context/useSharedAuth';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 import { PageHeader } from '../components/PageHeader';
@@ -7,7 +6,11 @@ import { LazyImage } from '../components/LazyImage';
 import { BookImportDialog } from '../components/BookImportDialog';
 import { MediaItemEditDialog } from '../components/MediaItemEditDialog';
 import { siteConfig } from '../configuration';
-import { loadBackgroundImage } from '../services/sensenet';
+import { loadBackgroundImage, assertOperations, captureOperationContext } from '../services/sensenet';
+import { mediaLibraryPath } from '../projectPaths';
+import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
+import { usePermissions } from '../hooks/usePermissions';
+import { PermissionContent } from '../components/PermissionContent';
 
 // Media types from MediaItem content type definition (see deployment/contenttypes/MediaItem.xml)
 const MEDIA_TYPES = [
@@ -22,33 +25,10 @@ const MEDIA_TYPES = [
   { value: 'other', label: 'Other' },
 ];
 
-function isAdmin(user: any): boolean {
-  if (!user) return false;
-  
-  // Special case: Admin user is always admin
-  if (user.Name === 'Admin' || user.LoginName === 'Admin') {
-    return true;
-  }
-  
-  // Check SenseNet group membership first
-  if (user.Groups && Array.isArray(user.Groups)) {
-    // Check if user is member of 'administrators' group
-    const isInAdminGroup = user.Groups.some((group: any) => {
-      // Group can be an object with Name property or just a string
-      const groupName = typeof group === 'string' ? group : group?.Name || group?.DisplayName;
-      return groupName === 'administrators' || groupName === 'Administrators';
-    });
-    if (isInAdminGroup) return true;
-  }
-  
-  // Fallback to email-based admin check
-  const userEmail = user.email || user.Email || user.preferred_username || user.name;
-  return siteConfig.adminEmails.length === 0 || siteConfig.adminEmails.includes(userEmail);
-}
 
 export default function MediaLibraryPage() {
   // Use unified auth context
-  const { user } = useSharedAuth();
+  const canCreate = usePermissions([{ target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }]);
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -97,7 +77,7 @@ export default function MediaLibraryPage() {
       }
       setError('');
       
-      const skip = customSkip !== undefined ? customSkip : (reset ? 0 : loadedMediaItems.length);
+      const skip = customSkip ?? 0;
       const items = await MediaLibraryService.getMediaItems(
         characterFilter, 
         appliedSearchQuery, 
@@ -119,7 +99,7 @@ export default function MediaLibraryPage() {
         setLoading(false);
       }
     }
-  }, [characterFilter, appliedSearchQuery, siteConfig.timelineList.allViewPageSize]);
+  }, [characterFilter, appliedSearchQuery]);
 
   useEffect(() => {
     loadMediaItems(true);
@@ -146,7 +126,6 @@ export default function MediaLibraryPage() {
     setLoadedMediaItems([]);
     setHasMore(false);
     setLoadingMore(false);
-    loadMediaItems(true);
   };
 
   const handleSearch = () => {
@@ -155,7 +134,6 @@ export default function MediaLibraryPage() {
     setLoadedMediaItems([]);
     setHasMore(false);
     setLoadingMore(false);
-    loadMediaItems(true);
   };
 
   const handleSearchKeyPress = (e: React.KeyboardEvent) => {
@@ -175,6 +153,20 @@ export default function MediaLibraryPage() {
     setLoadedMediaItems(prev => prev.map(item => 
       item.Id === updatedItem.Id ? updatedItem : item
     ));
+  };
+
+  const handleDeleteItem = async (item: MediaItem, event: React.MouseEvent) => {
+    event.stopPropagation();
+    const checkContext = captureOperationContext();
+    if (!window.confirm(`Delete "${item.DisplayName}" from the media library?`)) return;
+    try {
+      await assertOperations([{ target: item.Id, action: 'delete' }]);
+      checkContext();
+      await MediaLibraryService.deleteMediaItem(item.Id);
+      setLoadedMediaItems(previous => previous.filter(media => media.Id !== item.Id));
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Failed to delete media item.');
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -234,7 +226,7 @@ export default function MediaLibraryPage() {
         backgroundImage={backgroundImageUrl || undefined}
         overlayOpacity={siteConfig.headerOverlayOpacity}
       >
-        {user && isAdmin(user) && (
+        {canCreate && (
           <>
             <Link
               to="/media-library/create"
@@ -271,7 +263,7 @@ export default function MediaLibraryPage() {
               Import Books
             </button>
             <span style={{ color: '#fff', marginLeft: 16, fontWeight: 400 }}>
-              or <Link to="/media-library/create" style={{ color: '#fff', fontWeight: 500, textDecoration: 'underline' }}>add a new item</Link>.
+              {canCreate && <>or <Link to="/media-library/create" style={{ color: '#fff', fontWeight: 500, textDecoration: 'underline' }}>add a new item</Link>.</>}
             </span>
           </>
         )}
@@ -409,7 +401,7 @@ export default function MediaLibraryPage() {
               ? 'Try adjusting your search criteria.' 
               : 'Get started by adding your first media item.'}
           </p>
-          {user && isAdmin(user) && (
+          {canCreate && (
             <Link 
               to="/media-library/create"
               style={{
@@ -433,6 +425,7 @@ export default function MediaLibraryPage() {
               const externalLinks = getExternalLinks(item.ExternalLinks);
               return (
                 // MagicUI card effect placeholder (replace with real import/use)
+                <PermissionContent key={item.Id} operations={[{ target: item.Id, action: 'read' }]} fallback={null}>
                 <div key={item.Id} style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }} onClick={() => navigate(`/media-library/${item.Name}`)}>
                   <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
                     {/* Cover image top, portrait aspect ratio */}
@@ -535,7 +528,7 @@ export default function MediaLibraryPage() {
                       </div>
                     )}
                     {/* Edit Button for authenticated users */}
-                    {user && isAdmin(user) && (
+                    <PermissionContent operations={[{ target: item.Id, action: 'update' }]} fallback={null}>
                       <div style={{ marginBottom: 8, width: '100%', display: 'flex', justifyContent: 'center' }}>
                         <button
                           onClick={(e) => handleEditItem(item, e)}
@@ -556,13 +549,17 @@ export default function MediaLibraryPage() {
                           Edit
                         </button>
                       </div>
-                    )}
+                    </PermissionContent>
+                    <PermissionContent operations={[{ target: item.Id, action: 'delete' }]} fallback={null}>
+                      <button type="button" onClick={event => handleDeleteItem(item, event)} style={{ background: '#dc3545', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 12px', marginBottom: 8, cursor: 'pointer' }}>Delete</button>
+                    </PermissionContent>
                     <div style={{ fontSize: 12, color: '#999', marginTop: 'auto', width: '100%', textAlign: 'center' }}>
                       Added {formatDate(item.CreationDate)}
                     </div>
                   </div>
                 </div>
               </div>
+              </PermissionContent>
             );
           })}
           </div>
@@ -611,12 +608,12 @@ export default function MediaLibraryPage() {
           loadMediaItems(true);
         }}
       />
-      <MediaItemEditDialog
+      {showEditDialog && editingItem && <PermissionContent operations={[{ target: editingItem.Id, action: 'read' }]} fallback={null}><MediaItemEditDialog
         isOpen={showEditDialog}
         onClose={() => setShowEditDialog(false)}
         mediaItem={editingItem}
         onSave={handleEditSave}
-      />
+      /></PermissionContent>}
     </>
   );
 }
