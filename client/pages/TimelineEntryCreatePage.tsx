@@ -4,7 +4,10 @@ import { MediaLibrarySelector } from '../components/MediaLibrarySelector';
 import { MediaItemCreateForm } from '../components/MediaItemCreateForm';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import type { MediaItem } from '../services/mediaLibraryService';
-import { timelinesPath } from '../projectPaths';
+import { timelinesPath, mediaLibraryPath } from '../projectPaths';
+import { assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import { usePermissions } from '../hooks/usePermissions';
+import { MEDIA_ITEM_CONTENT_TYPE, TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 
 type MediaSelectionMode = 'select' | 'create';
 
@@ -21,6 +24,11 @@ export default function TimelineEntryCreatePage() {
   const [importance, setImportance] = useState('essential');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const parentPath = timelineName ? `${timelinesPath}/${timelineName}` : '';
+  const entryOperations: Operation[] = parentPath ? [{ target: parentPath, action: 'read' }, { target: parentPath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }] : [];
+  const canCreateEntry = usePermissions(entryOperations);
+  const mediaOperations: Operation[] = [...entryOperations, { target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }];
+  const canCreateMedia = usePermissions(mediaOperations);
 
   const handleSelect = (media: MediaItem) => setSelectedMedia(media);
 
@@ -31,11 +39,13 @@ export default function TimelineEntryCreatePage() {
 
   const handleSave = async () => {
     if (!timelineName || !selectedMedia) return;
+    const checkContext = captureOperationContext();
     setSaving(true);
     setError('');
     try {
       // TimelineEntry should be created under the selected timeline's path
-      const parentPath = `${timelinesPath}/${timelineName}`;
+      await assertOperations([...entryOperations, { target: selectedMedia.Id, action: 'read' }]);
+      checkContext();
       await TimelineEntryService.createTimelineEntry({
         displayName: selectedMedia.DisplayName,
         mediaItem: {
@@ -82,6 +92,7 @@ export default function TimelineEntryCreatePage() {
             </button>
           </div>
           <MediaItemCreateForm 
+            requiredOperations={entryOperations}
             onSuccess={handleMediaCreated}
             onCancel={() => setSelectionMode('select')}
           />
@@ -105,6 +116,7 @@ export default function TimelineEntryCreatePage() {
             Choose Media Item
           </h3>
           <button 
+            disabled={!canCreateMedia}
             onClick={() => setSelectionMode('create')} 
             style={{ 
               background: '#28a745', 
@@ -130,6 +142,8 @@ export default function TimelineEntryCreatePage() {
       </div>
     );
   };
+
+  if (!canCreateEntry) return <div role="status" style={{ padding: 24 }}>Adding an entry is unavailable with your current permissions.</div>;
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: 24 }}>
@@ -353,7 +367,7 @@ export default function TimelineEntryCreatePage() {
               </button>
               <button 
                 onClick={handleSave} 
-                disabled={saving}
+                disabled={saving || !canCreateEntry}
                 style={{ 
                   background: saving ? '#94a3b8' : '#2a4d8f', 
                   color: '#fff', 

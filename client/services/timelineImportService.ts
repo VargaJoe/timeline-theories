@@ -1,6 +1,9 @@
 import JSZip from 'jszip';
 import { TimelineEntryService, type TimelineEntry } from './timelineEntryService';
 import { uploadCoverImageBinary } from './mediaLibraryService';
+import { repository, assertOperations, captureOperationContext } from './sensenet';
+import type { Operation } from './sensenet';
+import { mediaLibraryPath } from '../projectPaths';
 
 /**
  * Parsed timeline entry from TSV
@@ -74,8 +77,7 @@ function parseTSV(content: string): { timelineName: string; entries: ParsedTimel
     const fields = line.split('\t');
 
     if (fields.length < 19) {
-      console.warn(`[timelineImportService] Skipping line ${i + 2}: insufficient columns (${fields.length}/19)`);
-      continue;
+      throw new Error(`Invalid TSV row ${i + 2}: expected 19 columns`);
     }
 
     // Extract timeline name from first entry
@@ -108,172 +110,58 @@ function parseTSV(content: string): { timelineName: string; entries: ParsedTimel
   return { timelineName, entries };
 }
 
-/**
- * Imports timeline from ZIP file
- * @param zipFile ZIP file containing timeline_data.tsv and covers folder
- * @param timelineId Timeline ID to import into
- * @param parentPath Parent path where timeline entries will be created
- * @param repository Repository instance with authentication
- * @returns Import result with statistics
- */
-export async function importTimelineFromZip(
-  zipFile: File,
-  timelineId: number,
-  parentPath: string,
-  _repository: typeof import('./sensenet').repository
-): Promise<ImportResult> {
-  const result: ImportResult = {
-    entriesCreated: 0,
-    entriesUpdated: 0,
-    entriesSkipped: 0,
-    errors: [],
-  };
-
-  try {
-    // Load ZIP file
-    const zip = await JSZip.loadAsync(zipFile);
-
-    // Read TSV content
-    const tsvFile = zip.file('timeline_data.tsv');
-    if (!tsvFile) {
-      throw new Error('timeline_data.tsv not found in ZIP file');
+export async function prepareTimelineImport(zipFile: File, timelineId: number, parentPath: string) {
+  const checkContext = captureOperationContext();
+  const zip = await JSZip.loadAsync(zipFile);
+  const tsv = zip.file('timeline_data.tsv');
+  if (!tsv) throw new Error('timeline_data.tsv not found in ZIP');
+  const { entries } = parseTSV(await tsv.async('string'));
+  const existing = await TimelineEntryService.listTimelineEntries(timelineId, parentPath);
+  const byName = new Map<string | undefined, TimelineEntry>(existing.map((entry: TimelineEntry) => [entry.name,entry]));
+  const names = new Set<string>();
+  const operations: Operation[] = [];
+  const plan: {entry: ParsedTimelineEntry; previous: TimelineEntry | undefined; media: {Id:number;Name:string;DisplayName:string}; cover:Blob | undefined}[] = [];
+  for (const entry of entries) {
+    if (!entry.entryName || entry.entryName.includes('/') || names.has(entry.entryName)) throw new Error('Ambiguous or invalid entry name in archive');
+    names.add(entry.entryName);
+    const mediaId = Number(entry.mediaId);
+    if (!Number.isSafeInteger(mediaId) || mediaId < 1) throw new Error('Archive needs a valid existing local media reference');
+    const media = await repository.load({ idOrPath: mediaId, oDataOptions: { select: ['Id','Name','Path','Title','DisplayName'] } });
+    if (!media.d.Path?.startsWith(mediaLibraryPath + '/')) throw new Error('Archive media reference is outside this library');
+    const previous = byName.get(entry.entryName);
+    if (previous?.mediaItem && previous.mediaItem.Id !== mediaId) throw new Error('Archive reference conflicts with the existing occurrence');
+    const entryTarget = previous?.id || parentPath;
+    operations.push(previous ? { target: entryTarget, action: 'update' } : { target: parentPath, action: 'create', contentType: 'TimelineEntry' });
+    let cover: Blob | undefined;
+    if (entry.coverImageFilename) {
+      const file = zip.file('covers/' + entry.coverImageFilename);
+      if (!file) throw new Error('Cover file is missing from the archive');
+      cover = await file.async('blob');
+      operations.push({ target: mediaId, action: 'upload' });
     }
-
-    const tsvContent = await tsvFile.async('string');
-    const { timelineName, entries } = parseTSV(tsvContent);
-
-    console.log(`[timelineImportService] Importing ${entries.length} entries into timeline: ${timelineName}`);
-
-    // Get existing entries - map by name for quick lookup
-    const existingEntries = await TimelineEntryService.listTimelineEntries(timelineId, parentPath);
-    const existingEntriesMap = new Map(existingEntries.map(e => [e.name, e]));
-
-    // Process each entry
-    for (const entry of entries) {
-      try {
-        const existingEntry = existingEntriesMap.get(entry.entryName);
-
-        // Prepare entry data, excluding empty choice fields
-        const entryData: Omit<TimelineEntry, 'id'> = {
-          name: entry.entryName,
-          displayName: entry.Title,
-          chronologicalDate: entry.ChronologicalDate,
-          position: entry.Position,
-          notes: entry.Notes,
-          chronologicalDescription: entry.ChronologicalDescription,
-          timelineId,
-          mediaItem: null, // Will be set if we have a media ID
-        };
-
-        // Set MediaItem reference if we have a media ID
-        if (entry.mediaId && entry.mediaId.trim() !== '') {
-          const mediaIdNum = parseInt(entry.mediaId);
-          if (!isNaN(mediaIdNum)) {
-            entryData.mediaItem = {
-              Id: mediaIdNum,
-              Name: entry.entryName, // Fallback to entry name
-              DisplayName: entry.Title,
-            };
-          }
-        }
-
-        // Add choice fields only if they have valid values
-        if (entry.EntryLabel && entry.EntryLabel.trim() !== '') {
-          entryData.entryLabel = entry.EntryLabel;
-        }
-        if (entry.Importance && entry.Importance.trim() !== '') {
-          entryData.importance = entry.Importance;
-        }
-
-        if (existingEntry) {
-          // Update existing entry using path-based addressing (security: no ID)
-          console.log(`[timelineImportService] Updating existing entry: ${entry.entryName}`);
-          
-          const entryPath = `${parentPath}/${entry.entryName}`;
-          await TimelineEntryService.updateTimelineEntry(entryPath, {
-            name: entry.entryName,
-            displayName: entry.Title,
-            chronologicalDate: entry.ChronologicalDate,
-            position: entry.Position,
-            notes: entry.Notes,
-            chronologicalDescription: entry.ChronologicalDescription,
-            entryLabel: entryData.entryLabel,
-            importance: entryData.importance,
-          });
-
-          result.entriesUpdated++;
-
-          // Upload cover image if available
-          if (entry.coverImageFilename && entryData.mediaItem) {
-            console.log(`[timelineImportService] Attempting to upload cover: ${entry.coverImageFilename} for media ${entryData.mediaItem.Id}`);
-            const coverFile = zip.file(`covers/${entry.coverImageFilename}`);
-            if (coverFile) {
-              const imageBlob = await coverFile.async('blob');
-              try {
-                await uploadCoverImageBinary(entryData.mediaItem.Id, imageBlob, entry.coverImageFilename);
-                console.log(`[timelineImportService] Successfully uploaded cover for ${entry.entryName}`);
-              } catch (error) {
-                console.warn(`[timelineImportService] Failed to upload cover:`, error);
-              }
-            } else {
-              console.warn(`[timelineImportService] Cover file not found in ZIP: covers/${entry.coverImageFilename}`);
-            }
-          } else {
-            if (!entry.coverImageFilename) {
-              console.log(`[timelineImportService] No cover filename for entry: ${entry.entryName}`);
-            }
-            if (!entryData.mediaItem) {
-              console.log(`[timelineImportService] No media item for entry: ${entry.entryName}`);
-            }
-          }
-        } else {
-          // Create new timeline entry
-          console.log(`[timelineImportService] Creating new entry: ${entry.entryName}`);
-          
-          await TimelineEntryService.createTimelineEntry(
-            entryData,
-            parentPath
-          );
-
-          // Upload cover image if available - use the actual media item ID from the created entry
-          if (entry.coverImageFilename && entryData.mediaItem) {
-            console.log(`[timelineImportService] Attempting to upload cover: ${entry.coverImageFilename} for media ${entryData.mediaItem.Id}`);
-            const coverFile = zip.file(`covers/${entry.coverImageFilename}`);
-            if (coverFile) {
-              const imageBlob = await coverFile.async('blob');
-              try {
-                await uploadCoverImageBinary(entryData.mediaItem.Id, imageBlob, entry.coverImageFilename);
-                console.log(`[timelineImportService] Successfully uploaded cover for ${entry.entryName}`);
-              } catch (error) {
-                console.warn(`[timelineImportService] Failed to upload cover:`, error);
-              }
-            } else {
-              console.warn(`[timelineImportService] Cover file not found in ZIP: covers/${entry.coverImageFilename}`);
-            }
-          } else {
-            if (!entry.coverImageFilename) {
-              console.log(`[timelineImportService] No cover filename for entry: ${entry.entryName}`);
-            }
-            if (!entryData.mediaItem) {
-              console.log(`[timelineImportService] No media item for entry: ${entry.entryName}`);
-            }
-          }
-
-          result.entriesCreated++;
-        }
-      } catch (error) {
-        console.error(`[timelineImportService] Failed to process entry: ${entry.entryName}`, error);
-        result.entriesSkipped++;
-        result.errors.push(
-          `Failed to process entry "${entry.entryName}": ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
-      }
-    }
-
-    console.log(`[timelineImportService] Import complete. Created: ${result.entriesCreated}, Updated: ${result.entriesUpdated}, Skipped: ${result.entriesSkipped}`);
-    return result;
-  } catch (error) {
-    console.error('[timelineImportService] Import failed:', error);
-    throw new Error(`Failed to import timeline: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    plan.push({entry, previous, media:media.d, cover});
   }
+  // Expose a review snapshot; execute retains its private complete target plan.
+  // A caller changing the preview must not remove a later denied target.
+  return { operations: operations.map(operation => ({ ...operation })), execute: async (): Promise<ImportResult> => {
+    checkContext();
+    await assertOperations(operations);
+    const result: ImportResult = { entriesCreated:0, entriesUpdated:0, entriesSkipped:0, errors:[] };
+    for (const {entry, previous, media, cover} of plan) {
+      checkContext();
+      const data: Omit<TimelineEntry,'id'> = { name:entry.entryName, displayName:entry.Title, timelineId,
+        mediaItem:{ Id:media.Id, Name:media.Name, DisplayName:media.DisplayName }, position:entry.Position,
+        chronologicalDate:entry.ChronologicalDate || undefined, chronologicalDescription:entry.ChronologicalDescription,
+        notes:entry.Notes, entryLabel:entry.EntryLabel || undefined, importance:entry.Importance || undefined };
+      if (cover) await uploadCoverImageBinary(media.Id, cover, entry.coverImageFilename);
+      checkContext();
+      if (previous) { await TimelineEntryService.updateTimelineEntry(previous.id, data); result.entriesUpdated++; }
+      else { await TimelineEntryService.createTimelineEntry(data,parentPath); result.entriesCreated++; }
+    }
+    return result;
+  } };
+}
+export async function importTimelineFromZip(zipFile: File, timelineId: number, parentPath: string, suppliedRepository: typeof repository): Promise<ImportResult> {
+  if (suppliedRepository !== repository) throw new Error('Repository mismatch');
+  return (await prepareTimelineImport(zipFile,timelineId,parentPath)).execute();
 }
