@@ -3,30 +3,9 @@ import { Link } from 'react-router-dom';
 import { useSharedAuth } from '../context/useSharedAuth';
 import { LoginButton } from './LoginButton';
 import { siteConfig } from '../configuration';
+import { mediaLibraryPath } from '../projectPaths';
+import { usePermissions } from '../hooks/usePermissions';
 
-function isAdmin(user: any): boolean {
-  if (!user) return false;
-  
-  // Special case: Admin user is always admin
-  if (user.Name === 'Admin' || user.LoginName === 'Admin') {
-    return true;
-  }
-  
-  // Check SenseNet group membership first
-  if (user.Groups && Array.isArray(user.Groups)) {
-    // Check if user is member of 'administrators' group
-    const isInAdminGroup = user.Groups.some((group: any) => {
-      // Group can be an object with Name property or just a string
-      const groupName = typeof group === 'string' ? group : group?.Name || group?.DisplayName;
-      return groupName === 'administrators' || groupName === 'Administrators';
-    });
-    if (isInAdminGroup) return true;
-  }
-  
-  // Fallback to email-based admin check
-  const userEmail = user.email || user.Email || user.preferred_username || user.name;
-  return siteConfig.adminEmails.length === 0 || siteConfig.adminEmails.includes(userEmail);
-}
 
 export const TopNavigationBar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -36,7 +15,8 @@ export const TopNavigationBar: React.FC = () => {
 
   // Determine if user is authenticated
   const isAuthenticated = !!user;
-  const userProfile = user;
+  const profileName = [user?.DisplayName, user?.Name, user?.UserName, user?.name, user?.preferred_username, user?.Email, user?.email].find((value): value is string => typeof value === 'string' && value.length > 0) || 'User';
+  const canReadMedia = usePermissions([{ target: mediaLibraryPath, action: 'read' }]);
 
   return (
     <nav style={{
@@ -106,7 +86,7 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          {isAuthenticated && isAdmin(userProfile) && (
+          {canReadMedia && (
             <Link 
               to="/media-library" 
               style={{
@@ -150,10 +130,10 @@ export const TopNavigationBar: React.FC = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {(userProfile?.DisplayName || userProfile?.Name || userProfile?.Email || 'U').charAt(0)?.toUpperCase()}
+                  {profileName.charAt(0).toUpperCase()}
                 </div>
                 <span style={{ fontSize: '14px' }}>
-                  {userProfile?.DisplayName || userProfile?.Name || userProfile?.Email?.split('@')[0] || 'User'}
+                  {profileName}
                 </span>
                 <LoginButton />
               </div>
@@ -213,7 +193,7 @@ export const TopNavigationBar: React.FC = () => {
             Timelines
           </Link>
           
-          {isAuthenticated && isAdmin(userProfile) && (
+          {canReadMedia && (
             <Link 
               to="/media-library" 
               style={{
@@ -254,10 +234,10 @@ export const TopNavigationBar: React.FC = () => {
                   fontWeight: 'bold',
                   fontSize: '14px'
                 }}>
-                  {(userProfile?.name || userProfile?.preferred_username || userProfile?.email || 'U').charAt(0)?.toUpperCase()}
+                  {profileName.charAt(0).toUpperCase()}
                 </div>
                 <span style={{ fontSize: '14px', flex: 1 }}>
-                  {userProfile?.name || userProfile?.preferred_username || userProfile?.email?.split('@')[0] || 'User'}
+                  {profileName}
                 </span>
                 <LoginButton />
               </div>

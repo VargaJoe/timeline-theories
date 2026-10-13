@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { BookImportService } from '../services/bookImportService';
 import type { BookSearchResult, BookImportData } from '../services/bookImportService';
-import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
+import { MediaLibraryService } from '../services/mediaLibraryService';
+
+import { mediaLibraryPath } from '../projectPaths';
+import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
+import { assertOperations, captureOperationContext } from '../services/sensenet';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface BookImportDialogProps {
   isOpen: boolean;
@@ -14,6 +19,7 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
   onClose,
   onImportComplete
 }) => {
+  const canCreate = usePermissions([{ target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<BookSearchResult[]>([]);
   const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set());
@@ -52,40 +58,9 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
     setSelectedBooks(newSelected);
   };
 
-  // Check for duplicate books by ISBN first, then by title + author combination
-  const checkForDuplicateBook = async (bookData: BookImportData): Promise<MediaItem | null> => {
-    try {
-      // Get all existing media items
-      const allItems = await MediaLibraryService.getMediaItems();
-      const existingBooks = allItems.filter(item => item.MediaType === 'book');
-
-      // First try to find by ISBN if available
-      if (bookData.ISBN) {
-        const isbnMatch = existingBooks.find(book => book.ISBN === bookData.ISBN);
-        if (isbnMatch) {
-          return isbnMatch;
-        }
-      }
-
-      // Then try to find by title + author combination
-      if (bookData.Title && bookData.Author) {
-        const titleAuthorMatch = existingBooks.find(book => 
-          book.Title === bookData.Title && book.Author === bookData.Author
-        );
-        if (titleAuthorMatch) {
-          return titleAuthorMatch;
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.warn('Error checking for duplicate book:', error);
-      return null;
-    }
-  };
-
   const handleImport = async () => {
     if (selectedBooks.size === 0) return;
+    const checkContext = captureOperationContext();
 
     setImporting(true);
     setError(null);
@@ -96,30 +71,12 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
         .map(book => BookImportService.convertToImportData(book));
 
       const importedBooks: BookImportData[] = [];
-      const skippedDuplicates: string[] = [];
-
+      // Preserve every selected occurrence; reconciliation is an explicit later task.
+      await assertOperations(booksToImport.map(() => ({ target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE })));
       for (const bookData of booksToImport) {
-        try {
-          // Check for duplicates before importing
-          const existingBook = await checkForDuplicateBook(bookData);
-          
-          if (existingBook) {
-            console.log('Skipping duplicate book:', bookData.DisplayName);
-            skippedDuplicates.push(bookData.DisplayName);
-            continue;
-          }
-
-          await MediaLibraryService.createMediaItem(bookData);
-          importedBooks.push(bookData);
-        } catch (err) {
-          console.error('Failed to import book:', bookData.DisplayName, err);
-          // Continue with other books even if one fails
-        }
-      }
-
-      // Show feedback about skipped duplicates
-      if (skippedDuplicates.length > 0) {
-        setError(`Imported ${importedBooks.length} books. Skipped ${skippedDuplicates.length} duplicates: ${skippedDuplicates.join(', ')}`);
+        checkContext();
+        await MediaLibraryService.createMediaItem(bookData);
+        importedBooks.push(bookData);
       }
 
       if (onImportComplete) {
@@ -419,7 +376,7 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
               </button>
               <button
                 onClick={handleImport}
-                disabled={importing}
+                disabled={importing || !canCreate}
                 style={{
                   background: importing ? '#6c757d' : '#28a745',
                   color: '#fff',

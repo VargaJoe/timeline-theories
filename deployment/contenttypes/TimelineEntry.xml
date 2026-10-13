@@ -1,4 +1,4 @@
-<ContentType name="TimelineEntry" parentType="GenericContent" handler="SenseNet.ContentRepository.GenericContent" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
+<ContentType name="TimelineEntry" parentType="GenericContent" handler="Timeline.Theories.M0.Security.TimelineEntrySecurityHandler" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
   <DisplayName>Timeline Entry</DisplayName>
   <Description>Junction between MediaItem and Timeline with position, notes, and metadata.</Description>
   <Icon>Content</Icon>
