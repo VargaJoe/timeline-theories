@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
-import { MediaLibraryService } from '../services/mediaLibraryService';
+import { MediaLibraryService, type CreateMediaItemRequest } from '../services/mediaLibraryService';
+import { assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface TimelineEntryEditModalProps {
   entry: TimelineEntry | null;
@@ -13,6 +15,9 @@ interface TimelineEntryEditModalProps {
 type EditMode = 'entry' | 'media';
 
 export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: TimelineEntryEditModalProps) {
+  const canUpdateEntry = usePermissions(entry ? [{ target: entry.id, action: 'update' }] : []);
+  const canUpdateMedia = usePermissions(entry?.mediaItem ? [{ target: entry.mediaItem.Id, action: 'update' }] : []);
+  const canUploadMedia = usePermissions(entry?.mediaItem ? [{ target: entry.mediaItem.Id, action: 'upload' }] : []);
   const [editMode, setEditMode] = useState<EditMode>('entry');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,6 +38,13 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
   const [coverImageUrl, setCoverImageUrl] = useState('');
   const [coverImageMode, setCoverImageMode] = useState<'url' | 'binary'>('url');
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
+  const mediaMetadataChanged = !!entry?.mediaItem && (
+    mediaDisplayName !== (entry.mediaItem.DisplayName || '') ||
+    mediaType !== (entry.mediaItem.MediaType || '') ||
+    releaseDate !== (entry.mediaItem.ReleaseDate || '') ||
+    description !== (entry.mediaItem.Description || '') ||
+    (coverImageMode === 'url' && coverImageUrl !== (entry.mediaItem.CoverImageUrl || ''))
+  );
 
   useEffect(() => {
     if (entry && isOpen) {
@@ -62,11 +74,14 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
 
   const handleSaveEntry = async () => {
     if (!entry) return;
+    const checkContext = captureOperationContext();
 
     setLoading(true);
     setError('');
 
     try {
+      await assertOperations([{ target: entry.id, action: 'update' }]);
+      checkContext();
       await TimelineEntryService.updateTimelineEntry(entry.id, {
         position,
         chronologicalDate: chronologicalDate || undefined,
@@ -87,23 +102,38 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
 
   const handleSaveMedia = async () => {
     if (!entry?.mediaItem) return;
+    const checkContext = captureOperationContext();
 
     setLoading(true);
     setError('');
 
     try {
-      const mediaItemData = {
+      const values = {
         DisplayName: mediaDisplayName,
         MediaType: mediaType,
         ReleaseDate: releaseDate,
         Description: description,
         CoverImageUrl: coverImageMode === 'url' ? coverImageUrl : undefined,
       };
-
-      if (coverImageMode === 'binary' && coverImageFile) {
-        await MediaLibraryService.uploadMediaItemCoverImage(entry.mediaItem.Id, coverImageFile);
-      } else {
+      const mediaItemData: Partial<CreateMediaItemRequest> = {};
+      for (const field of Object.keys(values) as (keyof typeof values)[]) {
+        if (values[field] !== undefined && values[field] !== (entry.mediaItem[field] || '')) {
+          mediaItemData[field] = values[field];
+        }
+      }
+      const hasChanges = Object.keys(mediaItemData).length > 0;
+      const hasUpload = coverImageMode === 'binary' && coverImageFile !== null;
+      const operations: Operation[] = [];
+      if (hasChanges) operations.push({ target: entry.mediaItem.Id, action: 'update' });
+      if (hasUpload) operations.push({ target: entry.mediaItem.Id, action: 'upload' });
+      await assertOperations(operations);
+      if (hasChanges) {
+        checkContext();
         await MediaLibraryService.updateMediaItem(entry.mediaItem.Id, mediaItemData);
+      }
+      if (hasUpload && coverImageFile) {
+        checkContext();
+        await MediaLibraryService.uploadMediaItemCoverImage(entry.mediaItem.Id, coverImageFile);
       }
 
       onSave();
@@ -156,6 +186,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
           <div style={{ display: 'flex', gap: 4, background: '#f3f4f6', borderRadius: 8, padding: 4 }}>
             <button
               onClick={() => setEditMode('entry')}
+              disabled={!canUpdateEntry}
               style={{
                 flex: 1,
                 padding: '8px 16px',
@@ -173,6 +204,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
             </button>
             <button
               onClick={() => setEditMode('media')}
+              disabled={!canUpdateMedia && !canUploadMedia}
               style={{
                 flex: 1,
                 padding: '8px 16px',
@@ -330,6 +362,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
               <input
                 type="text"
                 value={mediaDisplayName}
+                disabled={!canUpdateMedia}
                 onChange={e => setMediaDisplayName(e.target.value)}
                 style={{
                   width: '100%',
@@ -348,6 +381,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
                 </label>
                 <select
                   value={mediaType}
+                  disabled={!canUpdateMedia}
                   onChange={e => setMediaType(e.target.value)}
                   style={{
                     width: '100%',
@@ -359,12 +393,19 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
                 >
                   <option value="">Select type...</option>
                   <option value="movie">Movie</option>
-                  <option value="tv">TV Series</option>
+                  <option value="tvseries">TV Series</option>
+                  <option value="tvseason">TV Season</option>
+                  <option value="tvepisode">TV Episode</option>
+                  <option value="show">Show</option>
+                  <option value="season">Season</option>
+                  <option value="episode">Episode</option>
                   <option value="book">Book</option>
                   <option value="comic">Comic</option>
-                  <option value="game">Game</option>
-                  <option value="music">Music</option>
+                  <option value="videogame">Video Game</option>
+                  <option value="podcast">Podcast</option>
+                  <option value="documentary">Documentary</option>
                   <option value="other">Other</option>
+                  {mediaType && !['movie','tvseries','tvseason','tvepisode','show','season','episode','book','comic','videogame','podcast','documentary','other'].includes(mediaType) && <option value={mediaType}>{mediaType}</option>}
                 </select>
               </div>
               <div>
@@ -374,6 +415,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
                 <input
                   type="text"
                   value={releaseDate}
+                  disabled={!canUpdateMedia}
                   onChange={e => setReleaseDate(e.target.value)}
                   style={{
                     width: '100%',
@@ -397,6 +439,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
                     type="radio"
                     name="coverImageMode"
                     checked={coverImageMode === 'url'}
+                    disabled={!canUpdateMedia}
                     onChange={() => setCoverImageMode('url')}
                     style={{ marginRight: 6 }}
                   />
@@ -407,6 +450,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
                     type="radio"
                     name="coverImageMode"
                     checked={coverImageMode === 'binary'}
+                    disabled={!canUploadMedia}
                     onChange={() => setCoverImageMode('binary')}
                     style={{ marginRight: 6 }}
                   />
@@ -418,6 +462,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
                 <input
                   type="url"
                   value={coverImageUrl}
+                  disabled={!canUpdateMedia}
                   onChange={e => setCoverImageUrl(e.target.value)}
                   style={{
                     width: '100%',
@@ -431,6 +476,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
               ) : (
                 <input
                   type="file"
+                  disabled={!canUploadMedia}
                   accept="image/*"
                   onChange={e => setCoverImageFile(e.target.files?.[0] || null)}
                   style={{
@@ -450,6 +496,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
               </label>
               <textarea
                 value={description}
+                disabled={!canUpdateMedia}
                 onChange={e => setDescription(e.target.value)}
                 rows={4}
                 style={{
@@ -499,7 +546,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
           </button>
           <button
             onClick={editMode === 'entry' ? handleSaveEntry : handleSaveMedia}
-            disabled={loading}
+            disabled={loading || (editMode === 'entry' ? !canUpdateEntry : (!canUpdateMedia && mediaMetadataChanged) || (!canUpdateMedia && !canUploadMedia) || (coverImageMode === 'binary' && !!coverImageFile && !canUploadMedia))}
             style={{
               padding: '8px 16px',
               border: 'none',

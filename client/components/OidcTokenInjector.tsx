@@ -4,20 +4,15 @@ import { setRepositoryAccessToken } from '../services/sensenet';
 
 export const OidcTokenInjector: React.FC = () => {
   // Use unified auth context
-  const { user, accessToken } = useSharedAuth();
+  const { accessToken } = useSharedAuth();
 
   useEffect(() => {
-    console.log('[OidcTokenInjector] Auth state changed:', {
-      hasUser: !!user,
-      hasAccessToken: !!accessToken
-    });
-
     if (accessToken) {
       setRepositoryAccessToken(accessToken);
     } else {
       setRepositoryAccessToken('');
     }
-  }, [user, accessToken]);
+  }, [accessToken]);
 
   return null;
 };
