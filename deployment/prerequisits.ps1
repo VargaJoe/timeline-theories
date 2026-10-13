@@ -7,8 +7,8 @@ Param (
 	[switch]$DryRun
 )
 
-# Developer certificate demo passwords
-$CertPsw="SuP3rS3CuR3P4sSw0Rd"
+# Legacy certificate helper only; M0 uses scripts/m0-bootstrap.ps1.
+$CertPsw=[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(36))
 
 # create dev cert if cert is not available
 & $PSScriptRoot/scripts/create-devcert.ps1 `
