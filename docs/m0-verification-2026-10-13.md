@@ -6,25 +6,29 @@ Kanonikus checkout: `D:\dev\gitjoe\timeline-theories`. Branch: `feature/m0-local
 
 | M0 terület | Tényleges ellenőrzés |
 | --- | --- |
-| Helyi runtime és profil | Izolált `timeline-m0`, trusted HTTPS, külön SQL/auth/repository volume-ok; explicit local default és transportból blokkolt production-readonly írás. Mindkét kliensbuild és lint PASS. |
+| Helyi runtime és profil | Izolált `timeline-m0`, trusted HTTPS, külön SQL/auth/repository volume-ok; explicit `dev:m0` / `build:m0` tesztmód. Normál dev/build standard envből választ local vagy remote repo/auth célt; az explicit readonly tiltás megtartja ugyanazt a célt. |
 | Indulás és olvasási hiba | A setup-on-import és lookup-error→create megszűnt. Unit és böngészős 404/401/403/500/abort fault injection külön ellenőrzi a nulla tartalomírást. A fault injection nem production próba. |
 | Adatátvétel és séma | MCP source snapshot `2026-10-13T14-32-10-703Z`: 2998 record, 66 Timeline, 1428 entry, 1437 média, 7 típus/őstípus séma. 1503 bináris mező SHA256-je egyezik; nulla mező-, referencia-, sorrend- vagy bináris eltérés. Old→new ID-map és szándékos ismételt előfordulás megmaradt. |
 | Backend jogosultság | 13/13 CRUD smoke, 74/74 domain/reference/binary/lifecycle próba; Visitor és valódi authorization-code PKCE Reader/Editor. Négy típus direct/expanded metadata és bináris Open-védelme, elutasított referencia megőrzése, raw-ID index, első create és normál/végleges Delete igazolt. |
 | Privát tartalom és versenyhelyzet | 46/46 privacy check, 12 publish/hide kör és 2580 olvasási minta. Nulla non-public HTTP200 és nulla redaktált fallback. Csak valódi `NodeIsOutOfDateException` számít stale konfliktusnak. |
-| Böngészős folyamat | 2026-10-13 17:43:01 UTC: 32/32 PASS, valódi formos OIDC Reader/Editor. Visitor és Reader 0 repository írás, Editor 19; CRUD, reorder, upload, ZIP, mixed-target deny, reference redaction, cache revocation, új dokumentumig kivárt logout és Delete igazolt. 9 saját UUID-fixture eltávolítva, source 2998 → 2998. A négy végső screenshot vizuális QA-ja PASS. |
+| Böngészős folyamat | 2026-10-13 19:26:33 UTC: 33/33 PASS, valódi formos OIDC Reader/Editor. Visitor és Reader 0 repository írás, Editor 19; CRUD, reorder, upload, ZIP, mixed-target deny, reference redaction, cache revocation, logout és Delete igazolt. Visitor Death Wish közvetlen/kártya útvonal, rejtett Export/Trakt és ugyanazon dokumentumban hiányzó média → olvasható média visszatérés PASS. 9 saját UUID-fixture eltávolítva, source 2998 → 2998. |
 | Adatmegőrzés újraindításkor | 17:46:24 UTC: saját SQL/auth/repository stop/start után 2998/2998 record és 1503 binary SHA256 egyezik, nulla mező-, referencia-, sorrend- vagy bináris eltérés; ID-map hash változatlan. Restart után valódi PKCE Reader/Editor login PASS. A 18 korábbi fájl (631641439 byte) SHA256-je változatlan. |
-| Kliens és karbantarthatóság | 47/47 unit/contract teszt, lint, local és readonly build PASS. A .NET 8 security extension 0 warning/0 error, a betöltött DLL hash-e egyezik a host builddel. Valódi két-tabos Chromium storage-próba PASS; ez nem production SNAuth login. |
+| Kliens és karbantarthatóság | 51/51 unit/contract teszt, lint, normál production, explicit M0 és readonly build PASS. Env mode/local/process prioritás és public-field allowlist külön ellenőrizve; legacy key/token nem kerül bundle-be. A .NET 8 security extension 0 warning/0 error, a betöltött DLL hash-e egyezik a host builddel. Valódi két-tabos Chromium storage-próba PASS; ez nem production SNAuth login. |
 
 A full verify és a teszt-fixture cleanup a teljes `/Root/Content/timelines` halmazt vizsgálja. A source rekordok nem szerkesztődtek a smoke során. Snapshotok, accountok, ID-map, tanúsítványok, reportok és képek az ignored `deployment/.local/` alatt maradnak.
 
 ## Másolható ellenőrzés
+
+A PR47 preview-korrekcióban a normál `npm run dev` / `npm run build` újra a standard `.env` és hosting process env alapján választ célt. A bootstrap/`dev:m0` nem módosítja a saját env fájlokat. A production build nem tartalmaz környezeti diagnosztikai sávot. Visitor számára az Export/Trakt control rejtett; Trakt import bejelentkezve is mindkét konkrét create joghoz kötött. A `Death Wish (1974)` média alkönyvtárban van: a régi flat route-guard hibás 404-et használt tiltásként. Most az Id-only névfeloldást külön konkrét ID-olvasás és jogvisszavonási figyelés követi. A natív production GET olvasható (Id3424), a Visitor HasPermission action 403; ACL módosítás nem történt.
+
+Netlify kézi próba új preview betöltése után: kijelentkezve nincs repo/auth sáv; a `Charles Bronson's Death Wish` timeline-on nincs `Export Timeline` és `Import from Trakt List`; a `Death Wish (1974)` timeline-kártya, a Media Library keresés/kártya és a közvetlen média URL egyaránt megnyílik. DevTools Networkben a repository origin a Netlify envben konfigurált SenseNet, nincs localhost repo/auth kérés. Production admin login/írás külön kézi próba; az agent productionben csak anonim GET-et végez.
 
 A branch lekérése után, a kanonikus checkoutban:
 
 ```powershell
 npm ci --prefix client
 ./deployment/scripts/m0-bootstrap.ps1 -TrustCertificate
-npm run dev
+npm run dev:m0
 ```
 
 A futó dev folyamatot hagyd meg; másik terminálban:

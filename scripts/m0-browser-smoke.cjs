@@ -196,18 +196,54 @@ async function smoke() {
     await checked('Visitor startup uses trusted HTTPS and sends no repository mutations', async () => {
       await gotoStable(visitor.page,FRONTEND + '/timelines');
       await visitor.page.getByRole('button', {name:/Login with/}).waitFor();
-      await visitor.page.getByRole('status').filter({hasText:'Local writes enabled'}).waitFor();
+      await visitor.page.getByRole('status').filter({hasText:'Writes enabled'}).waitFor();
       await visitor.page.getByText('Timeline Theories',{exact:true}).first().waitFor();
       await wait(1500);
       expectNoWrites(visitor);
       assert.equal(visitor.forbidden.length,0);
     });
-    await checked('Visitor direct create and add-entry routes deny without a write', async () => {
+    await checked('Visitor timeline export/Trakt import stay hidden and direct create routes deny without a write', async () => {
+      await gotoStable(visitor.page,FRONTEND+'/timelines/'+publicTimeline.Name);
+      await visitor.page.getByText(publicTimeline.DisplayName,{exact:true}).waitFor();
+      assert.equal(await visitor.page.getByRole('button',{name:'Export Timeline',exact:true}).count(),0);
+      assert.equal(await visitor.page.getByTitle('Import from Trakt List',{exact:true}).count(),0);
+      expectNoWrites(visitor);
       for (const route of ['/create','/media-library/create','/timelines/'+publicTimeline.Name+'/add-entry']) {
         await gotoStable(visitor.page,FRONTEND+route); await expectDeniedPage(visitor.page); expectNoWrites(visitor);
       }
       await visitor.page.screenshot({path:path.join(output,'visitor-denied.png')});
     });
+    await checked('Visitor opens restored Death Wish subfolder media directly and through its timeline card',async()=>{
+      const mediaName='Death Wish (1974)';
+      const timelineName='Charles Bronson-s Death Wish';
+      const mediaUrl=FRONTEND+'/media-library/'+encodeURIComponent(mediaName);
+      await gotoStable(visitor.page,mediaUrl);
+      await visitor.page.getByRole('heading',{name:mediaName,exact:true}).waitFor();
+      expectNoWrites(visitor);
+      await gotoStable(visitor.page,FRONTEND+'/timelines/'+encodeURIComponent(timelineName));
+      await visitor.page.getByText("Charles Bronson's Death Wish",{exact:true}).waitFor();
+      assert.equal(await visitor.page.getByRole('button',{name:'Export Timeline',exact:true}).count(),0);
+      assert.equal(await visitor.page.getByTitle('Import from Trakt List',{exact:true}).count(),0);
+      await visitor.page.getByRole('link',{name:mediaName,exact:true}).last().click();
+      await visitor.page.waitForURL(mediaUrl);
+      await visitor.page.getByRole('heading',{name:mediaName,exact:true}).waitFor();
+      expectNoWrites(visitor);
+      const documentTimeOrigin=await visitor.page.evaluate(()=>performance.timeOrigin);
+      const missingUrl=FRONTEND+'/media-library/'+encodeURIComponent(prefix+'-missing');
+      // Exercise route state changes without a document reload, including recovery
+      // after an unavailable Name; a late result must belong to its own slug.
+      await visitor.page.evaluate(url=>{history.pushState(history.state,'',url);window.dispatchEvent(new PopStateEvent('popstate'));},missingUrl);
+      await visitor.page.getByRole('heading',{name:'Media Item Unavailable',exact:true}).waitFor();
+      await visitor.page.getByRole('status').filter({hasText:'This operation is unavailable with your current permissions.'}).waitFor();
+      assert.equal(await visitor.page.getByRole('heading',{name:mediaName,exact:true}).count(),0);
+      expectNoWrites(visitor);
+      await visitor.page.evaluate(url=>{history.pushState(history.state,'',url);window.dispatchEvent(new PopStateEvent('popstate'));},mediaUrl);
+      await visitor.page.getByRole('heading',{name:mediaName,exact:true}).waitFor();
+      assert.equal(await visitor.page.evaluate(()=>performance.timeOrigin),documentTimeOrigin);
+      expectNoWrites(visitor);
+      report.sourceMediaReadRegression={mediaName,timelineName,directRoute:true,timelineCardRoute:true,sameDocumentUnavailableRecovery:true,repositoryMutations:0};
+      await visitor.page.screenshot({path:path.join(output,'visitor-source-subfolder-media.png')});
+    },'real Visitor local restored source read only; no source mutations');
     for(const fault of [404,401,403,500,'abort'])await checked(`Startup GET fault ${fault} fails closed with zero writes`,async()=>{
       const isolated=await session();let injected=0;
       await isolated.context.route(local.REPOSITORY+'/**',route=>{
@@ -224,6 +260,8 @@ async function smoke() {
     await checked('Authenticated reader has no write controls and direct routes deny', async () => {
       await editorGoto(reader,'/timelines/'+publicTimeline.Name);
       await reader.page.getByText(publicTimeline.DisplayName,{exact:true}).waitFor();
+      await reader.page.getByRole('button',{name:'Export Timeline',exact:true}).waitFor();
+      assert.equal(await reader.page.getByTitle('Import from Trakt List',{exact:true}).count(),0);
       assert.equal(await reader.page.getByTitle('Edit Timeline',{exact:true}).count(),0);
       assert.equal(await reader.page.getByTitle('Add Timeline Entry',{exact:true}).count(),0);
       assert.equal(await reader.page.getByTitle('Delete Entry',{exact:true}).count(),0);

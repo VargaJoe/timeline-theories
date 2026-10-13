@@ -14,10 +14,8 @@ function IdentityBoundary({ children }: { children: ReactNode }) {
 }
 function MediaReadRoute() {
   const { id } = useParams();
-  const target = id && /^\d+$/.test(id) ? Number(id) : `${mediaLibraryPath}/${id}`;
-  return <PermissionContent operations={[{ target, action: 'read' }]}><MediaItemViewPage /></PermissionContent>;
+  return <MediaItemViewPage key={id} />;
 }
-
 function EntryCreateRoute() {
   const { timelineId } = useParams();
   const target = timelineId && /^\d+$/.test(timelineId) ? Number(timelineId) : `${timelinesPath}/${timelineId}`;
@@ -59,9 +57,9 @@ function App() {
         <ScrollToTopOnRouteChange />
         <div style={{ minHeight: '100vh', background: '#f8f9fa' }}>
           <TopNavigationBar />
-          <div role="status" style={{ padding: '8px 16px', fontSize: 12, background: environment.writable ? '#e9f5ec' : '#fff0ce', overflowWrap: 'anywhere' }}>
-            {environment.mode} · {environment.writable ? 'Local writes enabled' : 'Read only'} · Repository: {environment.repositoryUrl} · Auth: {environment.authority}
-          </div>
+          {import.meta.env.DEV && <div role="status" style={{ padding: '8px 16px', fontSize: 12, background: environment.writable ? '#e9f5ec' : '#fff0ce', overflowWrap: 'anywhere' }}>
+            {environment.mode} · {environment.writable ? 'Writes enabled' : 'Read only'} · Repository: {environment.repositoryUrl} · Auth: {environment.authority}
+          </div>}
           <main>
             <IdentityBoundary><Routes>
               <Route path="/authentication/callback" element={<AuthCallbackPage />} />

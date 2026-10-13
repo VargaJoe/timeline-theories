@@ -10,18 +10,18 @@ export const authType = environment.authType;
 // Base paths for content organization
 export const contentPaths = {
   timelines: environment.projectRoot,
-  get assets() { return `${this.timelines}/(structure)/style`; }
+  get assets() { return import.meta.env.VITE_ASSETS_BASE_PATH || `${this.timelines}/(structure)/style`; }
 };
 
 // Site configuration
 export const siteConfig = {
   // Site branding
-  siteTitle: 'Timeline Theories',
+  siteTitle: import.meta.env.VITE_SITE_TITLE || 'Timeline Theories',
   
   // Background image: base path + relative path
-  headerBackgroundImagePath: `${contentPaths.assets}/${'background.webp'}`,
+  headerBackgroundImagePath: `${contentPaths.assets}/${import.meta.env.VITE_HEADER_BACKGROUND_IMAGE || 'background.webp'}`,
   headerBackgroundFallback: null, // Use gradient fallback instead of external image
-  headerOverlayOpacity: 0.3, // 0.0 = no overlay (full image), 1.0 = full overlay (no image)
+  headerOverlayOpacity: parseFloat(import.meta.env.VITE_HEADER_OVERLAY_OPACITY || '0.3'),
 
   // Default cover image dimensions for binary upload (px)
   coverImageDefaultWidth: 360,
@@ -30,17 +30,17 @@ export const siteConfig = {
   // Timeline list configuration
   timelineList: {
     // Enable/disable ABC pagination (character-based filtering)
-    enableAbcPagination: true, // Default: true
+    enableAbcPagination: import.meta.env.VITE_ENABLE_ABC_PAGINATION !== 'false',
     // Enable/disable "All" view with pagination (can be disabled for performance reasons)
-    enableAllView: true, // Default: true
+    enableAllView: import.meta.env.VITE_ENABLE_ALL_TIMELINE_VIEW !== 'false',
     // Number of timelines to load per page in "All" view
-    allViewPageSize: 20, // Default: 20
+    allViewPageSize: parseInt(import.meta.env.VITE_ALL_TIMELINE_PAGE_SIZE || '20'),
   },
 
   // Image caching configuration
   imageCache: {
-    ttl: 3600000, // 1 hour default
-    concurrencyLimit: 2,
+    ttl: parseInt(import.meta.env.VITE_LOCAL_STORAGE_TTL || '3600000'),
+    concurrencyLimit: parseInt(import.meta.env.VITE_IMAGE_CONCURRENCY_LIMIT || '2'),
   }
 };
 

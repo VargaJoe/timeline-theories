@@ -1,6 +1,6 @@
 # M0 kliens: környezet, céljogok és ellenőrzés
 
-Az M0 fejlesztési alapértelmezése a külön helyi SenseNet. Az éles rendszerből csak a konfigurált MCP olvasó exportja készít snapshotot; a production login és ACL javítása külön feladat. Merge, automerge és deploy nincs ebben a változtatásban.
+Az alkalmazás repository/auth célját a felhasználó `.env`/hosting konfigurációja határozza meg. Az elkülönített M0 runtime külön, explicit tesztparanccsal választható. Az agent production vizsgálata csak olvasó; production ACL írás, merge, automerge és kézi deploy nincs ebben a változtatásban.
 
 ## Indítás és profil
 
@@ -8,25 +8,26 @@ A teljes backend, tanúsítvány, tesztidentitás és adatátvétel lépései: [
 
 ```powershell
 npm ci --prefix client
-npm run dev
+npm run dev:m0
 ```
 
-Nyisd meg a `https://localhost:8080` címet. A zöld sávban `local`, `Local writes enabled`, repository `https://localhost:41016`, auth `https://localhost:41017` jelenik meg. A helyi accountokat a bootstrap hozza létre; a jelszavak az ignored `deployment/.local/accounts.json` fájlban vannak, nem a bundle-ben.
+Nyisd meg a `https://localhost:8080` címet. A fejlesztői sávban `m0-local`, `Writes enabled`, repository `https://localhost:41016`, auth `https://localhost:41017` jelenik meg. A sáv kizárólag Vite dev alatt látszik; Netlify és minden buildelt felület elhagyja. A helyi accountokat a bootstrap hozza létre; a jelszavak az ignored `deployment/.local/accounts.json` fájlban vannak, nem a bundle-ben.
 
 Az explicit profilok:
 
 | Parancs | Nyilvános profil | Írás |
 | --- | --- | --- |
-| `npm run dev` / `npm run build` | `client/profiles/local.json` + ignored `local.override.json` | Csak loopback helyi repository |
-| `npm run dev:readonly --prefix client` / `npm run build:readonly --prefix client` | `production-readonly.json` + opcionális ignored override | Minden kliens repository-írás tiltott |
+| `npm run dev` / `npm run build` | Standard Vite `.env` / hosting `VITE_*` | Konkrét céljogok alapján, local és remote repo egyaránt |
+| `npm run dev:readonly --prefix client` / `npm run build:readonly --prefix client` | Ugyanez a felhasználói env; a cél nem változik | Minden kliens repository-írás tiltott |
+| `npm run dev:m0` / `npm run build:m0 --prefix client` | `client/profiles/local.json` + ignored `local.override.json` | Elkülönített loopback M0 tesztrepo |
 
-A Vite CLI mód neve `development-local`, mert a Vite a `local` módnevet fenntartja saját env-suffixére. A megjelenített belső mód `local`. A korábbi `.env`, `.env.local`, `.env.prod`, `.env.itteni`, `.env.miez` fájlok megmaradnak, de a kliens célválasztásában nem vesznek részt. A folyamatban beállított `TIMELINE_REPOSITORY_URL` és `TIMELINE_AUTHORITY` explicit publikus override, ugyanazon validáción megy át. Profilváltoztatás után állítsd le és indítsd újra a Vite folyamatot; a buildet újra kell készíteni.
+A normál Vite prioritás alacsonytól magasig: `.env`, `.env.local`, `.env.<mode>`, `.env.<mode>.local`, végül a folyamat/Netlify környezeti változói. `dev` módja `development`, `build` módja `production`; egyéb env fájlhoz a megfelelő `--mode` kell. A `VITE_SENSENET_REPO_URL`, `VITE_OIDC_AUTHORITY`, `VITE_OIDC_CLIENT_ID`, `VITE_PROJECT_ROOT_PATH` változókat a kliens nem cseréli localhostra vagy másik repóra. Lokális frontend production repohoz is kapcsolható. `VITE_AUTH_TYPE=auto` (default) a konfigurált repo publikus discovery válaszából csak az auth provider típusát választja ki; az authority/client ID envből marad. `VITE_READ_ONLY=true` explicit tilt minden appírást. Env-változás után restart/build kell; a felhasználó env fájljait a bootstrap sem írja felül.
 
-Csak HTTPS origin, támogatott auth típus, érvényes project path, publikus SPA client ID és szigorú boolean writable fogadható el. A helyi mód cloud repository/auth párost elutasít; a remote mód writable=true értéket elutasít. Ismeretlen profilmező, URL-credential és path traversal is hibát ad. A Vite `VITE_*` örökölt env-befecskendezése nincs engedélyezve. Tanúsítvány nélküli dev startup hibával leáll.
+Csak HTTPS origin, támogatott auth típus, érvényes project path, publikus SPA client ID és szigorú boolean writable fogadható el. Loopback-korlát kizárólag az explicit `m0-local` tesztprofilban van. A browser env publikus mezők allowlistje: az URL/client ID/UI beállítások bekerülhetnek; tetszőleges `VITE_*` mező, API key, token, jelszó nem. URL-credential és path traversal hibát ad. Tanúsítvány nélküli dev startup hibával leáll.
 
 Az SNAuth SDK három rögzített localStorage kulcsa még a provider mountja előtt repo/auth/client-ID szerinti névtérbe kerül. A native Storage getItem/setItem/removeItem adapter csak e három kulcsot és az adott ablak localStorage objektumát érinti; a többi kulcs és sessionStorage változatlan. Egy másik profil régi tabjának késői callback/refresh írása a saját névterében marad. Az ismeretlen eredetű legacy tokeneket nem migráljuk. Ugyanazon profil munkamenete reload után megmarad; futó ablakon belüli profilcsere teljes reloadot követel. Két valódi Chromium tab és újranyitás igazolta az elkülönítést, de az éles SNAuth login működését ez nem igazolja.
 
-Az éles readonly auth-cél a meglévő konfiguráció publikus `https://plastice-is.sensenet.cloud` értékét rögzíti. Ez konfigurációs érték, nem a production login működésének igazolása. Az éles frontend nem volt megnyitva. A production anoním privát GET-résének szerveroldali javítása továbbra is külön, jóváhagyott feladat.
+Az éles auth-cél az envben konfigurált érték; nincs rögzített remote JSON célprofil. A PR-preview Visitor olvasása ellenőrizhető production írás nélkül. Production admin login/írás és a korábbi audit szerveroldali ACL-megállapításai külön szelet; az éles ACL nem változik.
 
 ## Műveleti határ
 
@@ -42,7 +43,7 @@ Az egyértékű Choice mezők (MediaType, Genre, EntryLabel, Importance) backend
 
 A nyers Request objektum, unchecked POST/action/move/copy és cross-repository fetch tiltott. A kérésadatokról az első await előtt másolat készül, így későbbi GET→POST vagy FormData módosítás nem változtathatja meg a vizsgált kérést. A bináris feltöltés cél-ID/path/name/type/field és teljes multipart metaadata egyezni köteles. Külső borítók nem kapnak repository Bearer tokent. Az identitásváltás újramountolja az olvasó oldalakat és eldobja a korábbi privát adatokat/képeredményeket.
 
-Visitor esetén a helyi official backend HasPermission 403-at ad, mert az Everyone szerepbe nem tartozik bele. Csak helyi anonim Open ellenőrzéshez történik minimális, konkrét `$select=Id` GET; minden hibát tiltásként kezel. Ez nem létrehozási vagy autentikációs fallback. A backend ACL a kliens megkerülésekor is érvényesül.
+Visitor esetén a local és a production backend `HasPermission` művelete egyaránt 403-at ad olvasható public médiára is. Anonim olvasásnál minimális, konkrét `$select=Id` GET bizonyítja a backend által engedett hozzáférést; minden hibát tiltásként kezel. Ez nem írási vagy autentikációs fallback; bejelentkezve továbbra is konkrét `HasPermission` kell. A Name-alapú média URL előbb csak Id/Name névfeloldást végez a MediaLibrary teljes fájában, majd külön, konkrét ID-jogellenőrzéssel tölti és figyeli a médiát. Az alkönyvtárak támogatottak, a numerikus Name nem keveredik ContentId-val. Nem egyértelmű névfeloldás zárt marad.
 
 ## Ellenőrző parancsok
 
@@ -70,7 +71,7 @@ A kliens kezdeti npm auditja 37 jelzést adott (24 high). A DOMPurify 3.4.17, Re
 
 ## Kézi smoke Joe számára
 
-1. Indítsd a helyi runtime-ot és `npm run dev`-et. Ellenőrizd a zöld sáv minden célját. Visitor: nyilvános listák olvashatók, `Create` és média/entry író művelet nincs; közvetlen `/create`, `/media-library/create` és egy timeline `/add-entry` útvonala tiltott.
+1. Indítsd a helyi runtime-ot és `npm run dev:m0`-t. Ellenőrizd a fejlesztői sáv minden célját. Visitor: nyilvános listák és az alkönyvtárban tárolt `Death Wish (1974)` média olvashatók; timeline-kártya és közvetlen média URL is működik. `Export Timeline`, `Import from Trakt List`, `Create` és média/entry író művelet nincs; közvetlen `/create`, `/media-library/create` és egy timeline `/add-entry` útvonala tiltott. Production buildben a diagnosztikai sáv nem jelenik meg.
 2. `Login with IdentityServer`: a formba a `M0Reader` LoginName-et írd, nem emailcímet. A jelszó az ignored accounts.json fájlban található. Belépés után maradjanak tiltottak az író műveletek. Privát timeline közvetlen URL-je ne adjon címet, leírást vagy entryt.
 3. M0Editorral a `Create Timeline` gombbal (`/create`) hozz létre saját teszt-timeline-t. Az új elem alapból privát: ugyanaz a `/timelines/<Name>` cím külön Visitor/Reader sessionben ne adjon tartalmat. `Add Timeline Entry` → `Create New Media` → `Create Media Item` → `Add to Timeline`: hozz létre külön teszt-médiát, majd `Select` → `Add to Timeline` útvonalon add hozzá még egyszer. Maradjon két előfordulás. `Edit Entry` alatt az egyik Notes mezőjét mentsd `Save Changes` gombbal; a másik ne változzon.
 4. `Reorder Entries` → `Save New Order` után töltsd újra az oldalt; az új sorrend maradjon. `Media Item Data` alatt teszt-borítófeltöltés és `Save Changes` után újratöltve is jelenjen meg a kép. `Export Timeline` majd `Import Timeline` ugyanabba a saját célba: a két occurrence ID maradjon külön. A ZIP import csak a kiválasztott, előre engedélyezett célokat érintse.

@@ -88,16 +88,16 @@ test('raw fetch writes are not a permission bypass',async()=>{
   const f=fixture();await assert.rejects(f.repository.fetch('https://localhost/api',{method:'POST'}));assert.equal(f.writes.length,0);
   await assert.rejects(f.repository.fetch(new Request('https://localhost/api',{method:'POST',body:'{}'})));assert.equal(f.writes.length,0);
 });
-test('local profile rejects cloud or mixed authority',()=>{
+test('explicit M0 profile rejects cloud or mixed authority',()=>{
   const profile={repositoryUrl:'https://localhost:41016',authority:'https://localhost:41017',authType:'IdentityServer',clientId:'public-spa',projectRoot:'/Root/Content/timelines',writable:true};
-  assert.equal(validateProfile(profile,'local').mode,'local');
-  assert.throws(()=>validateProfile({...profile,repositoryUrl:'https://plastice.sensenet.cloud'},'local'));
-  assert.throws(()=>validateProfile({...profile,authority:'https://auth.sensenet.com'},'local'));
-  assert.throws(()=>validateProfile({...profile,repositoryUrl:'https://user:secret@localhost:41016'},'local'));
-  assert.throws(()=>validateProfile(profile,'production'));
-  assert.throws(()=>validateProfile({...profile,apiKey:'must-not-bundle'},'local'));
-  assert.throws(()=>validateProfile({...profile,writable:'true'},'local'));
-  assert.throws(()=>validateProfile({...profile,projectRoot:'/Root/Content/timelines/../other'},'local'));
+  assert.equal(validateProfile(profile,'m0-local').mode,'m0-local');
+  assert.throws(()=>validateProfile({...profile,repositoryUrl:'https://plastice.sensenet.cloud'},'m0-local'));
+  assert.throws(()=>validateProfile({...profile,authority:'https://auth.sensenet.com'},'m0-local'));
+  assert.throws(()=>validateProfile({...profile,repositoryUrl:'https://user:secret@localhost:41016'},'m0-local'));
+  assert.equal(validateProfile({...profile,repositoryUrl:'https://repository.example',authority:'https://auth.example'},'production').writable,true);
+  assert.throws(()=>validateProfile({...profile,apiKey:'must-not-bundle'},'m0-local'));
+  assert.throws(()=>validateProfile({...profile,writable:'true'},'m0-local'));
+  assert.throws(()=>validateProfile({...profile,projectRoot:'/Root/Content/timelines/../other'},'m0-local'));
 });
 test('a batch context cannot continue after logout or revocation',()=>{
   let current='editor'; const f=fixture({identity:()=>current});

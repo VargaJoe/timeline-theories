@@ -5,11 +5,11 @@ import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TimelineEntryEditModal } from '../components/TimelineEntryEditModal';
 import { PageHeader } from '../components/PageHeader';
-import { TIMELINE_CONTENT_TYPE, TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
+import { MEDIA_ITEM_CONTENT_TYPE, TIMELINE_CONTENT_TYPE, TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
-import { timelinesPath } from '../projectPaths';
+import { mediaLibraryPath, timelinesPath } from '../projectPaths';
 import { repository, assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
 import { usePermissions } from '../hooks/usePermissions';
 import { PermissionContent } from '../components/PermissionContent';
@@ -75,19 +75,22 @@ export const TimelineViewPage: React.FC = () => {
   // Export handler
   const [isExporting, setIsExporting] = useState(false);
   const handleExportTimeline = async () => {
-    if (!timeline) return;
+    if (!auth.isAuthenticated || !timeline) return;
+    const checkContext = captureOperationContext();
     const parentPath = `${timelinesPath}/${timeline.name}`;
     
     setIsExporting(true);
     try {
       await assertOperations([{ target: timeline.id, action: 'read' }]);
       const { exportTimelineAsZip } = await import('../services/timelineExportService');
+      checkContext();
       const result = await exportTimelineAsZip(
         Number(timeline.id),
         timeline.name,
         parentPath,
         repository
       );
+      checkContext();
       
       // Trigger ZIP download
       const url = URL.createObjectURL(result.blob);
@@ -565,7 +568,7 @@ export const TimelineViewPage: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </button></PermissionContent>
-            <button
+            {auth.isAuthenticated && <button
               onClick={handleExportTimeline}
               disabled={isExporting}
               title={isExporting ? "Exporting timeline..." : "Export Timeline (ZIP with TSV + Images)"}
@@ -611,7 +614,7 @@ export const TimelineViewPage: React.FC = () => {
                   <span style={{ marginLeft: 8 }}>Export Timeline</span>
                 </>
               )}
-            </button>
+            </button>}
             <PermissionContent operations={[{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }]} fallback={null}><label
               title={isImporting ? "Importing timeline..." : "Import Timeline (ZIP with TSV + Images)"}
               style={{
@@ -667,7 +670,10 @@ export const TimelineViewPage: React.FC = () => {
                 disabled={isImporting}
               />
             </label></PermissionContent>
-            <div title="Import from Trakt List" style={{ display: 'inline-block' }}>
+            {auth.isAuthenticated && <PermissionContent operations={[
+              { target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE },
+              { target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE },
+            ]} fallback={null}><div title="Import from Trakt List" style={{ display: 'inline-block' }}>
               <TraktImportDialog
                 timelineName={timeline.name}
                 onImportComplete={() => {
@@ -677,7 +683,7 @@ export const TimelineViewPage: React.FC = () => {
                     .finally(() => setEntriesLoading(false));
                 }}
               />
-            </div>
+            </div></PermissionContent>}
           </div>
         )}
 

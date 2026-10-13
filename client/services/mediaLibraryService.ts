@@ -320,7 +320,7 @@ export class MediaLibraryService {
       const response = await repository.load({
         idOrPath: id,
         oDataOptions: {
-          select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
+          select: ['Id', 'ParentId', 'Name', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
           expand: ['CreatedBy']
         }
       });
@@ -338,20 +338,22 @@ export class MediaLibraryService {
    */
   static async getMediaItemByName(name: string): Promise<MediaItem> {
     try {
-      // Use a query to find by Name, supporting subfolders
-      const query = `+Name:'${name}' +(TypeIs:${MEDIA_ITEM_CONTENT_TYPE} OR TypeIs:${BOOK_CONTENT_TYPE})`;
+      // URLs carry a Name, not a root-relative path or ContentId. Resolve across
+      // subfolders using only identifiers, then read through the exact ID guard.
+      const query = `+Name:${JSON.stringify(name)} +(TypeIs:${MEDIA_ITEM_CONTENT_TYPE} OR TypeIs:${BOOK_CONTENT_TYPE})`;
       const response = await repository.loadCollection({
         path: mediaLibraryPath,
         oDataOptions: {
           query,
-          select: ['Id', 'ParentId', 'Name', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber'],
-          expand: ['CreatedBy']
+          select: ['Id', 'Name'],
+          top: 2
         }
       });
-      if (response.d.results.length === 0) {
-        throw Object.assign(new Error('Media item not found by Name.'), { statusCode: 404 });
+      const matches = response.d.results.filter((item: { Id: number; Name: string }) => item.Name === name);
+      if (matches.length !== 1 || !Number.isSafeInteger(matches[0].Id) || matches[0].Id <= 0) {
+        throw new Error('Media name is unavailable or ambiguous.');
       }
-      return this.mapMemoToMediaItem(response.d.results[0]);
+      return this.getMediaItem(matches[0].Id);
     } catch (error) {
       console.error('Error fetching media item by Name:', error);
       throw error;

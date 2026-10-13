@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "cd client && npm run dev",
+    "dev:m0": "cd client && npm run dev:m0",
     "build": "cd client && npm run build",
     "test": "node --test tests/*.test.mjs scripts/*.test.cjs",
     "test:backend": "node scripts/m0-backend-smoke.cjs",

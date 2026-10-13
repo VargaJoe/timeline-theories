@@ -1,11 +1,12 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readProfile } from './profile.mjs';
+import { readProfile, publicEnvDefines } from './profile.mjs';
 
 export default defineConfig(({ mode, command }) => {
-  const profile = readProfile(mode, __dirname);
+  const env = mode === 'm0-local' ? {} : loadEnv(mode, __dirname, 'VITE_');
+  const profile = readProfile(mode, __dirname, env);
   const certDir = path.resolve(__dirname, '../deployment/.local/certificates');
   const key = path.join(certDir, 'localhost.key');
   const cert = path.join(certDir, 'localhost.crt');
@@ -14,9 +15,9 @@ export default defineConfig(({ mode, command }) => {
   }
   return {
     plugins: [react()],
-    envDir: path.resolve(__dirname, 'profiles'),
-    envPrefix: 'TIMELINE_PUBLIC_',
-    define: { __TIMELINE_PROFILE__: JSON.stringify(profile) },
+    envDir: mode === 'm0-local' ? path.resolve(__dirname, 'profiles') : __dirname,
+    envPrefix: [],
+    define: { __TIMELINE_PROFILE__: JSON.stringify(profile), ...publicEnvDefines(env) },
     server: { host: '127.0.0.1', port: 8080, strictPort: true,
       https: fs.existsSync(key) && fs.existsSync(cert) ? { key: fs.readFileSync(key), cert: fs.readFileSync(cert) } : undefined },
   };

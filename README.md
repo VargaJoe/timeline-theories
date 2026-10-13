@@ -45,10 +45,10 @@ Use Node.js 22+, PowerShell 7, Docker Desktop and the .NET 8 SDK (a newer compat
 ```powershell
 npm ci --prefix client
 ./deployment/scripts/m0-bootstrap.ps1 -TrustCertificate
-npm run dev
+npm run dev:m0
 ```
 
-Open https://localhost:8080. Select a profile explicitly; legacy `.env` variants are preserved but no longer select frontend targets. Never place credentials in Vite configuration.
+Open https://localhost:8080 for the isolated M0 runtime. Ordinary `npm run dev` / `npm run build` take their repository/auth targets from the standard `client/.env` configuration and hosting environment. Existing `.env` files are preserved; `dev:m0` is an explicit opt-in test command. Never place credentials in Vite configuration.
 
 See [local runtime, full snapshot and restore](docs/m0-local-data.md), [profiles, permissions and manual tests](docs/m0-client-safety.md), and the [M0 verification handoff](docs/m0-verification-2026-10-13.md) for setup and validation. The application does not provision content on startup.
 

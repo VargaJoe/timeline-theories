@@ -27,9 +27,8 @@ const copyFormData = (body: FormData) => {
   body.forEach((value, key) => copy.append(key, value));
   return copy;
 };
-const isLocalWriteTarget = () => environment.mode === 'local' && environment.writable &&
-  rawRepository.configuration.repositoryUrl.replace(/\/$/, '') === repositoryUrl &&
-  ['localhost', '127.0.0.1', '[::1]'].includes(new URL(repositoryUrl).hostname);
+const isConfiguredWriteTarget = () => environment.writable &&
+  rawRepository.configuration.repositoryUrl.replace(/\/$/, '') === repositoryUrl;
 rawRepository.fetch = async (input: RequestInfo, init?: RequestInit, awaitReadyState?: boolean) => {
   if (typeof input !== 'string') throw new Error('Request objects are not supported by the checked repository');
   const url = new URL(input, repositoryUrl);
@@ -43,7 +42,7 @@ rawRepository.fetch = async (input: RequestInfo, init?: RequestInit, awaitReadyS
   if (awaitReadyState !== false) await rawRepository.awaitReadyState();
   if (before !== rawRepository.configuration.token) throw new Error('Identity changed before dispatch');
   if (!['GET', 'HEAD'].includes(method)) {
-    if (!isLocalWriteTarget()) throw new Error('Production/development writes are disabled');
+    if (!isConfiguredWriteTarget()) throw new Error('Repository writes are disabled by configuration');
     const item = url.pathname.replace(/^\/odata\.svc\//i, '').replace(/\/[^/]+$/, matched => /\/DeleteBatch|\/upload/i.test(matched) ? '' : matched);
     const idMatch = item.match(/^content\((\d+)\)$/i);
     const target = idMatch ? Number(idMatch[1]) : decodeURIComponent(item.replace(/\('([^']*(?:''[^']*)*)'\)$/, '/$1').replace(/''/g, "'")).replace(/^([^/])/, '/$1');
@@ -59,7 +58,7 @@ rawRepository.fetch = async (input: RequestInfo, init?: RequestInit, awaitReadyS
       else if (method === 'POST' && typeof payload.__ContentType === 'string') await assertOperations([{target,action:'create',contentType:payload.__ContentType}]);
       else throw new Error('Unsupported mutation endpoint');
     }
-    if (before !== rawRepository.configuration.token || !isLocalWriteTarget()) throw new Error('Identity/repository changed before dispatch');
+    if (before !== rawRepository.configuration.token || !isConfiguredWriteTarget()) throw new Error('Identity/repository changed before dispatch');
     checkContext();
     return originalFetch(input, requestInit, false);
   }
@@ -69,10 +68,10 @@ rawRepository.fetch = async (input: RequestInfo, init?: RequestInit, awaitReadyS
 const checkedUploads = new WeakMap<FormData, string | number>();
 const permissionGuard = createOperationGuard({
   probe: async (target, permissions) => {
-    // Official local SenseNet excludes Visitor from HasPermission's Everyone role.
-    // A minimal, concrete GET uses the same backend Open ACL as the following read.
-    // This applies only to local anonymous reads; errors never authorize anything.
-    if (environment.mode === 'local' && !rawRepository.configuration.token && permissions.length === 1 && permissions[0] === 'Open') {
+    // SenseNet's HasPermission action excludes Visitor, even for public content.
+    // Anonymous read availability is proved by the actual backend GET on this
+    // exact content; denied/missing/transport failures still fail closed.
+    if (!rawRepository.configuration.token && permissions.length === 1 && permissions[0] === 'Open') {
       const result = await rawRepository.load({ idOrPath: target, oDataOptions: { select: ['Id'], metadata: 'no' } });
       return Number.isSafeInteger(result.d?.Id) && result.d.Id > 0;
     }
@@ -82,7 +81,7 @@ const permissionGuard = createOperationGuard({
     const result = await rawRepository.allowedChildTypes.get({ idOrPath: target });
     return result.d.results.map((type: { Name: string }) => type.Name);
   },
-  writable: isLocalWriteTarget,
+  writable: isConfiguredWriteTarget,
   identity: () => `${rawRepository.configuration.repositoryUrl}:${rawRepository.configuration.token || ''}`,
 });
 export const repository = guardRepository(rawRepository, permissionGuard);
