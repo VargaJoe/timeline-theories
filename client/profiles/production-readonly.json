@@ -1,0 +1,8 @@
+{
+  "repositoryUrl": "https://plastice.sensenet.cloud",
+  "authority": "https://plastice-is.sensenet.cloud",
+  "authType": "SNAuth",
+  "clientId": "",
+  "projectRoot": "/Root/Content/timelines",
+  "writable": false
+}

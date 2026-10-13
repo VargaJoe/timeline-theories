@@ -35,14 +35,14 @@ export async function uploadCoverImageBinary(
   imageBlob: Blob,
   fileName: string = 'cover.jpg'
 ): Promise<void> {
-  console.log('[uploadCoverImageBinary] called with:', { mediaItemRef, imageBlob, fileName });
+  await assertOperations([{ target: mediaItemRef, action: 'upload' }]);
   
   try {
     // Get the media item's Name and parent ID
     const content = await repository.load({
       idOrPath: mediaItemRef,
       oDataOptions: {
-        select: ['Id', 'ParentId', 'Name']
+        select: ['Id', 'ParentId', 'Name', 'Type']
       }
     });
     
@@ -61,17 +61,14 @@ export async function uploadCoverImageBinary(
     formData.append('Overwrite', 'true');
     formData.append('PropertyName', 'CoverImageBin'); // Target the binary field
     formData.append('FileLength', imageBlob.size.toString());
-    formData.append('ContentType', 'MediaItem'); // Specify content type
+    formData.append('ContentType', content.d.Type);
     formData.append(mediaItemName, imageBlob, fileName); // Use media item Name as form field name
 
     // Upload to parent container using SenseNet upload endpoint with parent ID
     const uploadUrl = `${repositoryUrl}/odata.svc/content(${parentId})/upload`;
     console.log('[uploadCoverImageBinary] uploading to:', uploadUrl);
     
-    const uploadResult = await repository.fetch(uploadUrl, {
-      method: 'POST',
-      body: formData
-    });
+    const uploadResult = await uploadBinary(mediaItemRef, uploadUrl, formData);
 
     if (!uploadResult.ok) {
       const errorText = await uploadResult.text();
@@ -88,10 +85,11 @@ export async function uploadCoverImageBinary(
 }
 
 // src/client/services/mediaLibraryService.ts
-import { repository } from './sensenet';
+import { repository, assertOperations, uploadBinary } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { MEDIA_ITEM_CONTENT_TYPE, BOOK_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
+import { singleChoice } from './contentValues';
 
 export interface MediaItem {
   Id: number;
@@ -144,7 +142,7 @@ interface SenseNetContent {
     DisplayName: string;
   };
   // MediaItem fields (optional for type safety)
-  MediaType?: string;
+  MediaType?: string | string[];
   ReleaseDate?: string;
   Year?: number;
   ChronologicalDate?: string;
@@ -156,7 +154,7 @@ interface SenseNetContent {
     };
   };
   Duration?: number;
-  Genre?: string;
+  Genre?: string | string[];
   Rating?: number;
   ExternalLinks?: string;
   Tags?: string;
@@ -170,6 +168,7 @@ interface SenseNetContent {
 }
 
 export interface CreateMediaItemRequest {
+  Name?: string;
   DisplayName: string;
   Title?: string;
   Subtitle?: string;
@@ -257,7 +256,7 @@ export class MediaLibraryService {
 
       // Validate rating
       let safeRating: number | undefined = undefined;
-      if (typeof data.Rating === 'number' && data.Rating >= 1 && data.Rating <= 10) {
+      if (typeof data.Rating === 'number' && data.Rating >= 0 && data.Rating <= 10) {
         safeRating = Math.round(data.Rating);
       }
 
@@ -269,6 +268,7 @@ export class MediaLibraryService {
 
       // Build content object, excluding undefined fields
       const content: Partial<CreateMediaItemRequest> = {
+        Name: data.Name || crypto.randomUUID(),
         DisplayName: data.DisplayName,
         Title: data.Title,
         Subtitle: data.Subtitle,
@@ -349,12 +349,12 @@ export class MediaLibraryService {
         }
       });
       if (response.d.results.length === 0) {
-        throw new Error('Media item not found by Name.');
+        throw Object.assign(new Error('Media item not found by Name.'), { statusCode: 404 });
       }
       return this.mapMemoToMediaItem(response.d.results[0]);
     } catch (error) {
       console.error('Error fetching media item by Name:', error);
-      throw new Error('Failed to load media item by Name. Please check your connection and try again.');
+      throw error;
     }
   }
 
@@ -421,7 +421,7 @@ export class MediaLibraryService {
       // Validate rating
       let safeRating: number | undefined = undefined;
       if (data.Rating !== undefined) {
-        if (typeof data.Rating === 'number' && data.Rating >= 1 && data.Rating <= 10) {
+        if (typeof data.Rating === 'number' && data.Rating >= 0 && data.Rating <= 10) {
           safeRating = Math.round(data.Rating);
         }
       }
@@ -519,7 +519,7 @@ export class MediaLibraryService {
         query += ` +(DisplayName:'*${searchQuery.toLowerCase()}*' OR Description:'*${searchQuery.toLowerCase()}*')`;
       }
 
-      const oDataOptions: any = {
+      const oDataOptions: { query: string; select: string[]; orderby: string[]; expand?: string[]; skip?: number; top?: number } = {
         query: query,
         select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
         expand: ['CreatedBy'],
@@ -558,13 +558,14 @@ export class MediaLibraryService {
       Title: memo.Title,
       Subtitle: memo.Subtitle,
       Description: memo.Description,
-      MediaType: memo.MediaType || 'Other',
+      MediaType: singleChoice(memo.MediaType) || 'other',
       ReleaseDate: memo.ReleaseDate,
+      Year: memo.Year,
       ChronologicalDate: memo.ChronologicalDate,
       CoverImageUrl: memo.CoverImageUrl,
       CoverImageBin: memo.CoverImageBin,
       Duration: memo.Duration,
-      Genre: memo.Genre,
+      Genre: singleChoice(memo.Genre),
       Rating: memo.Rating,
       ExternalLinks: memo.ExternalLinks,
       Tags: memo.Tags,
@@ -604,7 +605,7 @@ export class MediaLibraryService {
    */
   static getCoverImageUrl(mediaItem: MediaItem): string | null {
     // First check if we have a binary image (preferred)
-    if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
+    if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource && mediaItem.CoverImageBin.__mediaresource.content_type !== '') {
       const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
       return `${repositoryUrl}${relativePath}`;
     }

@@ -5,16 +5,18 @@ import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TimelineEntryEditModal } from '../components/TimelineEntryEditModal';
 import { PageHeader } from '../components/PageHeader';
-import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
+import { TIMELINE_CONTENT_TYPE, TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
 import { timelinesPath } from '../projectPaths';
-import { repository } from '../services/sensenet';
+import { repository, assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import { usePermissions } from '../hooks/usePermissions';
+import { PermissionContent } from '../components/PermissionContent';
+import { useSharedAuth } from '../context/useSharedAuth';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { loadBackgroundImage } from '../services/sensenet';
 import { siteConfig, repositoryUrl } from '../configuration';
-import { useSharedAuth } from '../context/useSharedAuth';
 import type { Timeline } from '../services/timelineService';
 import type { TimelineEntry, MediaItemRef } from '../services/timelineEntryService';
 
@@ -33,6 +35,10 @@ function getCoverImageUrl(mediaItem: MediaItemRef): string | null {
   }
   
   return null;
+}
+
+function entryReadOperations(entry: TimelineEntry): Operation[] {
+  return [{ target: entry.id, action: 'read' }, ...(entry.mediaItem ? [{ target: entry.mediaItem.Id, action: 'read' as const }] : [])];
 }
 
 // Type definitions for react-beautiful-dnd to avoid TypeScript any warnings
@@ -65,7 +71,6 @@ interface DroppableProvided {
 
 export const TimelineViewPage: React.FC = () => {
   const auth = useSharedAuth();
-  const isUserAuthenticated = auth.isAuthenticated;
 
   // Export handler
   const [isExporting, setIsExporting] = useState(false);
@@ -75,6 +80,7 @@ export const TimelineViewPage: React.FC = () => {
     
     setIsExporting(true);
     try {
+      await assertOperations([{ target: timeline.id, action: 'read' }]);
       const { exportTimelineAsZip } = await import('../services/timelineExportService');
       const result = await exportTimelineAsZip(
         Number(timeline.id),
@@ -107,17 +113,16 @@ export const TimelineViewPage: React.FC = () => {
   
   const handleImportTimeline = async (file: File) => {
     if (!timeline) return;
+    const checkContext = captureOperationContext();
     const parentPath = `${timelinesPath}/${timeline.name}`;
     
     setIsImporting(true);
     try {
-      const { importTimelineFromZip } = await import('../services/timelineImportService');
-      const result = await importTimelineFromZip(
-        file,
-        Number(timeline.id),
-        parentPath,
-        repository
-      );
+      const { prepareTimelineImport } = await import('../services/timelineImportService');
+      const plan = await prepareTimelineImport(file, Number(timeline.id), parentPath);
+      await assertOperations(plan.operations);
+      checkContext();
+      const result = await plan.execute();
       
       console.log(`[TimelineViewPage] Import complete. Created: ${result.entriesCreated}, Updated: ${result.entriesUpdated}, Skipped: ${result.entriesSkipped}`);
       
@@ -128,6 +133,7 @@ export const TimelineViewPage: React.FC = () => {
       setEntriesLoading(false);
     } catch (err) {
       console.error('Import error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to import timeline.');
     } finally {
       setIsImporting(false);
     }
@@ -164,18 +170,33 @@ export const TimelineViewPage: React.FC = () => {
   const [editError, setEditError] = useState('');
   const [showEntryEditModal, setShowEntryEditModal] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TimelineEntry | null>(null);
+  const [loadedContext, setLoadedContext] = useState('');
+
+  const timelinePath = timelineName ? `${timelinesPath}/${timelineName}` : '';
+  const readContext = JSON.stringify([timelinePath, auth.accessToken, auth.user?.Id, auth.user?.sub]);
+  const canRead = usePermissions(timelinePath ? [{ target: timelinePath, action: 'read' }] : []);
+  const canCreateEntry = usePermissions(timelinePath ? [{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }] : []);
+  const reorderOperations: Operation[] = entries.map(entry => ({ target: entry.id, action: 'update' }));
+  const canReorder = usePermissions(reorderOperations);
+  const mediaUpdateOperations: Operation[] = entries.flatMap(entry => entry.mediaItem ? [{ target: entry.mediaItem.Id, action: 'update' as const }] : []);
+  useEffect(() => {
+    if (!canReorder) { setReorderMode(false); setPendingOrder(null); }
+  }, [canReorder]);
 
   // Load timeline data
   useEffect(() => {
     console.log('[TimelineViewPage] useEffect triggered, timelineName:', timelineName);
-    if (!timelineName) {
+    if (!timelineName || !canRead) {
       console.log('[TimelineViewPage] No timelineName, returning early');
       return;
     }
     
+    let cancelled = false;
     const loadTimeline = async () => {
       try {
         setLoading(true);
+        setError(null);
+        setEntries([]);
         const decodedTimelineName = decodeURIComponent(timelineName);
         console.log(`[TimelineViewPage] Loading timeline: ${timelineName} -> ${decodedTimelineName}`);
         // Load the specific timeline by name (path segment)
@@ -187,6 +208,7 @@ export const TimelineViewPage: React.FC = () => {
             select: ['Id', 'Name', 'DisplayName', 'Description', 'SortOrder', 'CreationDate', 'IsVisible', 'TimelineType'],
           },
         });
+        if (cancelled) return;
         // Handle SortOrder as array or string, use first element if array, else default to 'chronological'
         let sortOrder: 'chronological' | 'release' = 'chronological';
         let sortOrderRaw: string | undefined = undefined;
@@ -211,12 +233,6 @@ export const TimelineViewPage: React.FC = () => {
           timelineType: result.d.TimelineType || 'chronological',
         };
         
-        // Check if this is a private timeline and user is not logged in (admin)
-        if (timelineData.isVisible === false && !isUserAuthenticated) {
-          setError('This timeline is private and only accessible to administrators.');
-          return;
-        }
-        
         setTimeline(timelineData);
         setEditTitle(result.d.DisplayName);
         setEditDescription(result.d.Description || '');
@@ -225,15 +241,18 @@ export const TimelineViewPage: React.FC = () => {
         setEntriesLoading(true);
         try {
           const entries = await TimelineEntryService.listTimelineEntries(Number(result.d.Id), parentPath, timelineData.timelineType === 'publisher-series' ? 'publication-date' : 'position');
+          if (cancelled) return;
           setEntries(entries);
           console.log(`[TimelineViewPage] Successfully loaded ${entries.length} entries`);
         } catch (entriesError) {
+          if (cancelled) return;
           console.error('[TimelineViewPage] Error loading entries:', entriesError);
           setError('Failed to load timeline entries: ' + (entriesError instanceof Error ? entriesError.message : String(entriesError)));
         } finally {
           setEntriesLoading(false);
         }
       } catch (err) {
+        if (cancelled) return;
         let message = 'Failed to load timeline';
         if (err && typeof err === 'object') {
           if ('message' in err && typeof err.message === 'string') {
@@ -246,11 +265,15 @@ export const TimelineViewPage: React.FC = () => {
         setError(message);
         setEntriesLoading(false);
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoadedContext(readContext);
+          setLoading(false);
+        }
       }
     };
     loadTimeline();
-  }, [timelineName, isUserAuthenticated]);
+    return () => { cancelled = true; };
+  }, [timelineName, canRead, readContext]);
 
   // Load background image from SenseNet
   useEffect(() => {
@@ -287,6 +310,7 @@ export const TimelineViewPage: React.FC = () => {
   }, []);
 
   const toggleReorderMode = async () => {
+    const checkContext = captureOperationContext();
     if (reorderMode && pendingOrder) {
       // Save the new order
       const updates = pendingOrder.map((entry, index) => ({
@@ -295,18 +319,17 @@ export const TimelineViewPage: React.FC = () => {
       }));
       
       try {
-        await Promise.all(
-          updates.map(update =>
-            repository.patch({
-              idOrPath: update.id,
-              content: { Position: update.position }
-            })
-          )
-        );
+        await assertOperations(updates.map(update => ({ target: update.id, action: 'update' })));
+        for (const update of updates) {
+          checkContext();
+          await repository.patch({ idOrPath: update.id, content: { Position: update.position } });
+        }
         setEntries(pendingOrder);
         setPendingOrder(null);
       } catch (error) {
         console.error('Error saving display order:', error);
+        setError(error instanceof Error ? error.message : 'Failed to save display order.');
+        return;
       }
     } else {
       setPendingOrder([...entries]);
@@ -324,7 +347,9 @@ export const TimelineViewPage: React.FC = () => {
     setPendingOrder(newEntries);
   };
 
-  if (loading) {
+  if (!canRead) return <div role="status" style={{ padding: 24 }}>This timeline is unavailable with your current permissions.</div>;
+
+  if (loading || loadedContext !== readContext) {
     return (
       <div style={{ padding: 24, textAlign: 'center' }}>
         <div style={{ color: '#666' }}>Loading timeline...</div>
@@ -382,9 +407,9 @@ export const TimelineViewPage: React.FC = () => {
         showSiteTitle={false}
       >
         {/* Header Actions */}
-        {isUserAuthenticated && (
+        {canRead && (
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
+            <PermissionContent operations={[{ target: timeline.id, action: 'update' }]} fallback={null}><button
               onClick={() => setEditMode(m => !m)}
               title={editMode ? 'Cancel Edit' : 'Edit Timeline'}
               style={{ 
@@ -412,12 +437,14 @@ export const TimelineViewPage: React.FC = () => {
               <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
-            </button>
-            <button
+            </button></PermissionContent>
+            <PermissionContent operations={[{ target: timeline.id, action: 'delete' }]} fallback={null}><button
               onClick={async () => {
+                const checkContext = captureOperationContext();
                 if (window.confirm('Are you sure you want to delete this timeline? This action cannot be undone.')) {
                   try {
-                    await import('../services/timelineService').then(({ deleteTimeline }) => deleteTimeline(timeline.id));
+                    await assertOperations([{ target: timeline.id, action: 'delete' }]);
+                    await import('../services/timelineService').then(({ deleteTimeline }) => { checkContext(); return deleteTimeline(timeline.id); });
                     window.location.href = '/timelines';
                   } catch {
                     alert('Failed to delete timeline.');
@@ -451,8 +478,8 @@ export const TimelineViewPage: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M6 6v12a2 2 0 002 2h8a2 2 0 002-2V6" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10v6m6-6v6" />
               </svg>
-            </button>
-            <Link 
+            </button></PermissionContent>
+            <PermissionContent operations={[{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }]} fallback={null}><Link
               to={`/timelines/${timelineName}/add-entry`} 
               title="Add Timeline Entry"
               style={{ 
@@ -479,8 +506,8 @@ export const TimelineViewPage: React.FC = () => {
               <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-            </Link>
-            <button
+            </Link></PermissionContent>
+            <PermissionContent operations={reorderOperations} fallback={null}><button
               onClick={toggleReorderMode}
               title={reorderMode ? 'Save New Order' : 'Reorder Entries'}
               style={{
@@ -508,8 +535,8 @@ export const TimelineViewPage: React.FC = () => {
               <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
               </svg>
-            </button>
-            <button
+            </button></PermissionContent>
+            <PermissionContent operations={mediaUpdateOperations} fallback={null}><button
               onClick={() => setShowBulkUpdateDialog(true)}
               title="Bulk Update Media Items"
               style={{
@@ -537,7 +564,7 @@ export const TimelineViewPage: React.FC = () => {
               <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-            </button>
+            </button></PermissionContent>
             <button
               onClick={handleExportTimeline}
               disabled={isExporting}
@@ -585,7 +612,7 @@ export const TimelineViewPage: React.FC = () => {
                 </>
               )}
             </button>
-            <label
+            <PermissionContent operations={[{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }]} fallback={null}><label
               title={isImporting ? "Importing timeline..." : "Import Timeline (ZIP with TSV + Images)"}
               style={{
                 background: isImporting ? '#6c757d' : '#28a745',
@@ -639,7 +666,7 @@ export const TimelineViewPage: React.FC = () => {
                 onChange={handleFileSelect}
                 disabled={isImporting}
               />
-            </label>
+            </label></PermissionContent>
             <div title="Import from Trakt List" style={{ display: 'inline-block' }}>
               <TraktImportDialog
                 timelineName={timeline.name}
@@ -655,13 +682,16 @@ export const TimelineViewPage: React.FC = () => {
         )}
 
         {/* Edit Form in Header */}
-        {editMode && (
+        {editMode && (<PermissionContent operations={[{ target: timeline.id, action: 'update' }]} fallback={null}>
           <form
             onSubmit={async e => {
               e.preventDefault();
+              const checkContext = captureOperationContext();
               setEditError('');
               setEditLoading(true);
               try {
+                await assertOperations([{ target: timeline.id, action: 'update' }]);
+                checkContext();
                 await repository.patch({
                   idOrPath: `${timelinesPath}/${timelineName}`,
                   contentType: TIMELINE_CONTENT_TYPE,
@@ -761,7 +791,7 @@ export const TimelineViewPage: React.FC = () => {
               </div>
             )}
           </form>
-        )}
+        </PermissionContent>)}
 
         {/* Timeline Metadata in Header */}
         <div style={{ marginTop: 24, display: 'flex', gap: 24, fontSize: 14, color: 'rgba(255,255,255,0.9)' }}>
@@ -910,7 +940,7 @@ export const TimelineViewPage: React.FC = () => {
         ) : entries.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 32, color: '#666' }}>
             <p style={{ marginBottom: 16 }}>No entries in this timeline yet.</p>
-            {isUserAuthenticated && (
+            {canCreateEntry && (
               <Link 
                 to={`/timelines/${timelineName}/add-entry`}
                 style={{
@@ -945,7 +975,8 @@ export const TimelineViewPage: React.FC = () => {
                 >
                   {pendingOrder.map((entry, idx) => {
                     return (
-                      <Draggable key={entry.id} draggableId={entry.id} index={idx}>
+                      <PermissionContent key={entry.id} operations={entryReadOperations(entry)} fallback={null}>
+                      <Draggable draggableId={entry.id} index={idx}>
                         {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
                           <div
                             ref={provided.innerRef}
@@ -1096,6 +1127,7 @@ export const TimelineViewPage: React.FC = () => {
                           </div>
                         )}
                       </Draggable>
+                      </PermissionContent>
                     );
                   })}
                   {provided.placeholder}
@@ -1113,10 +1145,11 @@ export const TimelineViewPage: React.FC = () => {
             padding: 0
           }}>
             {entries.map((entry) => (
-              <div key={entry.id} className="entry-card" style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
+              <PermissionContent key={entry.id} operations={entryReadOperations(entry)} fallback={null}>
+              <div className="entry-card" style={{ position: 'relative', background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 16, overflow: 'visible', cursor: 'pointer' }}>
                 <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 320, border: '1px solid #e9ecef', transition: 'box-shadow 0.2s', position: 'relative' }}>
                   {/* Delete Entry Button (admin only) */}
-                  {isUserAuthenticated && (
+                  <PermissionContent operations={[{ target: entry.id, action: 'update' }]} fallback={null}>
                     <button
                       title="Edit Entry"
                       style={{
@@ -1142,9 +1175,9 @@ export const TimelineViewPage: React.FC = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                       </svg>
                     </button>
-                  )}
+                  </PermissionContent>
                   {/* Delete Entry Button (admin only) */}
-                  {isUserAuthenticated && (
+                  <PermissionContent operations={[{ target: entry.id, action: 'delete' }]} fallback={null}>
                     <button
                       title="Delete Entry"
                       style={{
@@ -1162,9 +1195,11 @@ export const TimelineViewPage: React.FC = () => {
                       }}
                       onClick={async (e) => {
                         e.stopPropagation();
+                        const checkContext = captureOperationContext();
                         if (window.confirm('Delete this timeline entry? This cannot be undone.')) {
                           try {
-                            await import('../services/timelineEntryService').then(({ TimelineEntryService }) => TimelineEntryService.deleteTimelineEntry(entry.id));
+                            await assertOperations([{ target: entry.id, action: 'delete' }]);
+                            await import('../services/timelineEntryService').then(({ TimelineEntryService }) => { checkContext(); return TimelineEntryService.deleteTimelineEntry(entry.id); });
                             window.location.reload();
                           } catch {
                             alert('Failed to delete entry.');
@@ -1177,7 +1212,7 @@ export const TimelineViewPage: React.FC = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10v6m6-6v6" />
                       </svg>
                     </button>
-                  )}
+                  </PermissionContent>
                   {/* Position Badge */}
                   <div style={{
                     position: 'absolute',
@@ -1269,13 +1304,14 @@ export const TimelineViewPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+              </PermissionContent>
             ))}
           </div>
         )}
       </div>
 
       {/* Bulk Update Dialog */}
-      <BulkUpdateDialog
+      {showBulkUpdateDialog && <PermissionContent operations={entries.flatMap(entryReadOperations)} fallback={null}><BulkUpdateDialog
         mediaItems={entries
           .map(entry => entry.mediaItem)
           .filter((item): item is NonNullable<typeof item> => item !== null)
@@ -1304,10 +1340,10 @@ export const TimelineViewPage: React.FC = () => {
             }
           }
         }}
-      />
+      /></PermissionContent>}
 
       {/* Timeline Entry Edit Modal */}
-      <TimelineEntryEditModal
+      {showEntryEditModal && editingEntry && <PermissionContent operations={entryReadOperations(editingEntry)} fallback={null}><TimelineEntryEditModal
         entry={editingEntry}
         isOpen={showEntryEditModal}
         onClose={() => setShowEntryEditModal(false)}
@@ -1320,7 +1356,7 @@ export const TimelineViewPage: React.FC = () => {
               .finally(() => setEntriesLoading(false));
           }
         }}
-      />
+      /></PermissionContent>}
     </>
   );
 };

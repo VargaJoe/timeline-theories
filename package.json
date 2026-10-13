@@ -3,7 +3,14 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "cd client && npm run dev",
-    "build": "cd client && npm run build"
+    "build": "cd client && npm run build",
+    "test": "node --test tests/*.test.mjs scripts/*.test.cjs",
+    "test:backend": "node scripts/m0-backend-smoke.cjs",
+    "test:privacy": "node scripts/m0-timeline-privacy-smoke.cjs",
+    "test:reference": "node scripts/m0-reference-privacy-smoke.cjs",
+    "test:browser": "node scripts/m0-browser-smoke.cjs",
+    "test:auth-storage": "node scripts/m0-sn-auth-storage-smoke.cjs",
+    "lint": "npm run lint --prefix client"
   },
   "dependencies": {
     "@sensenet/authentication-jwt": "^1.1.4",

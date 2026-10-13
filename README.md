@@ -26,7 +26,7 @@ Timeline Theories is a personal web application I created to organize complex mu
 
 ### 🎯 **Powerful Organization**
 - Drag-and-drop timeline entry reordering
-- Smart media item deduplication
+- Preserved repeated media occurrences and editorial order
 - Timeline entry grouping and arcs
 - Advanced search and filtering capabilities
 
@@ -40,57 +40,17 @@ Timeline Theories is a personal web application I created to organize complex mu
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-- SenseNet ECM repository (for backend)
-- Trakt.tv API key (optional, for Trakt integration)
+Use Node.js 22+, PowerShell 7, Docker Desktop and the .NET 8 SDK (a newer compatible SDK also works). The M0 default is an isolated local repository with trusted HTTPS.
 
-### Installation
-
-1. **Clone the repository**
-```bash
-git clone https://github.com/VargaJoe/timeline-theories.git
-cd timeline-theories
-```
-
-2. **Install dependencies**
-```bash
-# Root dependencies
-npm install
-
-# Client dependencies
-cd client
-npm install
-```
-
-3. **Environment Setup**
-```bash
-# Copy environment template
-cp client/.env.example client/.env
-```
-
-4. **Configure Environment Variables**
-Edit `client/.env`:
-```env
-# SenseNet Repository Configuration
-VITE_SENSENET_REPO_URL=https://your-sensenet-repo-url
-VITE_PROJECT_ROOT_PATH=/Root/Content
-
-# OIDC Authentication
-VITE_OIDC_CLIENT_ID=your-client-id
-VITE_OIDC_AUTHORITY=https://your-identity-server-url
-
-# Trakt.tv Integration (Optional)
-VITE_TRAKT_API_KEY=your-trakt-api-key
-```
-
-5. **Start Development Server**
-```bash
+```powershell
+npm ci --prefix client
+./deployment/scripts/m0-bootstrap.ps1 -TrustCertificate
 npm run dev
 ```
 
-Visit `http://localhost:5173` to see the application.
+Open https://localhost:8080. Select a profile explicitly; legacy `.env` variants are preserved but no longer select frontend targets. Never place credentials in Vite configuration.
+
+See [local runtime, full snapshot and restore](docs/m0-local-data.md), [profiles, permissions and manual tests](docs/m0-client-safety.md), and the [M0 verification handoff](docs/m0-verification-2026-10-13.md) for setup and validation. The application does not provision content on startup.
 
 ---
 
@@ -132,7 +92,7 @@ timeline-theories/
 ```bash
 # Development
 npm run dev          # Start development server
-npm run build        # Build for production
+npm run build        # Build the local profile (deployment is separate)
 
 # Client-specific
 cd client
