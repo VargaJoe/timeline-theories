@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { setRepositoryAccessToken } from '../services/sensenet';
 import { useSharedAuth } from '../context/useSharedAuth';
-import { useAuthType } from '../AppProviders';
+import { useAuthType } from '../context/authTypeContext';
 
 console.log('[LoginButton] Component loaded');
 
@@ -78,7 +78,7 @@ export const LoginButton: React.FC = () => {
 
   // Logged in state - show user and logout button
   if (isAuthenticated && user) {
-    const userName = user.Name || user.name || 'User';
+    const userName = [user.DisplayName, user.UserName, user.Name, user.name, user.Email, user.email].find((value): value is string => typeof value === 'string' && value.length > 0) || 'User';
     console.log('[LoginButton] Rendering: Logout button for user', userName);
     return (
       <button 

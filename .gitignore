@@ -200,3 +200,7 @@ docs/temp-*.md
 
 # deployment files
 deployment/dbvolume/
+deployment/.local/
+client/profiles/*.override.json
+deployment/extensions/**/bin/
+deployment/extensions/**/obj/

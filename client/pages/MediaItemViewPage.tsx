@@ -6,6 +6,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import type { MediaItem } from '../services/mediaLibraryService';
 import { MediaLibraryService } from '../services/mediaLibraryService';
 import { LazyImage } from '../components/LazyImage';
+import { PermissionContent } from '../components/PermissionContent';
 
 export const MediaItemViewPage: React.FC = () => {
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
@@ -44,7 +45,7 @@ export const MediaItemViewPage: React.FC = () => {
         setMediaItem(item);
       } catch (err) {
         console.error('Failed to load media item:', err);
-        setError('Failed to load media item');
+        setError('This operation is unavailable with your current permissions.');
       } finally {
         setLoading(false);
       }
@@ -126,8 +127,8 @@ export const MediaItemViewPage: React.FC = () => {
           <svg style={{ width: 64, height: 64, color: '#dc3545', margin: '0 auto 16px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <h1 style={{ fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>Media Item Not Found</h1>
-          <p style={{ color: '#666', marginBottom: 16 }}>{error || 'The media item you are looking for does not exist.'}</p>
+          <h1 style={{ fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 8 }}>{error ? 'Media Item Unavailable' : 'Media Item Not Found'}</h1>
+          <p role="status" style={{ color: '#666', marginBottom: 16 }}>{error || 'The media item you are looking for does not exist.'}</p>
           <Link 
             to="/media-library" 
             style={{
@@ -182,7 +183,7 @@ export const MediaItemViewPage: React.FC = () => {
   }
 
   return (
-    <>
+    <PermissionContent operations={[{ target: mediaItem.Id, action: 'read' }]}>
       <PageHeader
         title={headerTitle}
         subtitle={headerSubtitle}
@@ -403,6 +404,6 @@ export const MediaItemViewPage: React.FC = () => {
           </div>
         </div>
       </div>
-    </>
+    </PermissionContent>
   );
 };
