@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MediaLibraryService, type MediaItem, type CreateMediaItemRequest } from '../services/mediaLibraryService';
 import { BookImportService, type BookSearchResult } from '../services/bookImportService';
+import { assertOperations, captureOperationContext } from '../services/sensenet';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface MediaItemEditDialogProps {
   isOpen: boolean;
@@ -21,7 +23,7 @@ interface ImportData {
 }
 
 const MEDIA_TYPES = [
-  'Movie', 'TVEpisode', 'TVSeries', 'Book', 'Comic', 'VideoGame', 'Podcast', 'Documentary', 'Other'
+  'Movie', 'Show', 'Season', 'Episode', 'TVEpisode', 'TVSeason', 'TVSeries', 'Book', 'Comic', 'VideoGame', 'Podcast', 'Documentary', 'Other'
 ];
 
 const GENRES = [
@@ -34,6 +36,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
   onClose,
   onSave
 }) => {
+  const canUpdate = usePermissions(mediaItem ? [{ target: mediaItem.Id, action: 'update' }] : []);
   const [formData, setFormData] = useState<CreateMediaItemRequest>({
     DisplayName: '',
     Description: '',
@@ -54,6 +57,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
     BookSeriesNumber: undefined,
     SeriesName: ''
   });
+  const originalFormData = useRef<Partial<CreateMediaItemRequest>>({});
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +71,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
   // Load media item data when dialog opens
   useEffect(() => {
     if (isOpen && mediaItem) {
-      setFormData({
+      const initialData = {
         DisplayName: mediaItem.DisplayName || '',
         Title: mediaItem.Title || '',
         Subtitle: mediaItem.Subtitle || '',
@@ -88,7 +92,9 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
         PublicationYear: mediaItem.PublicationYear,
         BookSeriesNumber: mediaItem.BookSeriesNumber,
         SeriesName: mediaItem.SeriesName || ''
-      });
+      };
+      originalFormData.current = initialData;
+      setFormData(initialData);
       setError(null);
       setSuccess(false);
       setImportSearchQuery(mediaItem.DisplayName || '');
@@ -151,29 +157,17 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mediaItem) return;
+    const checkContext = captureOperationContext();
 
     setIsSubmitting(true);
     setError(null);
 
     try {
-      console.log('🚀 Submitting update for media item:', mediaItem.Id);
-      
-      // Filter out empty strings for optional fields to avoid sending them as updates
-      const cleanFormData = Object.entries(formData).reduce((acc, [key, value]) => {
-        if (value !== '' || ['DisplayName', 'Description', 'MediaType'].includes(key)) {
-          acc[key as keyof CreateMediaItemRequest] = value;
-        }
-        return acc;
-      }, {} as Partial<CreateMediaItemRequest>);
-      
-      console.log('📋 Cleaned form data being sent:', cleanFormData);
-      console.log('🔍 Form data types:', Object.keys(cleanFormData).reduce((acc, key) => {
-        acc[key] = typeof cleanFormData[key as keyof CreateMediaItemRequest];
-        return acc;
-      }, {} as Record<string, string>));
-
-      const updatedItem = await MediaLibraryService.updateMediaItem(mediaItem.Id, cleanFormData);
-      console.log('✅ Update successful:', updatedItem);
+      const changedFields = Object.fromEntries(Object.entries(formData).filter(([key, value]) => value !== originalFormData.current[key as keyof CreateMediaItemRequest])) as Partial<CreateMediaItemRequest>;
+      if (Object.keys(changedFields).length === 0) { onClose(); return; }
+      await assertOperations([{ target: mediaItem.Id, action: 'update' }]);
+      checkContext();
+      const updatedItem = await MediaLibraryService.updateMediaItem(mediaItem.Id, changedFields);
 
       setSuccess(true);
       setTimeout(() => {
@@ -352,6 +346,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
                   onChange={(e) => handleInputChange('MediaType', e.target.value)}
                   style={inputStyle}
                 >
+                  {!MEDIA_TYPES.includes(formData.MediaType) && <option value={formData.MediaType}>{formData.MediaType}</option>}
                   {MEDIA_TYPES.map(type => (
                     <option key={type} value={type}>{type}</option>
                   ))}
@@ -365,6 +360,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
                   onChange={(e) => handleInputChange('Genre', e.target.value)}
                   style={inputStyle}
                 >
+                  {formData.Genre && !GENRES.includes(formData.Genre) && <option value={formData.Genre}>{formData.Genre}</option>}
                   {GENRES.map(genre => (
                     <option key={genre} value={genre}>{genre}</option>
                   ))}
@@ -385,7 +381,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
             </div>
 
             {/* Book-specific fields */}
-            {formData.MediaType === 'Book' && (
+            {formData.MediaType.toLowerCase() === 'book' && (
               <div style={{
                 background: '#f8f9fa',
                 border: '1px solid #e9ecef',
@@ -584,7 +580,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !canUpdate}
                 style={isSubmitting ? buttonDisabledStyle : buttonPrimaryStyle}
               >
                 {isSubmitting ? 'Updating...' : 'Update Media Item'}

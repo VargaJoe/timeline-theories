@@ -4,11 +4,11 @@
  */
 
 import { useContext } from 'react';
-import type { AuthContextModel } from './SNAuthProvider';
+import type { AuthContextModel } from './authTypes';
 
 // Import both contexts
-import { SNAuthContext } from './SNAuthProvider';
-import { ISAuthContext } from './ISAuthProvider';
+import { SNAuthContext } from './authTypes';
+import { ISAuthContext } from './authTypes';
 
 /**
  * Use auth from whichever provider is active
@@ -20,18 +20,15 @@ export function useSharedAuth(): AuthContextModel {
 
   // Check ISAuth first (IdentityServer)
   if (isAuth !== undefined) {
-    console.log('[useSharedAuth] Using IdentityServer auth context');
     return isAuth;
   }
 
   // Check SNAuth
   if (snAuth !== undefined) {
-    console.log('[useSharedAuth] Using SNAuth context');
     return snAuth;
   }
 
   // Fallback if neither provider is active
-  console.warn('[useSharedAuth] No auth provider available, returning fallback');
   return {
     user: undefined,
     isAuthenticated: false,
