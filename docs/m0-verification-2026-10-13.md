@@ -56,6 +56,8 @@ A pontos UI-labeles részletes lépések: [m0-client-safety.md](m0-client-safety
 
 A kliens/service/transport diff, a bootstrap/snapshot/restore és a helyi backend extension külön belső review-t kapott. A valódi próbákból származó javítások: Choice-tömbök és dirty-only media patch; profilok közti SNAuth storage; publikus ZIP-preview mutációja; stock Reference/Open metadata rés; explicit üresre normalizált kapcsolatírás; OData Path metadata és native deletion lifecycle. A végső eredmény csak a javítások után megismételt, sikeres integrációra támaszkodik.
 
+A meglévő Netlify PR-preview első csomagolása a már nem használt CommonJS `netlify/functions/sensenet.js` segéden állt meg az ESM klienscsomagban; maga a kliensbuild sikeres volt. A régi repositoryból kulcsot betöltő segéd eltávolítva, a Trakt proxy csak szerveroldali `TRAKT_API_KEY` konfigurációt használ. Netlify account-, build- vagy production beállítás nem változott; az automatikus PR-preview elkülönül az éles deploytól.
+
 A helyi backend policy egy repository processre és a provisionált helyi szerepekre érvényes. Tiltott targetet tartalmazó query egészében elutasulhat. A több lépéses import nem tranzakció: egy későbbi valódi backend hiba hagyhat korábbi sikeres lépést; ismert kezdeti permission deny mellett nulla írás indul. Explicit MediaItem unlink nincs: null/üres kapcsolat módosítása tiltott, a teljes entry Delete külön támogatott.
 
 A project-data snapshot nem teljes identity/security/database mentés, és nem tranzakciós production export. Az eredeti audit/generált metaadat a snapshotban megmarad, a helyi rendszermezőket a helyi szerver adja. A termék ZIP exportja továbbra sem lossless backup.
