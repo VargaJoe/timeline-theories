@@ -1,0 +1,8 @@
+{
+  "repositoryUrl": "https://localhost:41016",
+  "authority": "https://localhost:41017",
+  "authType": "IdentityServer",
+  "clientId": "timeline-theories-local",
+  "projectRoot": "/Root/Content/timelines",
+  "writable": true
+}

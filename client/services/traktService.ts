@@ -160,7 +160,7 @@ function mapTraktItem(item: TraktRawItem): TraktListItem {
   }
 }
 
-export async function fetchTraktList(username: string, listSlug: string, accessToken?: string): Promise<TraktListItem[]> {
+export async function fetchTraktList(username: string, listSlug: string): Promise<TraktListItem[]> {
   // Re-enable test file logic with better debugging
   if (import.meta.env.DEV) {
     try {
@@ -179,26 +179,11 @@ export async function fetchTraktList(username: string, listSlug: string, accessT
   
   // Always use Netlify proxy to avoid CORS issues
   const url = `/.netlify/functions/trakt-proxy?username=${encodeURIComponent(username)}&list=${encodeURIComponent(listSlug)}`;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-  
-  console.log('[TraktService] Making API call with:', { url, hasAccessToken: !!accessToken, accessTokenLength: accessToken?.length });
-  
-  if (accessToken) {
-    headers['Authorization'] = `Bearer ${accessToken}`;
-    console.log('[TraktService] Added Authorization header with Bearer token');
-  } else {
-    console.warn('[TraktService] No access token provided!');
-  }
-  
-  const res = await fetch(url, { headers });
+  const res = await fetch(url);
   console.log('[TraktService] API response status:', res.status);
   
   if (!res.ok) {
     console.error('[TraktService] API call failed:', res.status, res.statusText);
-    const errorText = await res.text();
-    console.error('[TraktService] Error response body:', errorText);
     throw new Error(`Failed to fetch Trakt list: ${res.status} ${res.statusText}`);
   }
   

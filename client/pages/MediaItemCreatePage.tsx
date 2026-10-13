@@ -2,12 +2,11 @@
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import MediaItemCreateForm from '../components/MediaItemCreateForm';
-import type { MediaItem } from '../services/mediaLibraryService';
 
 const MediaItemCreatePage: React.FC = () => {
   const navigate = useNavigate();
 
-  const handleSuccess = (_mediaItem: MediaItem) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+  const handleSuccess = () => {
     // Navigate to media library or media item detail page
     navigate('/media-library');
   };
