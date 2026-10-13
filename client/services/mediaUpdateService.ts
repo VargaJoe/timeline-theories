@@ -1,3 +1,4 @@
+import { assertOperations, captureOperationContext } from './sensenet';
 import { MediaLibraryService, resizeImageToDefault, uploadCoverImageBinary } from './mediaLibraryService';
 import { loadApiKey } from './sensenet';
 import { omdbKeyFullPath, tmdbKeyFullPath } from '../projectPaths';
@@ -899,9 +900,15 @@ export class MediaUpdateService {
     onProgress?: ProgressCallback,
     isPreview: boolean = true
   ): Promise<MediaUpdateResult[]> {
+    const checkContext = captureOperationContext();
     const results: MediaUpdateResult[] = [];
+    if (!isPreview) await assertOperations(mediaItems.flatMap(item => [
+      { target: item.Id, action: 'update' as const },
+      ...(options.coverImageMode === 'binary' ? [{ target: item.Id, action: 'upload' as const }] : []),
+    ]));
 
     for (let i = 0; i < mediaItems.length; i++) {
+      checkContext();
       const mediaItem = mediaItems[i];
       
       // Report basic progress
@@ -968,6 +975,7 @@ export class MediaUpdateService {
                 try {
                   console.log('[MediaUpdateService] Binary cover image mode selected for', mediaItem.DisplayName, changes.coverImageUrl);
                   const blob = await resizeImageToDefault(changes.coverImageUrl);
+                  checkContext();
                   console.log('[MediaUpdateService] Resized image blob for', mediaItem.DisplayName, blob);
                   await uploadCoverImageBinary(mediaItem.Id, blob);
                   console.log('[MediaUpdateService] uploadCoverImageBinary called for', mediaItem.DisplayName, mediaItem.Id);
@@ -979,8 +987,7 @@ export class MediaUpdateService {
                   }
                 } catch (e) {
                   console.error('Failed to upload cover image as binary:', e);
-                  // fallback: set URL if binary upload fails
-                  updateFields.CoverImageUrl = changes.coverImageUrl;
+                  throw e;
                 }
               } else {
                 // For preview or URL mode, just set the URL
@@ -993,6 +1000,7 @@ export class MediaUpdateService {
 
             // Only apply database updates if this is NOT a preview
             if (!isPreview) {
+              checkContext();
               await MediaLibraryService.updateMediaItem(mediaItem.Id, updateFields);
             } else {
               console.log(`[processBulkUpdate] Preview mode - skipping database update for "${mediaItem.DisplayName}"`);
@@ -1019,6 +1027,7 @@ export class MediaUpdateService {
           });
         }
       } catch (error) {
+        if (!isPreview) throw error;
         results.push({
           mediaItem,
           updateData: null,

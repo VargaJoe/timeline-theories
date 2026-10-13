@@ -1,10 +1,15 @@
 // src/client/components/MediaItemCreateForm.tsx
 import React, { useState, useEffect } from 'react';
 import { MediaLibraryService, type CreateMediaItemRequest, type MediaItem } from '../services/mediaLibraryService';
+import { assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import { mediaLibraryPath } from '../projectPaths';
+import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface MediaItemCreateFormProps {
   onSuccess?: (mediaItem: MediaItem) => void;
   onCancel?: () => void;
+  requiredOperations?: Operation[];
 }
 
 const MEDIA_TYPES = [
@@ -134,8 +139,11 @@ const buttonDisabledStyle = {
 
 export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({ 
   onSuccess, 
-  onCancel 
+  onCancel,
+  requiredOperations = [],
 }) => {
+  const operations: Operation[] = [...requiredOperations, { target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }];
+  const canCreate = usePermissions(operations);
   const [formData, setFormData] = useState<CreateMediaItemRequest>({
     DisplayName: '',
     Description: '',
@@ -174,8 +182,8 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
       errors.Description = 'Description is required';
     }
 
-    if (formData.Rating && (formData.Rating < 1 || formData.Rating > 10)) {
-      errors.Rating = 'Rating must be between 1 and 10';
+    if (formData.Rating !== undefined && (formData.Rating < 0 || formData.Rating > 10)) {
+      errors.Rating = 'Rating must be between 0 and 10';
     }
 
     if (formData.Duration && formData.Duration < 1) {
@@ -214,11 +222,14 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
     if (!validateForm()) {
       return;
     }
+    const checkContext = captureOperationContext();
 
     setIsSubmitting(true);
     setError(null);
 
     try {
+      await assertOperations(operations);
+      checkContext();
       const mediaItem = await MediaLibraryService.createMediaItem(formData);
       setSuccess(true);
       
@@ -438,14 +449,14 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
             </div>
 
             <div>
-              <label style={labelStyle}>Rating (1-10)</label>
+              <label style={labelStyle}>Rating (0-10)</label>
               <input
                 type="number"
-                value={formData.Rating || ''}
+                value={formData.Rating ?? ''}
                 onChange={(e) => handleInputChange('Rating', e.target.value ? Number(e.target.value) : undefined)}
                 style={validationErrors.Rating ? errorInputStyle : inputStyle}
                 placeholder="8"
-                min="1"
+                min="0"
                 max="10"
                 step="0.1"
               />
@@ -576,7 +587,7 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
             )}
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !canCreate}
               style={isSubmitting ? buttonDisabledStyle : buttonPrimaryStyle}
             >
               {isSubmitting ? 'Creating...' : 'Create Media Item'}

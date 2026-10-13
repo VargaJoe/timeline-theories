@@ -1,6 +1,7 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { siteConfig } from '../configuration';
+import React, { useState, useEffect } from 'react';
+import { siteConfig, repositoryUrl } from '../configuration';
+import { captureOperationContext, subscribePermissions } from '../services/sensenet';
 import { useSharedAuth } from '../context/useSharedAuth';
 
 // Concurrency control for image loading
@@ -26,19 +27,6 @@ const dequeueRequest = () => {
   processQueue();
 };
 
-// Cache management functions (disabled due to localStorage quota issues)
-const getCachedImage = (_url: string): string | null => {
-  // Disable caching entirely due to localStorage quota issues
-  // Images will still work fine with browser HTTP caching
-  return null;
-};
-
-const setCachedImage = (_url: string, _data: string) => {
-  // Disable caching entirely due to localStorage quota issues
-  // Images will still work fine with browser HTTP caching
-  return;
-};
-
 export interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'loading'> {
   src: string;
   placeholder?: string;
@@ -54,111 +42,67 @@ export const LazyImage: React.FC<LazyImageProps> = ({
   onError,
   ...restProps
 }) => {
-  const [hasError, setHasError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState<string>(src);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const { accessToken } = useSharedAuth();
-  const accessTokenRef = useRef(accessToken);
+  const { accessToken, user, isLoading } = useSharedAuth();
+  const [revision, setRevision] = useState(0);
+  useEffect(() => subscribePermissions(() => setRevision(value => value + 1)), []);
+  const requestKey = JSON.stringify([src, accessToken, user?.Id, user?.sub, isLoading, revision]);
+  const [image, setImage] = useState<{ key: string; source?: string; loaded: boolean; error: boolean }>({ key: '', loaded: false, error: false });
+  const currentImage = image.key === requestKey ? image : undefined;
+  const isLoaded = currentImage?.loaded === true;
+  const hasError = currentImage?.error === true;
 
-  // Update the ref when accessToken changes
   useEffect(() => {
-    accessTokenRef.current = accessToken;
-  }, [accessToken]);
-
-  const loadImage = useCallback(async () => {
-    if (!src) return;
-
-    // Check cache first
-    const cached = getCachedImage(src);
-    if (cached) {
-      setCurrentSrc(cached);
-      setIsLoaded(true);
-      return;
-    }
-
-    // Create new abort controller for this request
-    abortControllerRef.current = new AbortController();
-
+    if (!src || isLoading) return;
+    const controller = new AbortController();
+    const checkContext = captureOperationContext();
+    const active = () => {
+      if (controller.signal.aborted) return false;
+      try { checkContext(); return true; } catch { return false; }
+    };
+    const fail = () => {
+      if (active()) setImage({ key: requestKey, loaded: false, error: true });
+    };
     const executeLoad = async () => {
       try {
-        // Always use cache-busting to avoid browser cache CORS issues
-        const cacheBustUrl = `${src}${src.includes('?') ? '&' : '?'}cb=1`;
-
-        // Prepare headers: include Authorization only if we have an access token
+        if (!active()) return;
+        const imageUrl = new URL(src, window.location.origin);
         const headers: Record<string, string> = {};
-        if (accessTokenRef.current) {
-          headers['Authorization'] = `Bearer ${accessTokenRef.current}`;
+        if (accessToken && imageUrl.protocol === 'https:' && imageUrl.origin === new URL(repositoryUrl).origin) {
+          headers.Authorization = `Bearer ${accessToken}`;
         }
-
-        // Use fetch to load the image (with or without authentication)
-        const response = await fetch(cacheBustUrl, {
-          headers,
-          signal: abortControllerRef.current?.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch image: ${response.status}`);
-        }
-
+        imageUrl.searchParams.set('cb', '1');
+        const response = await fetch(imageUrl.href, { headers, credentials: 'omit', signal: controller.signal });
+        if (!active()) return;
+        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
         const blob = await response.blob();
-
+        if (!active()) return;
         const reader = new FileReader();
+        controller.signal.addEventListener('abort', () => {
+          if (reader.readyState === FileReader.LOADING) reader.abort();
+        }, { once: true });
         reader.onload = () => {
-          const result = reader.result;
-          if (typeof result === 'string') {
-            setCurrentSrc(result);
-            setCachedImage(src, result); // Cache the image
-            setIsLoaded(true);
-          } else {
-            setHasError(true);
-          }
+          if (!active()) return;
+          if (typeof reader.result === 'string') setImage({ key: requestKey, source: reader.result, loaded: false, error: false });
+          else fail();
         };
-
-        reader.onerror = () => {
-          setHasError(true);
-        };
-
+        reader.onerror = fail;
         reader.readAsDataURL(blob);
-      } catch (err) {
-        if (err instanceof Error && err.name !== 'AbortError' && err.message !== 'Aborted') {
-          console.error('Image load error:', err);
-          setHasError(true);
-        }
-      } finally {
-        dequeueRequest();
-      }
+      } catch (error) {
+        if (active() && (!(error instanceof Error) || error.name !== 'AbortError')) fail();
+      } finally { dequeueRequest(); }
     };
-
     enqueueRequest(executeLoad);
-  }, [src]); // Remove accessToken from dependencies
+    return () => controller.abort();
+  }, [src, accessToken, isLoading, requestKey]);
 
-  // Handle image load event
   const handleLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    setIsLoaded(true);
-    if (onLoad) {
-      onLoad(event);
-    }
+    setImage(previous => previous.key === requestKey ? { ...previous, loaded: true } : previous);
+    onLoad?.(event);
   };
-
-  // Handle image error event
   const handleError = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    setHasError(true);
-    if (onError) {
-      onError(event);
-    }
+    setImage(previous => previous.key === requestKey ? { ...previous, error: true } : previous);
+    onError?.(event);
   };
-
-  useEffect(() => {
-    loadImage();
-
-    // Cleanup function to abort ongoing requests
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, [src, loadImage]);
 
   // Default placeholder styles
   const placeholderStyle: React.CSSProperties = {
@@ -198,8 +142,8 @@ export const LazyImage: React.FC<LazyImageProps> = ({
           {placeholder || '📷'}
         </div>
       )}
-      <img
-        src={currentSrc}
+      {currentImage?.source && <img
+        src={currentImage.source}
         alt={alt}
         className={className}
         style={imageStyle}
@@ -207,7 +151,7 @@ export const LazyImage: React.FC<LazyImageProps> = ({
         onError={handleError}
         loading="lazy"
         {...restProps}
-      />
+      />}
     </>
   );
 };
