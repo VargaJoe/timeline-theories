@@ -2,6 +2,8 @@ import React, { useState, useCallback } from 'react';
 import { MediaUpdateService, DataSource } from '../services/mediaUpdateService';
 import type { UpdateOptions, MediaUpdateResult, BulkUpdateProgress } from '../services/mediaUpdateService';
 import type { MediaItem } from '../services/mediaLibraryService';
+import { assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface BulkUpdateDialogProps {
   mediaItems: MediaItem[];
@@ -39,6 +41,12 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
     failed: 0,
     errors: []
   });
+  const approvedItems = previewResults.filter(result => result.approved && result.hasChanges);
+  const saveOperations: Operation[] = approvedItems.flatMap(result => [
+    { target: result.mediaItem.Id, action: 'update' },
+    ...(options.updateCoverImages && options.coverImageMode === 'binary' ? [{ target: result.mediaItem.Id, action: 'upload' as const }] : []),
+  ]);
+  const canSave = usePermissions(saveOperations);
 
   // Calculate similarity between original and proposed titles
   const calculateSimilarity = (original: string, proposed: string): number => {
@@ -118,12 +126,18 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
   }, [mediaItems, options, validateResults]);
 
   const handleConfirmUpdate = useCallback(async () => {
+    const checkContext = captureOperationContext();
     setStep('processing');
     setProcessing(true);
     
     try {
       // Only process approved items
       const approvedItems = previewResults.filter(r => r.approved && r.hasChanges);
+      const operations: Operation[] = approvedItems.flatMap(result => [
+        { target: result.mediaItem.Id, action: 'update' },
+        ...(options.updateCoverImages && options.coverImageMode === 'binary' ? [{ target: result.mediaItem.Id, action: 'upload' as const }] : []),
+      ]);
+      await assertOperations(operations);
       
       let success = 0;
       let failed = 0;
@@ -131,20 +145,23 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
       
       // Apply updates for approved items only
       for (const result of approvedItems) {
+        checkContext();
         try {
           if (result.updateData) {
             // Use MediaUpdateService to handle binary uploads properly
-            await MediaUpdateService.processBulkUpdate(
+            const results = await MediaUpdateService.processBulkUpdate(
               [result.mediaItem],
               options,
               undefined, // no progress callback for individual items
               false // isPreview = false (final processing)
             );
+            if (results.some(item => item.error)) throw new Error(results.find(item => item.error)?.error);
             success++;
           }
         } catch (error) {
           failed++;
           errors.push(`${result.mediaItem.DisplayName}: ${error instanceof Error ? error.message : 'Update failed'}`);
+          break;
         }
       }
       
@@ -588,6 +605,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                   {itemsWithChanges.filter(r => r.approved).length > 0 && (
                     <button
                       onClick={handleConfirmUpdate}
+                      disabled={!canSave || processing}
                       style={{
                         background: '#28a745',
                         color: '#fff',

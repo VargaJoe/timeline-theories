@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:m0": "vite --mode m0-local",
+    "dev:readonly": "vite --mode production-readonly",
     "build": "tsc -b && vite build",
+    "build:m0": "tsc -b && vite build --mode m0-local",
+    "build:readonly": "tsc -b && vite build --mode production-readonly",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -16,7 +20,7 @@
     "@sensenet/client-core": "^4.2.0",
     "@sensenet/sn-auth-react": "^1.0.2",
     "@types/react-router-dom": "^5.3.3",
-    "dompurify": "^3.3.1",
+    "dompurify": "^3.4.17",
     "history": "^5.3.0",
     "jszip": "^3.10.1",
     "node-fetch": "^3.3.2",
@@ -24,7 +28,8 @@
     "react-beautiful-dnd": "^13.1.1",
     "react-dom": "^17.0.2",
     "react-quill": "^2.0.0",
-    "react-router-dom": "^6.30.3"
+    "react-router-dom": "^6.30.6",
+    "timeline-theories": "file:.."
   },
   "devDependencies": {
     "@eslint/js": "^9.29.0",
@@ -40,7 +45,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.2.0",
     "typescript": "~5.8.3",
-    "typescript-eslint": "^8.34.1",
-    "vite": "^7.1.11"
+    "typescript-eslint": "^8.71.2",
+    "vite": "^7.3.7"
   }
 }

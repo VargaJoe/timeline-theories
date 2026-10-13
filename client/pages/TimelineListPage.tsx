@@ -9,10 +9,13 @@ import { MediaCoverMontage } from '../components/MediaCoverMontage';
 import { loadBackgroundImage } from '../services/sensenet';
 import { siteConfig } from '../configuration';
 import { timelinesPath } from '../projectPaths';
+import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
+import { usePermissions } from '../hooks/usePermissions';
 
 export const TimelineListPage: React.FC = () => {
   // Handle authentication state - unified auth context
   const { user } = useSharedAuth();
+  const canCreate = usePermissions([{ target: timelinesPath, action: 'create', contentType: TIMELINE_CONTENT_TYPE }]);
   const [searchParams, setSearchParams] = useSearchParams();
   
   const [loading, setLoading] = useState(true);
@@ -196,7 +199,7 @@ export const TimelineListPage: React.FC = () => {
       setLoadingMore(false);
     }
     setIsInitialized(true);
-  }, [searchParams, siteConfig.timelineList.enableAbcPagination]);
+  }, [searchParams, characterFilter]);
 
   // Load background image from SenseNet
   useEffect(() => {
@@ -365,7 +368,7 @@ export const TimelineListPage: React.FC = () => {
               )}
             </select>
           </div>
-          {user && (
+          {canCreate && (
             <Link
               to="/create"
               style={{
@@ -408,7 +411,7 @@ export const TimelineListPage: React.FC = () => {
             <p style={{ color: '#6c757d', marginBottom: 32, fontSize: 16 }}>
               It looks like there are no timelines available yet. 
             </p>
-            {user && (
+            {canCreate && (
               <Link 
                 to="/create" 
                 style={{
