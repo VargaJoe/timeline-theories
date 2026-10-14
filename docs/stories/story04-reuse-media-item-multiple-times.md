@@ -1,5 +1,8 @@
 # Story 04 - Reuse Media Item Multiple Times
 
+> **Status audit — 2026-10-14:** Megvalósított alap; tesztelt. Külön entry ID/Name/Position/Notes ugyanazzal a MediaItem ID-val. Külön repeat_label nincs; EntryLabel/Notes létezik.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US004 – Reuse Media Item Multiple Times**
 > As a user, I want to use the same media item multiple times in a single timeline (e.g., if it appears in two story arcs), optionally with notes.

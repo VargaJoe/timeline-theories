@@ -1,12 +1,14 @@
-import { repository, assertOperations, captureOperationContext } from './sensenet';
+import { repository, assertOperations, captureOperationContext, patchContentWithRevision } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 import { singleChoice } from './contentValues';
+import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, nativeSnapshot } from './nativeApi';
 
 // Minimal MediaItem reference type for expanded reference
 export interface MediaItemRef {
   Name: string;
   Id: number;
+  revision?: string;
   DisplayName?: string;
   Title?: string;
   Subtitle?: string;
@@ -29,6 +31,7 @@ export interface MediaItemRef {
 
 export interface TimelineEntry {
   id: string;
+  revision?: string;
   name?: string;
   displayName: string;
   mediaItem: MediaItemRef | null;
@@ -102,6 +105,7 @@ export class TimelineEntryService {
     return results.map((item: Record<string, unknown>) => {
       const media = (Array.isArray(item.MediaItem) ? item.MediaItem[0] : item.MediaItem) as (Omit<MediaItemRef, 'MediaType'> & { MediaType?: string | string[] }) | undefined;
       return {        id: String(item.Id),
+        revision: typeof item.revision === 'string' ? item.revision : cachedNativeSnapshot(Number(item.Id))?.revision,
         name: item.Name as string,
         displayName: item.DisplayName as string,
         mediaItem: media ? { ...media, MediaType: singleChoice(media.MediaType) } : null,
@@ -149,7 +153,6 @@ export class TimelineEntryService {
         IsOptional: data.isOptional ?? false,
         ArcGroup: data.arcGroup,
         Importance: data.importance,
-        CreatedBy: data.createdBy,
       },
     });
     
@@ -166,9 +169,7 @@ export class TimelineEntryService {
   // Update a timeline entry
   static async updateTimelineEntry(entryId: string | number, updates: Partial<Omit<TimelineEntry, 'id' | 'mediaItem' | 'timelineId'>>): Promise<void> {
     try {
-      await repository.patch({
-        idOrPath: entryId,
-        content: {
+      await patchContentWithRevision(entryId, {
           Name: updates.name,
           DisplayName: updates.displayName,
           Position: updates.position,
@@ -180,23 +181,35 @@ export class TimelineEntryService {
           IsOptional: updates.isOptional,
           ArcGroup: updates.arcGroup,
           Importance: updates.importance,
-        },
-      });
+      }, updates.revision);
     } catch (error) {
       console.error('Failed to update timeline entry:', error);
-      throw new Error('Failed to update timeline entry.');
+      throw error instanceof Error ? error : new Error('Failed to update timeline entry.');
     }
   }
 
   // Bulk update entry positions
   static async updateEntryPositions(entries: TimelineEntry[]): Promise<void> {
+    if (!entries.length) return;
     const checkContext = captureOperationContext();
-    // For each entry, update its Position field
-    // (Could be optimized with batch API if available)
+    const timelineId = entries[0].timelineId;
+    if (!Number.isSafeInteger(timelineId) || entries.some(entry => entry.timelineId !== timelineId)) throw new Error('Order must contain occurrences from one timeline');
     await assertOperations(entries.map(entry => ({ target: entry.id, action: 'update' as const })));
-    for (const [idx, entry] of entries.entries()) {
+    const members = entries.map(entry => {
+      const revision = entry.revision || cachedNativeSnapshot(Number(entry.id))?.revision;
+      if (!revision) throw new Error('Order has no loaded occurrence revision; reload the timeline');
+      return { id: Number(entry.id), revision };
+    });
+    checkContext();
+    const commands = [{ action: 'order', timelineId, entries: members }];
+    await applyNativeCommands(commands, checkContext);
+    // The UI retains this list after save; attach each post-apply revision to the retained objects.
+    for (const [index, entry] of entries.entries()) {
+      const snapshot = await nativeSnapshot(Number(entry.id), { refresh: true });
       checkContext();
-      await repository.patch({ idOrPath: Number(entry.id), content: { Position: idx + 1 } });
+      entry.revision = snapshot.revision;
+      entry.position = index + 1;
     }
+    acknowledgeNativeCommands(commands);
   }
 }

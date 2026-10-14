@@ -1,5 +1,8 @@
 # Story 24 - Enhanced Multi-Source Data Merging
 
+> **Status audit — 2026-10-14:** Részleges/átfedés. Provider prioritás/fallback és diff van; mezőnkénti többforrás provenance/konfliktusválasztó nincs.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US24 – Enhanced Multi-Source Data Merging**
 > As a user, I want to merge media data from multiple sources intelligently during bulk updates, so I can get the best information without manual conflicts.

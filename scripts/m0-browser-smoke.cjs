@@ -39,6 +39,7 @@ async function smoke() {
   const created = [];
   const fixtureIds = new Map();
   const contexts = [];
+  const sessions = [];
   let browser;
   const checked = async (name, action,kind='real backend and browser UI',continueAfterFailure=false) => {
     try { await action(); report.checks.push({ name,kind,passed: true }); console.log(JSON.stringify({check:name,passed:true})); }
@@ -89,7 +90,10 @@ async function smoke() {
     }
     return result;
   };
-  const expectNoWrites = (session, mark = 0) => assert.equal(session.writes.length, mark, 'Denied browser flow sent a repository mutation.');
+  const expectNoWrites = (session, mark = 0) => {
+    assert.equal(session.writes.length, mark, 'Denied browser flow attempted a native apply.');
+    assert.equal(session.rawMutations.length, 0, 'The browser sent a raw repository mutation.');
+  };
   const expectDeniedPage = async page => {
     await page.getByRole('status').filter({ hasText:'This operation is unavailable' }).waitFor();
     await wait(500);
@@ -99,6 +103,9 @@ async function smoke() {
     contexts.push(context);
     const page = await context.newPage();
     const writes = [];
+    const rawMutations = [];
+    const providerRequests = [];
+    const nativePlans = new Map();
     const forbidden = [];
     const externalRequests=[];
     const imageHeaders = [];
@@ -113,7 +120,12 @@ async function smoke() {
     });
     page.on('request', async request => {
       const url = new URL(request.url());
-      if (url.origin === local.REPOSITORY && ['POST','PUT','PATCH','DELETE'].includes(request.method())) writes.push({method:request.method(),path:url.pathname});
+      if (url.origin === local.REPOSITORY && ['POST','PUT','PATCH','DELETE'].includes(request.method())) rawMutations.push({method:request.method(),path:url.pathname});
+      if(url.origin===FRONTEND&&request.method()==='POST') {
+        const applied=url.pathname.match(/^\/api\/v1\/plans\/([^/]+)\/apply$/);
+        if(applied)writes.push({method:'POST',path:url.pathname,planId:applied[1],targetIds:nativePlans.get(applied[1])?.targets||[]});
+        if(url.pathname.startsWith('/api/v1/providers/'))providerRequests.push({path:url.pathname});
+      }
       if(url.pathname==='/m0-external-cover-'+id+'.png'||(url.origin===local.REPOSITORY&&url.pathname.toLowerCase().includes('binaryhandler'))){
         const headers=await request.allHeaders().catch(()=>null);
         if(headers)imageHeaders.push({repository:url.origin===local.REPOSITORY,bearer:headers.authorization?.startsWith('Bearer ')===true,cookie:!!headers.cookie});
@@ -121,15 +133,26 @@ async function smoke() {
     });
     page.on('response', async response => {
       const request=response.request();const url=new URL(request.url());
-      if(url.origin!==local.REPOSITORY||request.method()!=='POST'||!response.ok())return;
+      if(url.origin!==FRONTEND||!url.pathname.startsWith('/api/v1/')||!response.ok())return;
       const value=await response.json().catch(()=>null);const content=value?.d;
+      if(request.method()==='POST'&&url.pathname==='/api/v1/plans'&&value?.id) {
+        nativePlans.set(value.id,{targets:value.targets||[]});
+        for(const write of writes)if(write.planId===value.id)write.targetIds=value.targets||[];
+      }
+      const applied=url.pathname.match(/^\/api\/v1\/plans\/([^/]+)\/apply$/);
+      if(applied) {
+        const write=writes.findLast(write=>write.planId===applied[1]);
+        if(write)write.targetIds=[...new Set([...(write.targetIds||[]),...(value?.completed||[]).map(item=>item.result?.id).filter(Number.isSafeInteger)])];
+      }
+      const nativeContent=value?.data;
+      const candidate=nativeContent&&typeof nativeContent==='object'&&!Array.isArray(nativeContent)?nativeContent:content;
       // Only the current run's unique title permits registering a browser-created fixture.
-      if(content?.Path?.startsWith(ROOT+'/')&&typeof content.DisplayName==='string'&&content.DisplayName.includes(id)) {
-        if(!created.includes(content.Path))created.push(content.Path);fixtureIds.set(content.Path,content.Id);
+      if(candidate?.Path?.startsWith(ROOT+'/')&&typeof candidate.DisplayName==='string'&&candidate.DisplayName.includes(id)) {
+        if(!created.includes(candidate.Path))created.push(candidate.Path);fixtureIds.set(candidate.Path,candidate.Id);
       }
     });
     page.on('dialog', dialog => dialog.accept());
-    return {context,page,writes,forbidden,imageHeaders,externalRequests};
+    const session={context,page,writes,rawMutations,providerRequests,forbidden,imageHeaders,externalRequests};sessions.push(session);return session;
   };
   const gotoStable = async (page,url) => {
     try { await page.goto(url); }
@@ -173,7 +196,8 @@ async function smoke() {
   };
   const waitForWrites = async (session, count) => {
     for (let attempt=0; attempt<150 && session.writes.length<count; attempt++) await wait(100);
-    assert.ok(session.writes.length >= count, 'Expected an actual local repository mutation.');
+    assert.ok(session.writes.length >= count, 'Expected an actual native apply request.');
+    assert.equal(session.rawMutations.length,0,'The browser sent a raw repository mutation.');
   };
   const until = async (predicate,message) => {
     for(let attempt=0;attempt<150;attempt++){if(await predicate())return;await wait(100);}
@@ -317,6 +341,7 @@ async function smoke() {
     });
     await checked('A second occurrence referencing the same media stays distinct', async () => {
       await editor.page.getByTitle('Add Timeline Entry',{exact:true}).click();
+      await editor.page.getByPlaceholder('Search media...', { exact: true }).fill(mediaTitle);
       await editor.page.getByRole('listitem').filter({hasText:mediaTitle}).getByRole('button',{name:'Select',exact:true}).click();
       await editor.page.locator('input[type="number"]').fill('2');
       await editor.page.getByRole('button',{name:'Add to Timeline',exact:true}).click();
@@ -370,8 +395,8 @@ async function smoke() {
       assert.equal(await dialog.locator('select').nth(0).inputValue(),'show');
       assert.equal(await dialog.locator('select').nth(1).inputValue(),'other');
       await editor.page.getByPlaceholder('Enter the title',{exact:true}).fill(currentMediaTitle+' standalone');
-      const [request]=await Promise.all([editor.page.waitForRequest(request=>request.method()==='PATCH'&&new URL(request.url()).pathname.includes(String(uiMedia.Id))),editor.page.getByRole('button',{name:'Update Media Item',exact:true}).click()]);
-      const payload=JSON.parse(request.postData());assert.deepEqual(Object.keys(payload).filter(key=>key!=='__ContentType'),['DisplayName']);
+      const [request]=await Promise.all([editor.page.waitForRequest(request=>request.method()==='POST'&&new URL(request.url()).pathname==='/api/v1/plans'&&request.postDataJSON()?.commands?.some(command=>command.action==='update'&&command.targetId===uiMedia.Id)),editor.page.getByRole('button',{name:'Update Media Item',exact:true}).click()]);
+      const payload=request.postDataJSON();assert.equal(payload.commands.length,1);assert.equal(payload.commands[0].targetId,uiMedia.Id);assert.deepEqual(Object.keys(payload.commands[0].fields),['DisplayName']);
       await editor.page.getByRole('heading',{name:'Edit Media Item',exact:true}).waitFor({state:'hidden'});
       currentMediaTitle+=' standalone';
       const after=await local.api(uiMedia.Id,{account:accounts.admin,query:{$select:Object.keys(fields).join(','),metadata:'no'}});assert.deepEqual(after,before);
@@ -383,10 +408,12 @@ async function smoke() {
       archive=path.join(output,'fixture-timeline.zip');await download.saveAs(archive);
       const mark=editor.writes.length;
       await editor.page.locator('input[type="file"][accept=".zip"]').setInputFiles(archive);
-      await waitForWrites(editor,mark+2);
+      await waitForWrites(editor,mark+1);
       await editor.page.getByText('Importing...',{exact:true}).waitFor({state:'hidden'});
       const after=(await getEntries(uiTimeline.Path)).results;assert.deepEqual(after.map(entry=>entry.Id),before.map(entry=>entry.Id));
       assert.equal(after.length,2);
+      assert.equal(editor.writes.length,mark+1,'ZIP import must use one explicit native plan apply.');
+      await until(()=>before.every(entry=>editor.writes.at(-1).targetIds.includes(entry.Id)),'Native ZIP apply did not name both existing occurrence targets.');
       await editor.page.getByText(currentMediaTitle,{exact:true}).first().waitFor();
       await editor.page.screenshot({path:path.join(output,'editor-crud-timeline.png')});
     });
@@ -405,17 +432,25 @@ async function smoke() {
       await editor.page.getByText('Permission denied or unavailable',{exact:true}).waitFor();expectNoWrites(editor,mark);
       assert.deepEqual((await getEntries(uiTimeline.Path)).results.map(entry=>[entry.Id,entry.Position]),before.map(entry=>[entry.Id,entry.Position]));
       await checked('Mutating public ZIP operation preview cannot bypass private mixed-target preflight',async()=>{
+        await permissions(deniedEntry.Id,[{identity:accounts.editor.path,...WRITE_PERMISSIONS}]);
         const modules=await appModules(editor.page,['/services/sensenet.ts','/services/timelineImportService.ts']);
         const mutationMark=editor.writes.length;
-        const outcome=await editor.page.evaluate(async ({modules,archive64,timelineId,parentPath})=>{
+        const prepared=await editor.page.evaluate(async ({modules,archive64,timelineId,parentPath,runId})=>{
           const core=await import(modules[0]);if(!core.repository.configuration.token)throw new Error('Expected actual authenticated application module.');
           const {prepareTimelineImport}=await import(modules[1]);
           const bytes=Uint8Array.from(atob(archive64),character=>character.charCodeAt(0));
           const plan=await prepareTimelineImport(new File([bytes],'fixture-timeline.zip',{type:'application/zip'}),timelineId,parentPath);
-          const originalCount=plan.operations.length;plan.operations.length=0;
+          globalThis.__m0ZipPreviewFixture={runId,plan};return{originalCount:plan.operations.length};
+        },{modules,archive64:fs.readFileSync(archive).toString('base64'),timelineId:uiTimeline.Id,parentPath:uiTimeline.Path,runId:id});
+        assert.ok(prepared.originalCount>0);expectNoWrites(editor,mutationMark);
+        await permissions(deniedEntry.Id,[{identity:accounts.editor.path,...READ_PERMISSIONS}]);
+        const outcome=await editor.page.evaluate(async ({runId})=>{
+          const fixture=globalThis.__m0ZipPreviewFixture;delete globalThis.__m0ZipPreviewFixture;
+          if(fixture?.runId!==runId)throw new Error('Expected this run\'s prepared ZIP fixture');
+          const plan=fixture.plan,originalCount=plan.operations.length;plan.operations.length=0;
           try{await plan.execute();return{denied:false,originalCount};}
           catch(error){return{denied:error.message==='Permission denied or unavailable',originalCount};}
-        },{modules,archive64:fs.readFileSync(archive).toString('base64'),timelineId:uiTimeline.Id,parentPath:uiTimeline.Path});
+        },{runId:id});
         assert.equal(outcome.denied,true);assert.ok(outcome.originalCount>0);expectNoWrites(editor,mutationMark);
         assert.deepEqual((await getEntries(uiTimeline.Path)).results.map(entry=>[entry.Id,entry.Position]),before.map(entry=>[entry.Id,entry.Position]));
       },'actual authenticated app ZIP plan public-preview mutation and real backend ACL');
@@ -432,7 +467,7 @@ async function smoke() {
     await checked('Actual bulk service preflights both media targets before provider fetch or first write',async()=>{
       const select='DisplayName,Description,MediaType,Genre,Year,ReleaseDate,CoverImageBin,Rating';
       const before=await Promise.all([uiMedia.Id,sharedMedia.Id].map(target=>local.api(target,{account:accounts.admin,query:{$select:select,metadata:'no'}})));
-      const mark=editor.writes.length;const providerMark=editor.externalRequests.length;
+      const mark=editor.writes.length;const providerMark=editor.providerRequests.length;const externalMark=editor.externalRequests.length;
       const modules=await appModules(editor.page,['/services/sensenet.ts','/services/mediaLibraryService.ts','/services/mediaUpdateService.ts']);
       const result=await editor.page.evaluate(async ({targets,modules})=>{
         const core=await import(modules[0]);if(!core.repository.configuration.token)throw new Error('Expected actual authenticated application module.');
@@ -441,7 +476,7 @@ async function smoke() {
         try{await MediaUpdateService.processBulkUpdate(items,{updateTitles:true,updateDescriptions:true,updateCoverImages:true,onlyMissing:false,preferredSources:['omdb'],coverImageMode:'binary'},()=>progress++,false);return{denied:false,progress};}
         catch(error){return{denied:error.message==='Permission denied or unavailable',progress};}
       },{targets:[uiMedia.Id,sharedMedia.Id],modules});
-      assert.deepEqual(result,{denied:true,progress:0});expectNoWrites(editor,mark);assert.equal(editor.externalRequests.length,providerMark,'Bulk provider request began before complete target preflight.');
+      assert.deepEqual(result,{denied:true,progress:0});expectNoWrites(editor,mark);assert.equal(editor.providerRequests.length,providerMark,'Native bulk provider request began before complete target preflight.');assert.equal(editor.externalRequests.length,externalMark,'External provider request began before complete target preflight.');
       const after=await Promise.all([uiMedia.Id,sharedMedia.Id].map(target=>local.api(target,{account:accounts.admin,query:{$select:select,metadata:'no'}})));assert.deepEqual(after,before);
     },'actual authenticated app service and real backend ACL; provider success is deferred');
     await checked('Entry-only rights do not authorize shared media Save or upload', async () => {
@@ -452,7 +487,9 @@ async function smoke() {
       const mark=editor.writes.length;await editor.page.getByRole('button',{name:'Save Changes',exact:true}).click();
       await editor.page.getByRole('heading',{name:'Edit Timeline Entry',exact:true}).waitFor({state:'hidden'});
       assert.equal(editor.writes.length,mark+1);
-      assert.ok(editor.writes.at(-1).path.includes(String(sharedEntry.Id)));
+      await until(()=>editor.writes.at(-1).targetIds.includes(sharedEntry.Id),'Native entry apply did not name its actual occurrence target.');
+      assert.deepEqual(editor.writes.at(-1).targetIds,[sharedEntry.Id]);assert.equal(editor.rawMutations.length,0);
+      assert.equal((await local.api(sharedEntry.Id,{account:accounts.admin,query:{$select:'Notes',metadata:'no'}})).Notes,'Entry-only permitted update');
       const saved=await local.api(sharedMedia.Id,{account:accounts.admin,query:{$select:'DisplayName',metadata:'no'}});assert.equal(saved.DisplayName,sharedMedia.DisplayName);
     });
     await checked('External cover fetch never receives repository bearer credentials',async()=>{
@@ -467,14 +504,16 @@ async function smoke() {
       await editor.page.getByRole('button',{name:'Media Item Data',exact:true}).click();const modal=editModal(editor.page);
       await modal.locator('input[type="text"]').first().fill('Unknown permission must not save');
       await modal.getByRole('radio',{name:'Upload Image',exact:true}).check();await modal.locator('input[type="file"]').setInputFiles({name:'unknown-must-not-upload.png',mimeType:'image/png',buffer:PNG});
+      const permissionPath=new URL(local.endpoint(uiMedia.Id)+'/HasPermission').pathname.toLowerCase();
       let injected=0;const routeHandler=route=>{
-        if(route.request().method()==='GET'&&/\/HasPermission$/i.test(new URL(route.request().url()).pathname)){
+        const url=new URL(route.request().url());
+        if(route.request().method()==='GET'&&url.pathname.toLowerCase()===permissionPath&&url.searchParams.get('permissions')?.includes('Save')){
           injected++;return route.fulfill({status:500,contentType:'application/json',body:'{"error":{"message":{"value":"M0 injected unknown permission"}}}'});
         }
         return route.fallback();
       };
       await editor.context.route(local.REPOSITORY+'/**',routeHandler);const mark=editor.writes.length;
-      await modal.getByRole('button',{name:'Save Changes',exact:true}).click();await modal.getByText('Failed to update media item',{exact:true}).waitFor();
+      await modal.getByRole('button',{name:'Save Changes',exact:true}).click();await modal.getByText('M0 injected unknown permission',{exact:true}).waitFor();
       assert.ok(injected>0,'No actual HasPermission operation was faulted.');expectNoWrites(editor,mark);
       await editor.context.unroute(local.REPOSITORY+'/**',routeHandler);await modal.getByRole('button',{name:'Cancel',exact:true}).click();
     },'browser GET permission fault injection; actual Save handler');
@@ -486,7 +525,7 @@ async function smoke() {
       await permissions(uiMedia.Id,[{identity:accounts.editor.path,...READ_PERMISSIONS}]);
       const mark=editor.writes.length;
       await modal.getByRole('button',{name:'Save Changes',exact:true}).click({timeout:3000});
-      await modal.getByText('Failed to update media item',{exact:true}).waitFor();expectNoWrites(editor,mark);
+      await modal.getByText('Permission denied or unavailable',{exact:true}).waitFor();expectNoWrites(editor,mark);
       const saved=await local.api(uiMedia.Id,{account:accounts.admin,query:{$select:'DisplayName',metadata:'no'}});assert.equal(saved.DisplayName,currentMediaTitle);
       await modal.getByRole('button',{name:'Cancel',exact:true}).click();
     });
@@ -579,6 +618,9 @@ async function smoke() {
       await assert.rejects(local.api(uiMedia.Path,{account:accounts.admin}),error=>error.status===404);
     });
     report.browserMutationCounts={visitor:visitor.writes.length,reader:reader.writes.length,editor:editor.writes.length};
+    report.browserMutationTransport='Native plans/apply POSTs; raw repository writes are forbidden.';
+    report.rawRepositoryMutationCounts={visitor:visitor.rawMutations.length,reader:reader.rawMutations.length,editor:editor.rawMutations.length};
+    for(const session of sessions)assert.equal(session.rawMutations.length,0,'A browser flow bypassed the native gateway.');
     report.passed=report.checks.every(check=>check.passed);
   } catch(error) {
     report.failure=redact(error.message);

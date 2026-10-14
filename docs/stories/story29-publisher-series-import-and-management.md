@@ -1,5 +1,8 @@
 # Story 29 - Publisher Series Import and Management
 
+> **Status audit — 2026-10-14:** Részleges. BookMediaItem öröklés/mezők/edit, OpenLibrary/GoogleBooks search/select/import, series-detektálás, publisher-series típus/PublicationYear sort van. Nem teljes publisher feed sync/series management; élő teljes import nem frissen igazolt.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US29 – Publisher Series Import and Management**
 > As a user, I want to manage publisher series for books with proper metadata and import capabilities, so I can organize book timelines by publication order.

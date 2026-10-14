@@ -1,5 +1,8 @@
 # Story 22 - Bulk Update Media Details for Timeline Entries
 
+> **Status audit — 2026-10-14:** Megvalósított forrás; élő siker nem frissen igazolt. BulkUpdateDialog + mediaUpdateService: OMDb/TMDB/Trakt preference/fallback, missing/overwrite, preview/approval, retry/backoff. M0 teljes célhalmaz deny esetén 0-write/0-provider-fetch próbát igazol.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 **As a user, I want to bulk update missing or outdated media details for all entries in a timeline, so I can enhance incomplete media items with titles, descriptions, and cover images.**
 
 ## Problem Statement

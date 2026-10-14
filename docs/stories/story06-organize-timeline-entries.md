@@ -1,5 +1,8 @@
 # Story 06 - Organize Timeline Entries
 
+> **Status audit — 2026-10-14:** Megvalósított alap; tesztelt. Position, drag/keyboard reorder, kézi pozíció, dátum/leírás/ArcGroup. Story12 átfedés; több PATCH, nincs atomikus vagy concurrent mentési garancia.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US006 – Organize Timeline Entries**
 > As a user, I want to drag-and-drop or number items in my timeline to define their order, and optionally group them by arc or date.

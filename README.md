@@ -15,12 +15,12 @@ Timeline Theories is a personal web application I created to organize complex mu
 
 ### 🎬 **Multi-Media Timeline Creation**
 - Support for films, TV episodes, books, comics, games, and more
-- Create timelines in chronological or release order
+- Store chronology/release metadata and manage editorial entry order
 - Reuse media items across multiple timelines
-- Import entire lists from Trakt.tv with review workflow
+- Import existing Trakt.tv lists (already used for the important source lists)
 
 ### 🔗 **External Integrations**
-- **Trakt.tv Integration**: Import lists and sync with your Trakt account
+- **Trakt.tv Integration**: Import public lists through a server provider proxy
 - **Rich Media Links**: Connect to IMDb, Goodreads, YouTube, Amazon, and more
 - **Cover Images**: Automatic cover art from external sources
 
@@ -28,23 +28,29 @@ Timeline Theories is a personal web application I created to organize complex mu
 - Drag-and-drop timeline entry reordering
 - Preserved repeated media occurrences and editorial order
 - Timeline entry grouping and arcs
-- Advanced search and filtering capabilities
+- ABC browsing, incremental loading and media-library text search
 
 ### 👥 **Sharing & Personal Collections**
 - Public timeline sharing
-- Timeline cloning and forking
 - User authentication with OIDC
-- Personal timeline collections
+- Private timelines protected by repository permissions
+
+Current feature coverage and limitations are recorded in the [2026-10-14 feature audit](docs/feature-status-audit-2026-10-14.md). The [native content-management API](docs/m1-native-api.md) shares the UI's application plans and permissions through a separate persistent HTTPS gateway, using standard SenseNet HTTP operations. See [M1 parity and verification](docs/m1-verification.md) for real test evidence and operational limits. Cloning, advanced timeline search and account synchronization remain backlog.
 
 ---
 
 ## 🚀 Quick Start
 
-Use Node.js 22+, PowerShell 7, Docker Desktop and the .NET 8 SDK (a newer compatible SDK also works). The M0 default is an isolated local repository with trusted HTTPS.
+Use Node.js 22.21+, PowerShell 7, Docker Desktop and the .NET 8 SDK (a newer compatible SDK also works). The M0 default is an isolated local repository with trusted HTTPS.
 
 ```powershell
+npm ci
 npm ci --prefix client
 ./deployment/scripts/m0-bootstrap.ps1 -TrustCertificate
+node scripts/m1-local-inventory-setup.cjs
+# Run in a separate terminal:
+npm run api:local
+# Frontend terminal:
 npm run dev:m0
 ```
 

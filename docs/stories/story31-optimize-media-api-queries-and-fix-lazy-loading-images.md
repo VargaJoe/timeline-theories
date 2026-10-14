@@ -1,5 +1,8 @@
 # Story 31 - Optimize Media API Queries and Fix Lazy Loading Images
 
+> **Status audit — 2026-10-14:** Részleges. Pagination, LazyImage concurrency/auth/anon/fallback van. Nincs react-window/virtualized MediaLibrary; image localStorage cache nincs; entry list minden 100-as lapot olvas, nem csak 50-et. Általános performance-célokhoz nincs mérési bizonyíték.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US033 – Optimize Media API Queries and Fix Lazy Loading Images**
 > As a user, I want media API queries to be efficient and lazy-loaded images to display reliably, so the app performs well and provides a smooth experience when browsing media.

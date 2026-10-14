@@ -1,5 +1,8 @@
 # Story 07 - View and Share Timeline
 
+> **Status audit — 2026-10-14:** Részleges; privacy út tesztelt. Publikus URL és IsVisible létezik. Share-link kezelés és teljes chronological/release nézetváltó nincs. A rendes timeline lekérése Position szerinti, mentett SortOrder mellett is.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US007 – View and Share Timeline**
 > As a user, I want to view my timeline in a clean interface and share it via a public link with read-only access.

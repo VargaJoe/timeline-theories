@@ -1,5 +1,8 @@
 # Story 17 - Create Timeline by Trakt List
 
+> **Status audit — 2026-10-14:** Megvalósított; Joe használta. traktService, TraktImportDialog, trakt-proxy; meglévő timeline-ra apply és fetchOnly út. Nem account sync vagy általános dedup/review/apply motor.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 **As a user, I want to create a new timeline by importing a Trakt list, so I can quickly build timelines from my or others’ Trakt lists.**
 
 ## Technical Breakdown & Tasks

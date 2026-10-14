@@ -1,5 +1,7 @@
 # 📚 Timeline Theories – Personal Multi-Media Timeline Tool
 
+> **Current project status — 2026-10-14:** This is the original product vision. Implemented/partial/missing capabilities are classified in the [feature audit](feature-status-audit-2026-10-14.md). Trakt import is an existing used feature; the next milestone is the [native agent content-management API](m1-agent-api-session-prompt-2026-10-14.md), including writes. The architecture below has been updated to the actual SenseNet application.
+
 A personal web application for creating and managing timeline-based lists of media entries (films, episodes, books, comics, etc.) based on either in-universe chronology or real-world release order. Designed for organizing complex timelines like Doctor Who, Star Wars, Marvel, etc., based on personal research and opinions.
 
 ---
@@ -20,20 +22,20 @@ A personal web application for creating and managing timeline-based lists of med
 
 ### Frontend
 - **Framework**: React + TypeScript
-- **Styling**: TailwindCSS or shadcn/ui
-- **State Management**: Zustand or Context API
+- **Styling**: Existing component styles and CSS
+- **State Management**: React state/context and existing service layer
 - **Routing**: React Router
 - **Build/Deploy**: Vite + Netlify (free tier)
 
 ### Backend
-- **Database**: Supabase (PostgreSQL with free tier, supports auth and media storage)
-- **Auth**: Supabase Auth or Clerk.dev (email/password, social login)
-- **API**: Supabase Edge Functions or Firebase Functions (free)
-- **ORM/Query**: Prisma (optional if using Supabase directly)
+- **Content repository**: SenseNet, with Timeline/MediaItem/BookMediaItem/TimelineEntry custom types
+- **Auth**: OIDC and alternative SNAuth mode; concrete repository permissions
+- **Current transport**: Browser services to SenseNet OData, plus Netlify Trakt provider function
+- **Next API**: Shared application-domain operations exposed for native external clients; hosting/auth design settled during M1
 
 ### Other Tools
 - **Markdown support**: For user-added descriptions or notes
-- **Image hosting**: Supabase Storage or Cloudinary (free plan)
+- **Images**: SenseNet binary covers and supported external image URLs
 - **Link validation**: Via OpenGraph or metadata scraping
 
 ---
@@ -113,7 +115,7 @@ A personal web application for creating and managing timeline-based lists of med
 ## 🆓 Free Hosting Suggestions
 
 - **Frontend**: Netlify / Vercel (free static hosting)
-- **Backend/DB**: Supabase (auth + DB + storage)
+- **Backend/DB**: Existing configured SenseNet repository; isolated local M0 runtime for development writes
 - **Optional**: GitHub Pages (only static), Cloudflare Pages
 
 ---

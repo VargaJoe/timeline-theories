@@ -1,5 +1,8 @@
 # Story 10 - Search and Filter Timelines
 
+> **Status audit — 2026-10-14:** Részleges. ABC/All/pagination/név- és CreationDate rendezés van. Timeline kulcsszó/tag/médiatípus kereső nincs; MediaLibrary cím/leírás kereső külön funkció.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US010 – Search and Filter Timelines**
 > As a user, I want to search timelines by keyword, tags, or media type, so I can find relevant content faster.

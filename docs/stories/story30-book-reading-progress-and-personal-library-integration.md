@@ -1,5 +1,8 @@
 # Story 30 - Book Reading Progress and Personal Library Integration
 
+> **Status audit — 2026-10-14:** Hiányzik. Nincs reading status, személyes rating/reading note/date/stat rendszer.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US30 – Book Reading Progress and Personal Library Integration**
 > As a user, I want to track my reading progress and maintain a personal library with ratings and notes, so I can manage my book reading habits effectively.

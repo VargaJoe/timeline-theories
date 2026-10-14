@@ -1,5 +1,7 @@
 # Timeline Theories állapotfelmérés és folytatási javaslat
 
+> **2026-10-14 status update:** This is the historical revival audit. M0 and dependency maintenance are merged. Joe confirms Trakt import already served the important migrations; the former import-first roadmap below is superseded. Current evidence: [feature status audit](feature-status-audit-2026-10-14.md). Next milestone: [M1 native content-management API](m1-agent-api-session-prompt-2026-10-14.md), including real writes.
+
 A projekt eredeti célja továbbra is jól illeszkedik Joe igényéhez: személyes, vegyes médiájú listák létrehozása saját in-universe kronológia, kiadási sorrend vagy más kutatási szempont szerint. A működő [Timeline Theories oldalt](https://timelines.vargajoe.hu/), a meglévő importált listákat és a MediaItem–TimelineEntry kapcsolatot fejlesztjük tovább. Minden lista Joe által elfogadott sorrendet és álláspontot képvisel; ennek megőrzése a helyreállítás alapja. Az újraindítást helyi SenseNet fejlesztői repositoryval, adatmegőrzéssel, az importok és a hozzáférési szabályok javításával javaslom kezdeni, majd ugyanarra az alkalmazási szolgáltatásrétegre építeni a felületet és a külső agent API-t.
 
 Ez a 2026. október 4-i felmérés és terv, nem implementációs döntés. Alkalmazáskódot, éles adatot, jogosultságot és deploymentet nem módosítottam. Az alábbi készültségi megállapítások külön jelzik a kódvizsgálatot, a futtatott próbákat és az ellenőrizetlen részeket.

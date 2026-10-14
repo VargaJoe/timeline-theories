@@ -142,6 +142,7 @@ import { repositoryUrl } from '../configuration';
 // Timeline service for frontend API calls
 export interface Timeline {
   id: string;
+  revision?: string;
   name: string;
   displayName: string;
   description?: string;

@@ -5,12 +5,12 @@ import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
 import { TraktImportDialog } from '../components/TraktImportDialog';
 import { TimelineEntryEditModal } from '../components/TimelineEntryEditModal';
 import { PageHeader } from '../components/PageHeader';
-import { MEDIA_ITEM_CONTENT_TYPE, TIMELINE_CONTENT_TYPE, TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
+import { MEDIA_ITEM_CONTENT_TYPE, TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
 import { mediaLibraryPath, timelinesPath } from '../projectPaths';
-import { repository, assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import { repository, assertOperations, captureOperationContext, patchContentWithRevision, type Operation } from '../services/sensenet';
 import { usePermissions } from '../hooks/usePermissions';
 import { PermissionContent } from '../components/PermissionContent';
 import { useSharedAuth } from '../context/useSharedAuth';
@@ -227,6 +227,7 @@ export const TimelineViewPage: React.FC = () => {
         }
         const timelineData = {
           id: String(result.d.Id),
+          revision: typeof result.d.revision === 'string' ? result.d.revision : undefined,
           name: decodedTimelineName, // Use the decoded timeline name
           displayName: result.d.DisplayName,
           description: result.d.Description || '',
@@ -315,18 +316,9 @@ export const TimelineViewPage: React.FC = () => {
   const toggleReorderMode = async () => {
     const checkContext = captureOperationContext();
     if (reorderMode && pendingOrder) {
-      // Save the new order
-      const updates = pendingOrder.map((entry, index) => ({
-        id: entry.id,
-        position: index + 1
-      }));
-      
       try {
-        await assertOperations(updates.map(update => ({ target: update.id, action: 'update' })));
-        for (const update of updates) {
-          checkContext();
-          await repository.patch({ idOrPath: update.id, content: { Position: update.position } });
-        }
+        await TimelineEntryService.updateEntryPositions(pendingOrder);
+        checkContext();
         setEntries(pendingOrder);
         setPendingOrder(null);
       } catch (error) {
@@ -696,21 +688,18 @@ export const TimelineViewPage: React.FC = () => {
               setEditError('');
               setEditLoading(true);
               try {
+                if (!timeline.revision) throw new Error('Reload this timeline before editing; its content revision is unavailable.');
                 await assertOperations([{ target: timeline.id, action: 'update' }]);
                 checkContext();
-                await repository.patch({
-                  idOrPath: `${timelinesPath}/${timelineName}`,
-                  contentType: TIMELINE_CONTENT_TYPE,
-                  content: {
+                const updated = await patchContentWithRevision<{ revision: string }>(`${timelinesPath}/${timelineName}`, {
                     DisplayName: editTitle,
                     Description: editDescription,
                     SortOrder: editSortOrder,
-                  },
-                });
-                setTimeline(t => t ? { ...t, displayName: editTitle, description: editDescription, sort_order: editSortOrder } : t);
+                }, timeline.revision);
+                setTimeline(t => t ? { ...t, revision: updated.d.revision, displayName: editTitle, description: editDescription, sort_order: editSortOrder } : t);
                 setEditMode(false);
-              } catch {
-                setEditError('Failed to update timeline.');
+              } catch (error) {
+                setEditError(error instanceof Error ? error.message : 'Failed to update timeline.');
               } finally {
                 setEditLoading(false);
               }
