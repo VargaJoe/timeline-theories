@@ -33,6 +33,13 @@ test('production and absent trusted deployment identity are rejected before any 
   assert.equal((await store.blobs.list({prefix:store.prefix})).blobs.length,0);
 });
 
+test('explicit app development can verify only app storage with a remote repository binding',async()=>{
+  const cfg=config({deployContext:undefined,local:false,devRuntime:true,deployId:'local-app-development'}),store=new Store(cfg);
+  const response=await verifyAppStorage(cfg,store);assert.equal(response.status,200);
+  const result=await response.json();assert.equal(result.storageSelftest.passed,true);assert.equal(result.senseNetRequests,0);assert.equal(result.repositoryWrites,0);
+  assert.equal((await verifyAppStorage({...cfg,devRuntime:false},store)).status,404);
+});
+
 test('missing SDK ETag fails closed, cleans its internal UUID and preserves the failed result',async()=>{
   let probeWrites=0;const cfg=config();
   const withoutTags=new Store({...cfg,blobOptions:{...cfg.blobOptions,fetch:async(url,options)=>{

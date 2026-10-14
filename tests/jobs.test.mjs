@@ -1,12 +1,15 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import { JobService } from '../client/api/jobs.mjs';
 import { Store, hash } from '../client/api/store.mjs';
 import { Coordinator } from '../client/api/coordinator.mjs';
+import { ProviderError } from '../client/api/providers.mjs';
 import { DomainError } from '../client/domain/content.mjs';
 import { startBlobFixture } from './helpers/netlify-blobs-fixture.mjs';
-import { devOptions } from '../scripts/m1-dev.mjs';
+import { devOptions, startDev } from '../scripts/m1-dev.mjs';
 
 // Real Blobs SDK against its local HTTP server, with explicit emulator fixes.
 // Context callbacks isolate job ownership; integrated API smoke verifies ACLs.
@@ -126,6 +129,39 @@ test('final non-2xx status and bytes reproduce the original response', async () 
   assert.deepEqual(Buffer.from(await result.arrayBuffer()), bytes);
 });
 
+test('background provider auth errors retain their status, code, source and safe message', async () => {
+  const { jobs, invocations } = setup(), id = await enqueue(jobs, request('/providers/trakt/list'));
+  await jobs.run(invocation(invocations[0], id), context(), async () => { throw new ProviderError('TRAKT provider request failed', { status: 403, code: 'provider_auth_failed', source: 'trakt' }); });
+  const response = await jobs.status(id, context());
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: { code: 'provider_auth_failed', message: 'TRAKT provider request failed', source: 'trakt' } });
+});
+
+test('background provider rate limit preserves retry advice and invalid input remains 400', async () => {
+  for (const [error, expected] of [
+    [new ProviderError('TMDB provider is rate limited', { status: 429, code: 'provider_rate_limited', source: 'tmdb', retryAfter: 60 }), { code: 'provider_rate_limited', message: 'TMDB provider is rate limited', source: 'tmdb', retryAfter: 60 }],
+    [new ProviderError('Invalid provider sources', { status: 400, code: 'invalid_provider_input' }), { code: 'invalid_provider_input', message: 'Invalid provider sources' }],
+  ]) {
+    const { jobs, invocations } = setup(), id = await enqueue(jobs, request('/providers/media/lookup'));
+    await jobs.run(invocation(invocations[0], id), context(), async () => { throw error; });
+    const response = await jobs.status(id, context());
+    assert.equal(response.status, error.status); assert.deepEqual(await response.json(), { error: expected });
+  }
+});
+
+test('unexpected errors with provider-like fields cannot expose a secret message', async () => {
+  const { jobs, invocations } = setup(), id = await enqueue(jobs, request('/providers/media/lookup'));
+  const unexpected = Object.assign(new Error('Transport debug credential: ' + secret), { status: 403, code: 'provider_auth_failed', source: 'trakt', retryAfter: 60 });
+  await jobs.run(invocation(invocations[0], id), context(), async () => { throw unexpected; });
+  const response = await jobs.status(id, context());
+  assert.equal(response.status, 500);
+  const value = await response.json();
+  assert.deepEqual(value, { error: { code: 'job_failed', message: 'The background job failed.' } });
+  assert.equal(JSON.stringify(value).includes(secret), false);
+  const stored = await jobs.read(id, 'result');
+  assert.equal(Buffer.from(stored.data.body, 'base64').toString().includes(secret), false);
+});
+
 test('queued cancellation prevents execution; running cancellation stops the next write guard', async () => {
   const queued = setup(), queuedId = await enqueue(queued.jobs);
   assert.equal((await queued.jobs.cancel(queuedId, context())).status, 409);
@@ -242,12 +278,35 @@ test('large-result preparation accepts a download Web Response and preserves ACL
 });
 
 test('ordinary dev preserves configured target values and uses one offline Netlify app', () => {
-  const env = { VITE_SENSENET_REPO_URL: 'https://configured.invalid', TIMELINE_REPOSITORY_URL: 'https://configured.invalid', NODE_EXTRA_CA_CERTS: 'configured-ca.pem' };
-  const options = devOptions({ environment: env });
+  const env = { VITE_SENSENET_REPO_URL: 'https://configured.invalid', TIMELINE_REPOSITORY_URL: 'https://configured.invalid', TIMELINE_AUTHORITY: 'https://configured-auth.invalid', TIMELINE_PROJECT_ROOT: '/Root/Content/configured', NODE_EXTRA_CA_CERTS: 'configured-ca.pem' };
+  const options = devOptions({ environment: env },{certificateExists:()=>true});
   assert.equal(options.options.env.VITE_SENSENET_REPO_URL, env.VITE_SENSENET_REPO_URL);
   assert.equal(options.options.env.TIMELINE_REPOSITORY_URL, env.TIMELINE_REPOSITORY_URL);
+  assert.equal(options.options.env.TIMELINE_AUTHORITY, env.TIMELINE_AUTHORITY);
+  assert.equal(options.options.env.TIMELINE_PROJECT_ROOT, env.TIMELINE_PROJECT_ROOT);
   assert.equal(options.options.env.NODE_EXTRA_CA_CERTS, env.NODE_EXTRA_CA_CERTS);
   assert.equal(options.options.env.TIMELINE_LOCAL_PROFILE, undefined);
   assert.equal(options.options.env.TIMELINE_NETLIFY_DEV, 'true');
+  assert.ok(path.isAbsolute(options.options.env.TIMELINE_APP_DEV_CA_FILE));
+  assert.notEqual(options.options.env.TIMELINE_APP_DEV_CA_FILE,env.NODE_EXTRA_CA_CERTS);
   assert.ok(options.args.includes('--offline')); assert.ok(options.args.includes('--no-open'));
+  assert.throws(()=>devOptions({environment:env},{certificateExists:()=>false}),/requires its existing local HTTPS certificate/);
+});
+
+test('both ordinary and M0 dev select corrected app storage before spawning the one CLI', async () => {
+  for(const local of [false,true]) {
+    let opened,launched,closed=0;
+    const child=new EventEmitter();child.kill=()=>{};
+    const result=await startDev({local,environment:{VITE_SENSENET_REPO_URL:'https://configured.invalid',NODE_EXTRA_CA_CERTS:'configured-ca.pem'}},{
+      certificateExists:()=>true,
+      openBlobs:async options=>{opened=options;return {...fixture,close:async()=>{closed++;}};},
+      spawnProcess:(command,args,options)=>{assert.ok(opened,'Storage was not opened before the CLI.');launched={command,args,options};return child;},
+    });
+    assert.equal(result,child);assert.equal(opened.siteID,'timeline-theories-m0-local');assert.ok(opened.directory.endsWith(path.join('deployment','.local','netlify-app-blobs')));
+    assert.equal(launched.options.env.TIMELINE_LOCAL_BLOB_ENDPOINT,fixture.url);assert.equal(launched.options.env.TIMELINE_LOCAL_BLOB_SITE_ID,fixture.siteID);assert.equal(launched.options.env.TIMELINE_LOCAL_BLOB_TOKEN,fixture.token);
+    assert.equal(launched.options.env.TIMELINE_NETLIFY_DEV,'true');assert.ok(path.isAbsolute(launched.options.env.TIMELINE_APP_DEV_CA_FILE));
+    if(!local){assert.equal(launched.options.env.TIMELINE_LOCAL_PROFILE,undefined);assert.equal(launched.options.env.NODE_EXTRA_CA_CERTS,'configured-ca.pem');}
+    else assert.equal(launched.options.env.TIMELINE_LOCAL_PROFILE,'true');
+    child.emit('exit',0,null);assert.equal(closed,1);
+  }
 });

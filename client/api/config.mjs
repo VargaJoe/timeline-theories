@@ -10,6 +10,13 @@ function origin(value, label) {
   return url.origin;
 }
 export function loadConfig({ local = process.env.TIMELINE_LOCAL_PROFILE === 'true', runtimeContext, requestUrl } = {}) {
+  const devRuntime = process.env.TIMELINE_NETLIFY_DEV === 'true';
+  let appCa;
+  if (devRuntime) {
+    const file = process.env.TIMELINE_APP_DEV_CA_FILE;
+    if (typeof file !== 'string' || !path.isAbsolute(file)) throw new DomainError('invalid_configuration','App development requires an absolute localhost CA file.',503);
+    try { appCa = fs.readFileSync(file); } catch { throw new DomainError('invalid_configuration','The localhost app CA file is unavailable.',503); }
+  }
   if (process.env.TIMELINE_READ_ONLY !== undefined && !['true','false'].includes(process.env.TIMELINE_READ_ONLY)) throw new DomainError('invalid_configuration','TIMELINE_READ_ONLY must be true or false.',503);
   if (process.env.VITE_READ_ONLY !== undefined && !['true','false'].includes(process.env.VITE_READ_ONLY)) throw new DomainError('invalid_configuration','VITE_READ_ONLY must be true or false.',503);
   let profile;
@@ -20,7 +27,7 @@ export function loadConfig({ local = process.env.TIMELINE_LOCAL_PROFILE === 'tru
   }
   const deployContext=runtimeContext?.deploy?.context || process.env.CONTEXT;
   let appOrigin=process.env.TIMELINE_FRONTEND_ORIGIN || process.env.DEPLOY_PRIME_URL || runtimeContext?.site?.url || process.env.URL;
-  if (!local && deployContext==='deploy-preview' && runtimeContext?.site?.name && requestUrl) {
+  if (!local && !devRuntime && deployContext==='deploy-preview' && runtimeContext?.site?.name && requestUrl) {
     const request=new URL(requestUrl), name=runtimeContext.site.name;
     if (/^[a-z0-9-]+$/.test(name) && request.protocol==='https:' && new RegExp('^deploy-preview-[1-9][0-9]*--'+name+'\\.netlify\\.app$').test(request.hostname)) appOrigin=request.origin;
   }
@@ -28,18 +35,20 @@ export function loadConfig({ local = process.env.TIMELINE_LOCAL_PROFILE === 'tru
     repositoryUrl: origin(profile?.repositoryUrl || process.env.TIMELINE_REPOSITORY_URL || process.env.VITE_SENSENET_REPO_URL, 'Repository'),
     authority: origin(profile?.authority || process.env.TIMELINE_AUTHORITY || process.env.VITE_OIDC_AUTHORITY, 'Authority'),
     projectRoot: profile?.projectRoot || process.env.TIMELINE_PROJECT_ROOT || process.env.VITE_PROJECT_ROOT_PATH,
-    frontendOrigin: origin(local ? 'https://localhost:8080' : appOrigin, 'App'),
+    frontendOrigin: origin(local || devRuntime ? 'https://localhost:8080' : appOrigin, 'App'),
     readOnly: process.env.TIMELINE_READ_ONLY === 'true' || process.env.VITE_READ_ONLY === 'true',
     ca: local ? fs.readFileSync(path.join(WORKSPACE,'deployment/.local/certificates/localhost.pem')) : undefined,
     local,
+    devRuntime,
+    appCa,
     providerKeyPaths: configuredKeyPaths(),
     deployContext,
-    deployId: runtimeContext?.deploy?.id || (local ? 'local-sdk-verification' : undefined),
+    deployId: runtimeContext?.deploy?.id || (local ? 'local-sdk-verification' : devRuntime ? 'local-app-development' : undefined),
     blobStoreName: deployContext === 'deploy-preview' ? 'timeline-preview-' + (runtimeContext?.deploy?.id || process.env.REVIEW_ID || 'unknown') : 'timeline-app-state-v1',
   };
   projectPaths(config.projectRoot);
   if (local && (config.repositoryUrl !== 'https://localhost:41016' || config.authority !== 'https://localhost:41017')) throw new DomainError('invalid_configuration','The explicit local profile requires the isolated M0 target.',503);
-  if (local && process.env.TIMELINE_LOCAL_BLOB_ENDPOINT) {
+  if ((local || devRuntime) && process.env.TIMELINE_LOCAL_BLOB_ENDPOINT) {
     const url = new URL(process.env.TIMELINE_LOCAL_BLOB_ENDPOINT);
     if (url.protocol !== 'http:' || !['127.0.0.1','localhost'].includes(url.hostname) || url.username || url.password || url.pathname !== '/' || url.search || url.hash || !process.env.TIMELINE_LOCAL_BLOB_SITE_ID || !process.env.TIMELINE_LOCAL_BLOB_TOKEN) throw new DomainError('invalid_configuration','Local app storage requires the trusted loopback emulator.',503);
     config.blobOptions = { apiURL: url.origin, siteID: process.env.TIMELINE_LOCAL_BLOB_SITE_ID, token: process.env.TIMELINE_LOCAL_BLOB_TOKEN };

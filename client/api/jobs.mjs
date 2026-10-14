@@ -1,6 +1,7 @@
 import https from 'node:https';
 import { randomUUID } from 'node:crypto';
 import { DomainError } from '../domain/content.mjs';
+import { ProviderError } from './providers.mjs';
 import { assertUuid, hash, openAppState } from './store.mjs';
 
 const MAX_INPUT = 4 * 1024 * 1024;
@@ -10,12 +11,20 @@ const forwardedHeaders = ['authorization', 'x-timeline-backend-auth', 'x-timelin
 const inputHeaders = ['content-type', 'idempotency-key'];
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const cancelled = () => new DomainError('job_cancelled', 'The original caller cancelled this background job.', 409);
-const errorResponse = error => ({ status: error instanceof DomainError ? error.status || 500 : 500, headers: { 'content-type': 'application/json' }, body: Buffer.from(JSON.stringify({ error: { code: error instanceof DomainError ? error.code : 'job_failed', message: error instanceof DomainError ? error.message : 'The background job failed.', ...(error instanceof DomainError && error.details ? { details: error.details } : {}) } })), readTargets: [] });
+function errorResponse(error) {
+  const provider = error instanceof ProviderError, recognized = provider || error instanceof DomainError;
+  const status = recognized && Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
+  const value = { code: recognized ? error.code : 'job_failed', message: recognized ? error.message : 'The background job failed.' };
+  if (error instanceof DomainError && error.details) value.details = error.details;
+  if (provider && typeof error.source === 'string' && error.source.length <= 64) value.source = error.source;
+  if (provider && Number.isSafeInteger(error.retryAfter) && error.retryAfter >= 0) value.retryAfter = error.retryAfter;
+  return { status, headers: { 'content-type': 'application/json' }, body: Buffer.from(JSON.stringify({ error: value })), readTargets: [] };
+}
 
 function appOrigin(config) {
   let url;
   try { url = new URL(config.frontendOrigin); } catch { throw new DomainError('invalid_configuration', 'Background jobs require the configured HTTPS app origin.', 503); }
-  if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash || (config.local && url.origin !== 'https://localhost:8080')) throw new DomainError('invalid_configuration', 'Background jobs require the configured HTTPS app origin.', 503);
+  if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash || ((config.local || config.devRuntime) && url.origin !== 'https://localhost:8080')) throw new DomainError('invalid_configuration', 'Background jobs require the configured HTTPS app origin.', 503);
   return url.origin;
 }
 function owner(context) {
@@ -39,9 +48,14 @@ function longRoute(request, origin) {
 }
 /** Credentials travel only in this HTTPS request. Redirects are never followed,
  * including redirects to another origin on behalf of the same app. */
-function invokeBackground(url, headers, bytes, config) {
+export function invokeBackground(url, headers, bytes, config) {
+  const target = new URL(url), expected = new URL(config.frontendOrigin);
+  if (target.protocol !== 'https:' || target.origin !== expected.origin || target.username || target.password || target.pathname !== BACKGROUND_PATH || target.search || target.hash || expected.pathname !== '/' || expected.username || expected.password || expected.search || expected.hash || (config.devRuntime && !['localhost','127.0.0.1','[::1]'].includes(target.hostname))) throw new DomainError('job_dispatch_invalid','Background dispatch must stay on the configured HTTPS application origin.',503);
+  // The app CA is scoped to the dev app socket. Ordinary repository requests
+  // retain their configured/default trust; deployed Functions use normal TLS.
+  const ca = config.devRuntime ? config.appCa : config.local ? config.ca : undefined;
   return new Promise((resolve, reject) => {
-    const request = https.request(url, { method: 'POST', headers: Object.fromEntries(headers), ...(config.local && config.ca ? { ca: config.ca } : {}), timeout: 15000 }, response => {
+    const request = https.request(target, { method: 'POST', headers: Object.fromEntries(headers), ...(ca ? { ca } : {}), timeout: 15000 }, response => {
       response.resume();
       response.once('end', () => response.statusCode === 202 ? resolve() : reject(new Error('Background invocation was not acknowledged.')));
       response.once('error', reject);

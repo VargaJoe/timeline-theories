@@ -1,6 +1,8 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import https from 'node:https';
+import fs from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import forge from '../client/node_modules/node-forge/lib/index.js';
 import { startBlobFixture } from './helpers/netlify-blobs-fixture.mjs';
@@ -8,6 +10,7 @@ import { createFunctionApp } from '../client/api/function.mjs';
 import { FIELDS } from '../client/domain/content.mjs';
 import { hash } from '../client/api/store.mjs';
 import { loadConfig } from '../client/api/config.mjs';
+import { invokeBackground } from '../client/api/jobs.mjs';
 
 // Function routing and ACL-flow tests only. Blobs uses its real SDK/HTTP/file
 // emulator; the isolated HTTPS stub below supplies controlled SenseNet protocol
@@ -263,7 +266,7 @@ test('aborted app deadline fails before backend authentication or dispatch', asy
 });
 
 test('trusted modern Netlify context selects only its own preview alias and isolates preview state', () => {
-  const environment = { TIMELINE_REPOSITORY_URL: 'https://plastice.sensenet.cloud', TIMELINE_AUTHORITY: 'https://plastice-is.sensenet.cloud', TIMELINE_PROJECT_ROOT: '/Root/Content/timelines', TIMELINE_READ_ONLY: 'true', TIMELINE_FRONTEND_ORIGIN: undefined, TIMELINE_INVENTORY_CREDENTIAL: undefined, DEPLOY_PRIME_URL: undefined, URL: undefined, CONTEXT: undefined, REVIEW_ID: undefined };
+  const environment = { TIMELINE_REPOSITORY_URL: 'https://plastice.sensenet.cloud', TIMELINE_AUTHORITY: 'https://plastice-is.sensenet.cloud', TIMELINE_PROJECT_ROOT: '/Root/Content/timelines', TIMELINE_READ_ONLY: 'true', TIMELINE_FRONTEND_ORIGIN: undefined, TIMELINE_INVENTORY_CREDENTIAL: undefined, TIMELINE_NETLIFY_DEV: undefined, TIMELINE_APP_DEV_CA_FILE: undefined, DEPLOY_PRIME_URL: undefined, URL: undefined, CONTEXT: undefined, REVIEW_ID: undefined };
   const saved = new Map(Object.keys(environment).map(name=>[name,process.env[name]]));
   try {
     for(const [name,value] of Object.entries(environment))if(value===undefined)delete process.env[name];else process.env[name]=value;
@@ -280,4 +283,41 @@ test('trusted modern Netlify context selects only its own preview alias and isol
       assert.equal(production.frontendOrigin,site.url);assert.equal(production.blobStoreName,'timeline-app-state-v1');
     }
   } finally {for(const [name,value] of saved)if(value===undefined)delete process.env[name];else process.env[name]=value;}
+});
+
+test('trusted dev runtime scopes app origin, CA and corrected storage independently of ordinary repository settings', () => {
+  const caFile=path.join(fixture.directory,'dev-app-ca.pem');fs.writeFileSync(caFile,tls.cert);
+  const environment={TIMELINE_LOCAL_PROFILE:undefined,TIMELINE_NETLIFY_DEV:'true',TIMELINE_APP_DEV_CA_FILE:caFile,
+    TIMELINE_REPOSITORY_URL:'https://repository.fixture.invalid',TIMELINE_AUTHORITY:'https://authority.fixture.invalid',TIMELINE_PROJECT_ROOT:'/Root/Content/ConfiguredFixture',
+    TIMELINE_FRONTEND_ORIGIN:'https://production-app.fixture.invalid',DEPLOY_PRIME_URL:'https://deploy-preview.fixture.invalid',URL:'http://offline-context.fixture.invalid',
+    TIMELINE_LOCAL_BLOB_ENDPOINT:fixture.url,TIMELINE_LOCAL_BLOB_SITE_ID:fixture.siteID,TIMELINE_LOCAL_BLOB_TOKEN:fixture.token,
+    TIMELINE_INVENTORY_CREDENTIAL:undefined,TIMELINE_READ_ONLY:'true',VITE_READ_ONLY:undefined,NODE_EXTRA_CA_CERTS:'existing-repository-ca.pem',CONTEXT:'dev'};
+  const saved=new Map(Object.keys(environment).map(name=>[name,process.env[name]]));
+  try {
+    for(const [name,value] of Object.entries(environment))if(value===undefined)delete process.env[name];else process.env[name]=value;
+    const config=loadConfig({local:false,runtimeContext:{site:{url:'http://offline-context.fixture.invalid'}}});
+    assert.equal(config.local,false);assert.equal(config.devRuntime,true);assert.equal(config.frontendOrigin,'https://localhost:8080');
+    assert.equal(config.repositoryUrl,environment.TIMELINE_REPOSITORY_URL);assert.equal(config.authority,environment.TIMELINE_AUTHORITY);assert.equal(config.projectRoot,environment.TIMELINE_PROJECT_ROOT);
+    assert.equal(config.ca,undefined);assert.equal(config.appCa.toString(),tls.cert);assert.equal(process.env.NODE_EXTRA_CA_CERTS,'existing-repository-ca.pem');
+    assert.deepEqual(config.blobOptions,fixture.blobOptions);assert.equal(config.deployId,'local-app-development');
+    process.env.TIMELINE_APP_DEV_CA_FILE='relative-app-ca.pem';assert.throws(()=>loadConfig({local:false}),error=>error.code==='invalid_configuration'&&error.status===503);
+    process.env.TIMELINE_NETLIFY_DEV='false';
+    const production=loadConfig({local:false,runtimeContext:{deploy:{context:'production',id:'production-build'}}});
+    assert.equal(production.devRuntime,false);assert.equal(production.frontendOrigin,'https://production-app.fixture.invalid');assert.equal(production.appCa,undefined);assert.equal(production.ca,undefined);assert.equal(production.blobOptions,undefined);assert.equal(production.deployId,'production-build');
+  }finally{for(const [name,value] of saved)if(value===undefined)delete process.env[name];else process.env[name]=value;}
+});
+
+test('actual background HTTPS acknowledgement uses app-only CA, rejects redirects and cannot change its target',async t=>{
+  const received=[];let status=202;
+  const server=https.createServer(tls,async(req,res)=>{const parts=[];for await(const part of req)parts.push(part);received.push({method:req.method,path:req.url,authorization:req.headers.authorization,apiKey:req.headers.apikey,body:JSON.parse(Buffer.concat(parts).toString())});res.writeHead(status,status===302?{Location:'https://foreign.fixture.invalid/'}:{});res.end();});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const frontendOrigin='https://127.0.0.1:'+server.address().port,url=new URL('/.netlify/functions/native-api-background',frontendOrigin),jobId=randomUUID();
+  const headers=new Headers({'Content-Type':'application/json'}),bytes=Buffer.from(JSON.stringify({jobId}));
+  await invokeBackground(url,headers,bytes,{frontendOrigin,devRuntime:true,appCa:tls.cert,ca:'separate backend trust'});
+  assert.deepEqual(received,[{method:'POST',path:'/.netlify/functions/native-api-background',authorization:undefined,apiKey:undefined,body:{jobId}}]);
+  await assert.rejects(invokeBackground(url,headers,bytes,{frontendOrigin,devRuntime:true,ca:tls.cert})); // Repository CA does not become app trust.
+  await assert.rejects(invokeBackground(url,headers,bytes,{frontendOrigin,devRuntime:false,local:false,appCa:tls.cert,ca:tls.cert})); // Deployed TLS does not use dev app trust.
+  assert.throws(()=>invokeBackground(new URL('/.netlify/functions/native-api-background','https://foreign.fixture.invalid'),headers,bytes,{frontendOrigin,devRuntime:true,appCa:tls.cert}),error=>error.code==='job_dispatch_invalid');
+  assert.throws(()=>invokeBackground(new URL('/not-background',frontendOrigin),headers,bytes,{frontendOrigin,devRuntime:true,appCa:tls.cert}),error=>error.code==='job_dispatch_invalid');
+  status=302;await assert.rejects(invokeBackground(url,headers,bytes,{frontendOrigin,devRuntime:true,appCa:tls.cert}));assert.equal(received.length,2);
 });

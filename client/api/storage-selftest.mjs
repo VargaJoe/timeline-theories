@@ -4,12 +4,12 @@ const response = (status, body) => new Response(JSON.stringify(body), { status, 
 class SelftestError extends Error {}
 const ensure = (condition, phase) => { if (!condition) throw new SelftestError(phase); };
 
-/** Preview-only, once per trusted deployment. This module has no repository,
+/** Preview/development only, once per trusted deployment. This module has no repository,
  * authentication, MCP, or HTTP transport dependency. All keys/values/ETags are
  * generated or read internally; public callers supply no probe parameters.
  * Netlify's own private storage SDK is the sole external operation here. */
 export async function verifyAppStorage(config, store) {
-  if (config.deployContext !== 'deploy-preview' && config.local !== true) return response(404, { error: { code: 'route_unavailable', message: 'Application route not found.' } });
+  if (config.deployContext !== 'deploy-preview' && config.local !== true && config.devRuntime !== true) return response(404, { error: { code: 'route_unavailable', message: 'Application route not found.' } });
   if (typeof config.deployId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(config.deployId)) return response(503, { error: { code: 'storage_selftest_configuration', message: 'A trusted deployment ID is required for app storage verification.' } });
   const deployHash = createHash('sha256').update('timeline-storage-selftest/v1\0' + config.deployId).digest('hex');
   const prefix = store.prefix + 'storage-selftest/' + deployHash + '/';

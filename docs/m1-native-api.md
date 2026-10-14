@@ -20,7 +20,7 @@ UI: `https://localhost:8080`. API: `https://localhost:8080/api/v1`. Repository: 
 
 Ordinary `npm run dev` and builds retain standard Vite `.env` precedence and configured hosting variables. Only `--local` selects M0 and its existing CA. For the local read-only smoke, stop the owned managed app and restart it with `node scripts/m1-dev.mjs --local --readonly`; discovery must report `readOnly: true` before that smoke proceeds. `npm run dev:readonly` selects the configured remote read-only profile without changing its repository or authority. TLS verification stays enabled.
 
-Local app state is kept in ignored `deployment/.local/netlify-app-blobs` through the real Blobs SDK's local HTTP emulator, using a stable local site identifier. The local helper corrects SDK emulator ETag, conditional-write and listing behavior; it does not establish Netlify cloud atomicity. Deployment uses Netlify's managed private Blobs store, with no local filesystem persistence in a Function.
+Every dev launch keeps app state in ignored `deployment/.local/netlify-app-blobs` through the real Blobs SDK's local HTTP emulator, using a stable local site identifier and isolated repository/auth/project binding prefixes. App development is independent of the selected content repository: its origin remains HTTPS localhost8080, with dedicated app-only CA trust for background requests. Ordinary repository trust and any existing `NODE_EXTRA_CA_CERTS` remain unchanged. The helper corrects SDK emulator ETag, conditional-write and listing behavior; actual Deploy Preview testing separately verifies cloud semantics. Deployment uses Netlify's managed private Blobs store, with no local filesystem persistence in a Function.
 
 ## Native connection and credentials
 

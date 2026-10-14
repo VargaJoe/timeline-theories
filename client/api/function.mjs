@@ -159,7 +159,7 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
       // Fixed, credential-free diagnostic. It accesses only its internally
       // generated app-storage records, once per trusted preview deployment.
       if(!background && route==='__verification/storage') {
-        if(config.deployContext!=='deploy-preview' && config.local!==true || method!=='POST')throw new DomainError('route_unavailable','Application route not found.',404);
+        if(config.deployContext!=='deploy-preview' && config.local!==true && config.devRuntime!==true || method!=='POST')throw new DomainError('route_unavailable','Application route not found.',404);
         if(request.headers.has('authorization') || request.headers.has('apikey') || Object.keys(await bodyJson(request,256)).length)throw new DomainError('invalid_input','Storage verification accepts only an empty JSON object without credentials.');
         const response=await verifyAppStorage(config,store);for(const [name,value] of Object.entries(headers))response.headers.set(name,value);return response;
       }
