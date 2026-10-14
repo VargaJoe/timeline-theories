@@ -34,6 +34,7 @@ export function loadConfig({ local = process.env.TIMELINE_LOCAL_PROFILE === 'tru
     local,
     providerKeyPaths: configuredKeyPaths(),
     deployContext,
+    deployId: runtimeContext?.deploy?.id || (local ? 'local-sdk-verification' : undefined),
     blobStoreName: deployContext === 'deploy-preview' ? 'timeline-preview-' + (runtimeContext?.deploy?.id || process.env.REVIEW_ID || 'unknown') : 'timeline-app-state-v1',
   };
   projectPaths(config.projectRoot);

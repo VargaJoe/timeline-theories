@@ -116,6 +116,36 @@ test('target binding, native raw sessions, browser sessions and visitor routing 
   assert.equal(state.patches, 0);
 });
 
+test('preview storage selftest accepts no credential or arbitrary input and never reaches SenseNet', async t => {
+  const {app,request,state}=await setup(t,{deployContext:'deploy-preview',deployId:randomUUID()});
+  const route='__verification/storage';
+  for(const options of [
+    {body:{key:'grants/caller-supplied',value:'C'}},
+    {body:{},token:'production-credential-must-not-be-used'},
+    {body:{},headers:{ApiKey:'must-not-be-used'}},
+    {body:{padding:'a'.repeat(256)}},
+  ]) {
+    const result=await app.handleRequest(request(route,{method:'POST',token:null,binding:false,...options}));
+    assert.ok([400,413].includes(result.status));
+  }
+  assert.equal((await app.store.blobs.list({prefix:app.store.prefix})).blobs.length,0);
+  const result=await app.handleRequest(request(route,{method:'POST',token:null,binding:false,browser:false,body:{}}));
+  assert.equal(result.status,200,await result.clone().text());
+  const proof=await result.json();assert.equal(proof.storageSelftest.passed,true);assert.equal(proof.senseNetRequests,0);assert.equal(proof.repositoryWrites,0);
+  const repeated=await app.handleRequest(request(route,{method:'POST',token:null,binding:false,body:{}}));
+  assert.deepEqual(await repeated.json(),proof);
+  assert.equal(state.requests.length,0);
+});
+
+test('storage verification is unavailable in production and old arbitrary-phase route is removed before authentication',async t=>{
+  const {app,request,state}=await setup(t,{deployContext:'production',deployId:randomUUID()});
+  for(const route of ['__verification/storage','__verification/state/'+randomUUID()]){
+    const result=await app.handleRequest(request(route,{method:'POST',token:null,binding:false,body:{}}));
+    assert.equal(result.status,404);assert.equal((await result.json()).error.code,'route_unavailable');
+  }
+  assert.equal((await app.store.blobs.list({prefix:app.store.prefix})).blobs.length,0);assert.equal(state.requests.length,0);
+});
+
 test('grant routes await durable issuance and self/owner revoke ownership and idempotence', async t => {
   const { app, request } = await setup(t);
   const issue = async () => {
@@ -242,7 +272,7 @@ test('trusted modern Netlify context selects only its own preview alias and isol
     const requestUrl='https://deploy-preview-53--timeline-theories.netlify.app/api/v1/capabilities';
     const preview=loadConfig({local:false,runtimeContext,requestUrl});
     assert.equal(preview.frontendOrigin,'https://deploy-preview-53--timeline-theories.netlify.app');
-    assert.equal(preview.deployContext,'deploy-preview');assert.equal(preview.blobStoreName,'timeline-preview-trusted-build-one');
+    assert.equal(preview.deployContext,'deploy-preview');assert.equal(preview.blobStoreName,'timeline-preview-trusted-build-one');assert.equal(preview.deployId,'trusted-build-one');
     for(const requestUrl of ['https://deploy-preview-53--another-site.netlify.app/api/v1/capabilities','https://deploy-preview-53--timeline-theories.netlify.app.evil.invalid/api/v1/capabilities','http://deploy-preview-53--timeline-theories.netlify.app/api/v1/capabilities'])assert.equal(loadConfig({local:false,runtimeContext,requestUrl}).frontendOrigin,site.url);
     assert.notEqual(loadConfig({local:false,runtimeContext:{site,deploy:{context:'deploy-preview',id:'trusted-build-two'}},requestUrl}).blobStoreName,preview.blobStoreName);
     for(const id of ['production-one','production-two']) {

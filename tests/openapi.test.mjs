@@ -69,12 +69,26 @@ test('effective path parameters and wire limits describe the actual API contract
   assert.ok(spec.paths['/uploads'].post.responses[201]);
 });
 
-test('cloud probe refuses production, other previews and ambiguous URLs before credential loading', async () => {
+test('public cloud diagnostic refuses production, other previews and mismatched discovery', async () => {
   assert.equal(validatePreviewUrl('https://deploy-preview-53--timeline-theories.netlify.app/'),'https://deploy-preview-53--timeline-theories.netlify.app');
   for(const url of ['https://timeline-theories.netlify.app','https://deploy-preview-54--timeline-theories.netlify.app','http://deploy-preview-53--timeline-theories.netlify.app','https://deploy-preview-53--timeline-theories.netlify.app/other','https://deploy-preview-53--timeline-theories.netlify.app?redirect=x','https://owner:secret@deploy-preview-53--timeline-theories.netlify.app','https://deploy-preview-53--timeline-theories.netlify.app:8443','https://deploy-preview-53--timeline-theories.netlify.app.evil.invalid'])assert.throws(()=>validatePreviewUrl(url));
   const expected={repository:'https://plastice.sensenet.cloud',authority:'https://plastice-is.sensenet.cloud',project:'/Root/Content/timelines',version:'1',runtime:'Netlify Functions in the Timeline app',concurrency:{atomicBatch:false}};
   verifyBinding(expected);assert.throws(()=>verifyBinding({...expected,authority:'https://wrong.invalid'}));
-  let credentialsLoaded=false,requests=0;
-  await assert.rejects(runCloudStateSmoke({url:'https://deploy-preview-53--timeline-theories.netlify.app',loadCredential:async()=>{credentialsLoaded=true;throw new Error('must not load');},fetchImpl:async(url,options)=>{requests++;assert.equal(new Headers(options.headers).has('authorization'),false);assert.equal(new URL(url).pathname,'/api/v1/capabilities');assert.equal(options.redirect,'error');return Response.json({...expected,project:'/Root/Content/wrong'});}}),/Discovery does not match/);
-  assert.equal(credentialsLoaded,false);assert.equal(requests,1);
+  let requests=0;
+  await assert.rejects(runCloudStateSmoke({url:'https://deploy-preview-53--timeline-theories.netlify.app',fetchImpl:async(url,options)=>{requests++;assert.equal(new Headers(options.headers).has('authorization'),false);assert.equal(new URL(url).pathname,'/api/v1/capabilities');assert.equal(options.redirect,'error');assert.equal(options.credentials,'omit');return Response.json({...expected,project:'/Root/Content/wrong'});}}),/Discovery does not match/);
+  assert.equal(requests,1);
+});
+
+test('public diagnostic polls only the fixed empty-JSON route and never sends or prints credentials', async () => {
+  const capabilities={repository:'https://plastice.sensenet.cloud',authority:'https://plastice-is.sensenet.cloud',project:'/Root/Content/timelines',version:'1',runtime:'Netlify Functions in the Timeline app',concurrency:{atomicBatch:false}};
+  let requests=0;
+  const result=await runCloudStateSmoke({url:'https://deploy-preview-53--timeline-theories.netlify.app',fetchImpl:async(url,options)=>{
+    requests++;const headers=new Headers(options.headers);assert.equal(headers.has('authorization'),false);assert.equal(headers.has('x-timeline-backend-auth'),false);assert.equal(headers.has('cookie'),false);assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');
+    if(requests===1){assert.equal(new URL(url).pathname,'/api/v1/capabilities');assert.equal(options.method,'GET');return Response.json(capabilities);}
+    assert.equal(new URL(url).pathname,'/api/v1/__verification/storage');assert.equal(options.method,'POST');assert.equal(options.body,'{}');assert.deepEqual([...headers.keys()],['content-type']);
+    if(requests===2)return Response.json({storageSelftest:{state:'running'},pending:true,senseNetRequests:0,repositoryWrites:0},{status:202});
+    return Response.json({storageSelftest:{state:'completed',passed:true,checks:{firstWriteWinners:1,strongInitialRead:true,nonmatchingCasRejected:true,currentCasSucceeded:true,staleCasRejected:true,strongFinalRead:true,ownedCleanupVerified:true},unexpected:'private-response-must-not-be-dumped'},senseNetRequests:0,repositoryWrites:0});
+  }});
+  assert.equal(result.httpRequests,3);assert.equal(result.credentialsSent,false);assert.equal(result.senseNetRequests,0);assert.equal(result.repositoryWrites,0);
+  assert.equal(JSON.stringify(result).includes('private-response-must-not-be-dumped'),false);
 });

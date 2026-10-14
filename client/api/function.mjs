@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Store, assertUuid, hash } from './store.mjs';
+import { Store } from './store.mjs';
 import { Coordinator } from './coordinator.mjs';
 import { MutationJournal } from './journal.mjs';
 import { loadConfig } from './config.mjs';
@@ -14,6 +14,7 @@ import { fetchPublicCover, coverOrigins } from './covers.mjs';
 import { resolveProviderKeys } from './provider-secrets.mjs';
 import { JobService } from './jobs.mjs';
 import { TransferService, TRANSFER_JSON_BYTES, TRANSFER_CHUNK_BYTES } from './transfers.mjs';
+import { verifyAppStorage } from './storage-selftest.mjs';
 
 const routes = ['capabilities','openapi.json','schemas/{type}','lookup','snapshots','content/{id}','content/{id}/cover','timelines','media','books','entries','plans','plans/{id}/apply','recovery','providers/books/search','providers/books/details','providers/media/lookup','providers/trakt/list','exchange/{timelineId}/export','exchange/{timelineId}/preview','grants','grants/{id}/revoke','jobs/{id}','jobs/{id}/cancel','uploads','uploads/{id}/chunks/{index}','uploads/{id}/complete','downloads/{id}/chunks/{index}'];
 const longRoute = (method, route) => method === 'POST' && (route === 'plans' || /^plans\/[0-9a-f-]{36}\/apply$/.test(route) || route.startsWith('providers/') || /^exchange\/\d+\/preview$/.test(route)) || method === 'GET' && /^exchange\/\d+\/export$/.test(route);
@@ -31,9 +32,9 @@ async function bytes(request, limit = TRANSFER_JSON_BYTES) {
   finally { reader.releaseLock(); }
   return Buffer.concat(parts);
 }
-async function bodyJson(request) {
+async function bodyJson(request, limit = TRANSFER_JSON_BYTES) {
   if (!request.headers.get('content-type')?.startsWith('application/json')) throw new DomainError('content_type','Use application/json.',415);
-  let input; try { input = JSON.parse((await bytes(request)).toString()); } catch (error) { if (error instanceof DomainError) throw error; throw new DomainError('invalid_json','Invalid JSON body.'); }
+  let input; try { input = JSON.parse((await bytes(request, limit)).toString()); } catch (error) { if (error instanceof DomainError) throw error; throw new DomainError('invalid_json','Invalid JSON body.'); }
   assertObject(input); return input;
 }
 function normalized(request, config, background = false) {
@@ -145,19 +146,6 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
     }
     throw new DomainError('route_unavailable','Application route not found.',404);
   }
-  // Preview-only platform verification writes one owned UUID of app metadata;
-  // there is no arbitrary storage key, repository write or administrator proxy.
-  async function verifyState(request, context, id) {
-    if(!config.local && config.deployContext!=='deploy-preview')throw new DomainError('route_unavailable','Application route not found.',404);
-    assertUuid(id);await context.check();await context.repo.assert([{target:context.repo.paths.root,action:'read'}]);
-    const input=await bodyJson(request),key=store.prefix+'verification/'+hash(context.principal)+'/'+id;
-    if(Object.keys(input).some(k=>!['phase','value','etag'].includes(k))||!['new','replace','read','delete'].includes(input.phase))throw new DomainError('invalid_input','Invalid bounded verification phase.');
-    if(input.phase==='delete'){await store.blobs.delete(key);return descriptor(200,{deleted:true,repositoryWrites:0});}
-    if(input.phase==='read'){const result=await store.blobs.getWithMetadata(key,{type:'json',consistency:'strong'});return descriptor(200,{exists:!!result,value:result?.data.value,etag:result?.etag,repositoryWrites:0});}
-    if(!['A','B','C'].includes(input.value)||input.phase==='replace'&&(typeof input.etag!=='string'||!input.etag.trim()||input.etag.length>512))throw new DomainError('invalid_input','Verification accepts bounded values and an ETag.');
-    const result=await store.blobs.setJSON(key,{value:input.value},input.phase==='new'?{onlyIfNew:true}:{onlyIfMatch:input.etag});
-    return descriptor(200,{modified:result.modified,etag:result.etag,repositoryWrites:0});
-  }
   async function handle(request, background=false) {
     const requestId=randomUUID();let originHeader=request.headers.get('origin');
     const headers={'X-Request-Id':requestId,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
@@ -168,12 +156,19 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
       if(!background && (!url.pathname.startsWith('/api/v1/')||url.pathname.includes('//')))throw new DomainError('route_unavailable','Application route not found.',404);
       if(method==='OPTIONS')return new Response(null,{status:204,headers});
       if(!background && method==='GET' && ['capabilities','openapi.json'].includes(route)){const value=capabilities(config);return new Response(JSON.stringify(route==='capabilities'?value:openApi(value)),{headers:{...headers,'Content-Type':'application/json'}});}
-      const revoke=route.match(/^grants\/([0-9a-f-]{36})\/revoke$/),verification=route.match(/^__verification\/state\/([0-9a-f-]{36})$/);
+      // Fixed, credential-free diagnostic. It accesses only its internally
+      // generated app-storage records, once per trusted preview deployment.
+      if(!background && route==='__verification/storage') {
+        if(config.deployContext!=='deploy-preview' && config.local!==true || method!=='POST')throw new DomainError('route_unavailable','Application route not found.',404);
+        if(request.headers.has('authorization') || request.headers.has('apikey') || Object.keys(await bodyJson(request,256)).length)throw new DomainError('invalid_input','Storage verification accepts only an empty JSON object without credentials.');
+        const response=await verifyAppStorage(config,store);for(const [name,value] of Object.entries(headers))response.headers.set(name,value);return response;
+      }
+      if(route.startsWith('__verification/'))throw new DomainError('route_unavailable','Application route not found.',404);
+      const revoke=route.match(/^grants\/([0-9a-f-]{36})\/revoke$/);
       const publicRead=method==='GET' && (['timelines','media','books','entries'].includes(route)||/^content\/\d+(\/cover)?$/.test(route)||/^downloads\/[0-9a-f-]{36}\/chunks\/\d+$/.test(route))||method==='POST'&&['lookup','snapshots'].includes(route);
-      const context=await authenticate(nodeHeaders(request),config,store,{session:['grants','recovery'].includes(route)||!!verification||!!revoke&&!request.headers.get('authorization')?.startsWith('Bearer tta_'),anonymous:publicRead});
+      const context=await authenticate(nodeHeaders(request),config,store,{session:['grants','recovery'].includes(route)||!!revoke&&!request.headers.get('authorization')?.startsWith('Bearer tta_'),anonymous:publicRead});
       let response;
       if(background)response=await jobs.run(request,context,({request,context,job})=>execute(request,context,job));
-      else if(verification && method==='POST')response=await transfers.prepareResponse(await verifyState(request,context,verification[1]),context);
       else if(revoke && method==='POST'){if(Object.keys(await bodyJson(request)).length)throw new DomainError('invalid_input','Revoke accepts an empty object.');await context.check();if(context.grant&&revoke[1]!==context.grant.id)throw new DomainError('grant_admin_denied','A delegated grant may revoke only itself.',403);if(!await store.revoke(revoke[1],context.identity.Id))throw new DomainError('grant_unavailable','Grant is unavailable for this identity.',404);await store.audit(context.principal,'grant','revoked',[]);response=new Response(JSON.stringify({revoked:true}),{headers:{'Content-Type':'application/json'}});}
       else if(route==='grants' && method==='POST')response=await transfers.prepareResponse(descriptor(201,await issueGrant(context,await bodyJson(request),config,store)),context);
       else if(route==='recovery' && method==='POST')response=await transfers.prepareResponse(await recovery(request,context),context);

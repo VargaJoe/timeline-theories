@@ -1342,14 +1342,16 @@ export const TimelineViewPage: React.FC = () => {
         entry={editingEntry}
         isOpen={showEntryEditModal}
         onClose={() => setShowEntryEditModal(false)}
-        onSave={() => {
-          // Reload entries after update
+        onSave={async () => {
+          const checkContext = captureOperationContext();
           setEntriesLoading(true);
-          if (timeline) {
-            TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`)
-              .then(setEntries)
-              .finally(() => setEntriesLoading(false));
-          }
+          try {
+            if (timeline) {
+              const refreshed = await TimelineEntryService.listTimelineEntries(Number(timeline.id), `${timelinesPath}/${timeline.name}`);
+              checkContext();
+              setEntries(refreshed);
+            }
+          } finally { setEntriesLoading(false); }
         }}
       /></PermissionContent>}
     </>

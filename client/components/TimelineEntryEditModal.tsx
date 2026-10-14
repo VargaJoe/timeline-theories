@@ -9,7 +9,7 @@ interface TimelineEntryEditModalProps {
   entry: TimelineEntry | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
 }
 
 type EditMode = 'entry' | 'media';
@@ -97,7 +97,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
         importance,
       });
 
-      onSave();
+      await onSave();
       onClose();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to update timeline entry');
@@ -145,7 +145,7 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
         await MediaLibraryService.uploadMediaItemCoverImage(entry.mediaItem.Id, coverImageFile, mediaRevision.current);
       }
 
-      onSave();
+      await onSave();
       onClose();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to update media item');

@@ -59,7 +59,7 @@ For the readonly gate, stop only the owned managed app and restart it with `node
 
 For live providers, the explicit local `--production-provider-keys` launcher option reads exactly three existing production key nodes into local Function memory. It provides no production content credential to the app. Run `node scripts/m1-provider-live.mjs`; report provider failures separately. Do not create/link provider accounts during this gate.
 
-The local Blobs SDK emulator needs documented compatibility fixes for conditional writes, ETags and Windows paths. Its tests do not prove cloud atomicity. `scripts/m1-cloud-state-smoke.mjs --url VERIFIED-PR53-PREVIEW-ORIGIN` is restricted to the actual PR53 Deploy Preview. It verifies simultaneous first writes, strong reads, current/stale ETag conditions and cleanup of one owned app-metadata UUID. The endpoint performs only SenseNet identity/Open reads, with zero SenseNet writes. Production exposes no verification endpoint.
+The local Blobs SDK emulator needs documented compatibility fixes for conditional writes, ETags and Windows paths. Its tests do not prove cloud atomicity. `node scripts/m1-cloud-state-smoke.mjs --url VERIFIED-PR53-PREVIEW-ORIGIN` is restricted to the actual PR53 Deploy Preview. It sends public discovery GET and empty-JSON POST to `/__verification/storage`, with no credentials, MCP/config secret reads or SenseNet requests. The preview-only endpoint checks simultaneous first writes, strong reads, current/nonmatching/stale ETag conditions and cleanup of an internal UUID. One private claim/result per trusted deployment prevents repeated diagnostic writes. Callers cannot choose storage keys, values or ETags. Production exposes no verification endpoint.
 
 ## Current acceptance record
 
@@ -70,9 +70,9 @@ Netlify integration is being verified on `feature/m1-native-agent-api`, 2026-10-
 | Independent native HTTPS client | 24 passed on the shared 8080 app; CRUD/reuse, scoped/auth/ACL/expiry/revoke/binding deny, zero-write preview, real dates, metadata protection, complete order, stable retry, stale conflict, PNG ZIP and Open Library; cleanup 2998 |
 | Whole-plan preflight | 10 passed on the shared app; hidden children, gained references, duplicate/late Name, invalid metadata, owner-only revoke; denied mixed plans write no earlier target; cleanup 2998 |
 | Concurrent actual app requests | 3 passed; same plan/key shares one job and creates one ID, competing revisions yield one save/409, stored result replay; cleanup 2998 |
-| SDK state / handler / transfer tests | 136 unit/contract tests passed, including real SDK HTTP, immutable state, cancellation, uncertainty retry, wire/large-envelope and OpenAPI/config checks. Controlled HTTPS fault test commits one PATCH, loses readback, then same-key retry reconciles with PATCH count still 1; this is explicitly not real SenseNet acceptance |
+| SDK state / handler / transfer tests | 142 unit/contract tests passed, including real SDK HTTP, immutable state, cancellation, uncertainty retry, wire/large-envelope, credential-free preview selftest and OpenAPI/config checks. Controlled HTTPS fault test commits one PATCH, loses readback, then same-key retry reconciles with PATCH count still 1; this is explicitly not real SenseNet acceptance |
 | UI/native Chromium | 7 passed on the shared app, waiting for actual terminal job responses; real native-created UI data, UI save read natively, pinned stale editor conflict, complete order; raw repository mutations 0 |
-| M0 Chromium regression | Job-aware terminal-response gate pending |
+| M0 Chromium regression | 33 passed, including actual OIDC Visitor/Reader/Editor, create/edit/order/cover/ZIP, mixed permission preflight, Open revocation, logout and cleanup 2998; job responses are checked at completion |
 | Large actual cover/ZIP | 5 passed; valid 6,294,468-byte RGB PNG and 12,590,252-byte ZIP, 11 upload/15 download chunks, exact hashes and real import referencing existing media; cleanup 2998 |
 | Actual app restart | Pending |
 | Real Deploy Preview CAS | Pending; emulator evidence alone is insufficient |
