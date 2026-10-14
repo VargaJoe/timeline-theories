@@ -1,0 +1,30 @@
+[build]
+  base = "client"
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[dev]
+  framework = "#custom"
+  command = "npm --prefix client run dev:app"
+  targetPort = 5173
+  port = 8080
+  autoLaunch = false
+
+[dev.https]
+  certFile = "deployment/.local/certificates/localhost.crt"
+  keyFile = "deployment/.local/certificates/localhost.key"
+
+[[redirects]]
+  from = "/api/v1/*"
+  to = "/.netlify/functions/native-api/v1/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

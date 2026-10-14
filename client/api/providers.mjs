@@ -7,7 +7,7 @@
 // https://developer.themoviedb.org/reference/tv-season-details
 // https://developer.themoviedb.org/docs/rate-limiting
 // https://developer.trakt.tv/ (current; legacy endpoint reference: https://trakt.docs.apiary.io/)
-import { validatePublicUrl } from '../client/domain/content.mjs';
+import { validatePublicUrl } from '../domain/content.mjs';
 
 const ORIGINS = Object.freeze({
   openlibrary: 'https://openlibrary.org',

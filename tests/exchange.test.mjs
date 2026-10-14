@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import * as exchange from '../client/domain/exchange.mjs';
 import { buildTSV, parseTSV, entryFieldsFromRow, EXCHANGE_LIMITS, inspectArchive, TSV_COLUMNS } from '../client/domain/exchange.mjs';
-import { decodeArchive, encodeArchive } from '../server/exchange.mjs';
+import { decodeArchive, encodeArchive } from '../client/api/exchange.mjs';
 const require = createRequire(new URL('../client/package.json', import.meta.url));
 const JSZip = require('jszip');
 const media = { Id: 42, Name: 'shared-media', Title: 'A title', Description: 'Tabs\tnewlines\nand literal \\n / \\t', MediaType: ['book'], Author: 'An author', Publisher: 'Publisher', ISBN: '978-test', PublicationYear: 2020, Genre: ['fantasy', 'adventure'], Tags: 'one, two' };

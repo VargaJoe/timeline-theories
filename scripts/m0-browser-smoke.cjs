@@ -106,6 +106,7 @@ async function smoke() {
     const rawMutations = [];
     const providerRequests = [];
     const nativePlans = new Map();
+    const nativeJobs = new Map(), terminalJobs = new Map(), writeRequests = new WeakMap();
     const forbidden = [];
     const externalRequests=[];
     const imageHeaders = [];
@@ -123,7 +124,7 @@ async function smoke() {
       if (url.origin === local.REPOSITORY && ['POST','PUT','PATCH','DELETE'].includes(request.method())) rawMutations.push({method:request.method(),path:url.pathname});
       if(url.origin===FRONTEND&&request.method()==='POST') {
         const applied=url.pathname.match(/^\/api\/v1\/plans\/([^/]+)\/apply$/);
-        if(applied)writes.push({method:'POST',path:url.pathname,planId:applied[1],targetIds:nativePlans.get(applied[1])?.targets||[]});
+        if(applied){const write={method:'POST',path:url.pathname,planId:applied[1],targetIds:nativePlans.get(applied[1])?.targets||[]};writes.push(write);writeRequests.set(request,write);}
         if(url.pathname.startsWith('/api/v1/providers/'))providerRequests.push({path:url.pathname});
       }
       if(url.pathname==='/m0-external-cover-'+id+'.png'||(url.origin===local.REPOSITORY&&url.pathname.toLowerCase().includes('binaryhandler'))){
@@ -131,19 +132,37 @@ async function smoke() {
         if(headers)imageHeaders.push({repository:url.origin===local.REPOSITORY,bearer:headers.authorization?.startsWith('Bearer ')===true,cookie:!!headers.cookie});
       }
     });
-    page.on('response', async response => {
-      const request=response.request();const url=new URL(request.url());
-      if(url.origin!==FRONTEND||!url.pathname.startsWith('/api/v1/')||!response.ok())return;
-      const value=await response.json().catch(()=>null);const content=value?.d;
-      if(request.method()==='POST'&&url.pathname==='/api/v1/plans'&&value?.id) {
+    const consume = (operation, value, status) => {
+      if(operation.kind==='preview'&&status>=200&&status<300&&value?.id) {
         nativePlans.set(value.id,{targets:value.targets||[]});
         for(const write of writes)if(write.planId===value.id)write.targetIds=value.targets||[];
       }
-      const applied=url.pathname.match(/^\/api\/v1\/plans\/([^/]+)\/apply$/);
-      if(applied) {
-        const write=writes.findLast(write=>write.planId===applied[1]);
-        if(write)write.targetIds=[...new Set([...(write.targetIds||[]),...(value?.completed||[]).map(item=>item.result?.id).filter(Number.isSafeInteger)])];
+      if(operation.kind==='apply'&&operation.write) {
+        const write=operation.write;
+        write.terminalStatus=status;write.complete=true;write.ok=value?.ok===true;write.error=value?.error?.code;
+        write.targetIds=[...new Set([...(write.targetIds||[]),...(value?.completed||[]).map(item=>item.result?.id).filter(Number.isSafeInteger)])];
       }
+    };
+    page.on('response', async response => {
+      const request=response.request();const url=new URL(request.url());
+      if(url.origin!==FRONTEND||!url.pathname.startsWith('/api/v1/'))return;
+      const value=await response.json().catch(()=>null);const content=value?.d;
+      const applied=url.pathname.match(/^\/api\/v1\/plans\/([^/]+)\/apply$/);
+      const operation=request.method()==='POST'&&url.pathname==='/api/v1/plans'?{kind:'preview'}:request.method()==='POST'&&applied?{kind:'apply',write:writeRequests.get(request)}:null;
+      if(operation) {
+        if(response.status()===202&&value?.pending===true&&typeof value.job?.id==='string') {
+          nativeJobs.set(value.job.id,operation);
+          if(operation.write){operation.write.jobId=value.job.id;operation.write.enqueueStatus=202;}
+          const terminal=terminalJobs.get(value.job.id);
+          if(terminal)consume(operation,terminal.value,terminal.status);
+        } else consume(operation,value,response.status());
+      }
+      const job=url.pathname.match(/^\/api\/v1\/jobs\/([0-9a-f-]{36})$/i);
+      if(job&&request.method()==='GET'&&response.status()!==202) {
+        terminalJobs.set(job[1],{value,status:response.status()});
+        const saved=nativeJobs.get(job[1]);if(saved)consume(saved,value,response.status());
+      }
+      if(!response.ok())return;
       const nativeContent=value?.data;
       const candidate=nativeContent&&typeof nativeContent==='object'&&!Array.isArray(nativeContent)?nativeContent:content;
       // Only the current run's unique title permits registering a browser-created fixture.
@@ -197,6 +216,9 @@ async function smoke() {
   const waitForWrites = async (session, count) => {
     for (let attempt=0; attempt<150 && session.writes.length<count; attempt++) await wait(100);
     assert.ok(session.writes.length >= count, 'Expected an actual native apply request.');
+    const pending=session.writes.slice(0,count),deadline=Date.now()+15*60*1000;
+    while(pending.some(write=>!write.complete)&&Date.now()<deadline)await wait(100);
+    for(const write of pending){assert.equal(write.complete,true,'The original browser job must complete.');assert.equal(write.terminalStatus,200,'Native apply must finish successfully, not merely return an acknowledgement.');assert.equal(write.ok,true,'Native apply result must confirm complete success.');}
     assert.equal(session.rawMutations.length,0,'The browser sent a raw repository mutation.');
   };
   const until = async (predicate,message) => {

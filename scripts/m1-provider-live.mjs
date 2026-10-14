@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { randomUUID, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { createClient } from './m1-client.mjs';
-import { decodeArchive } from '../server/exchange.mjs';
+import { decodeArchive } from '../client/api/exchange.mjs';
 import { coverMimeType } from '../client/domain/exchange.mjs';
 const require = createRequire(import.meta.url), local = require('./m0-local-api.cjs');
 const PROJECT = '/Root/Content/timelines', REPORT = path.join(local.ROOT, 'm1-provider-live-report.json');
@@ -22,8 +22,8 @@ const provenance = data => (data.sources || []).map(source => { const url = new 
 /** Real application routes; provider credentials are never read or held by this client. */
 export async function run() {
   const prefix = 'm1-provider-' + randomUUID(), checks = [], owned = new Map(), providerResults = [];
-  const client = createClient({ baseUrl: 'https://localhost:8081/api/v1', repository: local.REPOSITORY, authority: local.AUTHORITY, project: PROJECT, caFile: path.join(local.ROOT, 'certificates/localhost.pem') });
-  const report = { version: 1, ranAt: new Date().toISOString(), gateway: 'https://localhost:8081', repository: local.REPOSITORY, project: PROJECT, fixturePrefix: prefix, security: 'Application content and mutations use only the isolated localhost gateway. Provider secrets stay in server memory. This client never calls production or reads provider keys.', checks, providers: providerResults, metadata: { ran: false }, book: { search: { ran: false }, details: { ran: false }, created: { ran: false } }, cover: { ran: false }, exchange: { ran: false }, cleanup: [], passed: false };
+  const client = createClient({ baseUrl: 'https://localhost:8080/api/v1', repository: local.REPOSITORY, authority: local.AUTHORITY, project: PROJECT, caFile: path.join(local.ROOT, 'certificates/localhost.pem') });
+  const report = { version: 1, ranAt: new Date().toISOString(), gateway: 'https://localhost:8080', repository: local.REPOSITORY, project: PROJECT, fixturePrefix: prefix, security: 'Application content and mutations use only the isolated localhost Netlify app. Provider secrets stay in Function memory. This client never calls production or reads provider keys.', checks, providers: providerResults, metadata: { ran: false }, book: { search: { ran: false }, details: { ran: false }, created: { ran: false } }, cover: { ran: false }, exchange: { ran: false }, cleanup: [], passed: false };
   fs.writeFileSync(REPORT, JSON.stringify(report, null, 2));
   const account = local.readAccounts().editor; let grant, phase = 'initialization', failure, initialCount;
   const record = (name, details = {}) => { const value = { name, ...details, passed: true }; checks.push(value); console.log(JSON.stringify(value)); };

@@ -5,18 +5,19 @@ import https from 'node:https';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { decodeArchive } from '../server/exchange.mjs';
+import { decodeArchive } from '../client/api/exchange.mjs';
+import { followNativeResponse } from './m1-client.mjs';
 const require = createRequire(import.meta.url);
 const local = require('./m0-local-api.cjs');
-const GATEWAY = 'https://localhost:8081', PROJECT = '/Root/Content/timelines';
+const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines';
 const BINDING = { 'X-Timeline-Repository': local.REPOSITORY, 'X-Timeline-Authority': local.AUTHORITY, 'X-Timeline-Project': PROJECT };
 const SCOPES = ['content:read', 'timelines:write', 'media:write', 'entries:write', 'covers:write', 'metadata:write', 'providers:read', 'exchange:read', 'exchange:write'];
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII=', 'base64');
 const REPORT = path.join(local.ROOT, 'm1-native-report.json');
 
 /** Independent HTTPS client. Redirects, arbitrary origins and disabled TLS are unavailable. */
-function request(route, { method = 'GET', token, headers = {}, body } = {}) {
-  const target = new URL('/api/v1/' + route, GATEWAY);
+function rawRequest(route, { method = 'GET', token, headers = {}, body } = {}) {
+  const target = new URL('/api/v1/' + route.replace(/^\//, ''), GATEWAY);
   if (target.origin !== GATEWAY || !target.pathname.startsWith('/api/v1/') || target.username || target.password) throw new Error('Native smoke localhost guard rejected URL');
   const outbound = { ...BINDING, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers };
   let bytes;
@@ -29,10 +30,15 @@ function request(route, { method = 'GET', token, headers = {}, body } = {}) {
     const req = https.request(target, { method, headers: outbound, ca: fs.readFileSync(path.join(local.ROOT, 'certificates/localhost.pem')) }, res => {
       const chunks = []; let size = 0;
       res.on('data', chunk => { size += chunk.length; if (size > 64 * 1024 * 1024) req.destroy(new Error('Native response exceeds smoke limit')); else chunks.push(chunk); });
-      res.on('end', () => { const bytes = Buffer.concat(chunks); let value; try { value = JSON.parse(bytes.toString('utf8')); } catch { value = null; } resolve({ status: res.statusCode, headers: res.headers, value, bytes }); });
+      res.on('end', () => { const bytes = Buffer.concat(chunks); let value; try { value = JSON.parse(bytes.toString('utf8')); } catch { value = null; } resolve({ status: res.statusCode, headers: res.headers, value, body: bytes, bytes }); });
+      res.on('error', () => reject(new Error('Native HTTP response was interrupted')));
     });
     req.setTimeout(60000, () => req.destroy(new Error('Native local request timed out'))); req.on('error', reject); req.end(bytes);
   });
+}
+async function request(route, options = {}) {
+  const auth = { token: options.token, headers: options.headers };
+  return followNativeResponse(await rawRequest(route, options), (nextRoute, nextOptions) => rawRequest(nextRoute, { ...nextOptions, ...auth }));
 }
 const succeed = response => {
   if (response.status < 200 || response.status >= 300) throw new Error('Native request HTTP ' + response.status + ': ' + (response.value?.error?.code || 'unexpected_response'));

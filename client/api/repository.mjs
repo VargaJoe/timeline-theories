@@ -1,5 +1,5 @@
 import https from 'node:https';
-import { DomainError, TYPES, assertId, projectPaths } from '../client/domain/content.mjs';
+import { DomainError, TYPES, assertId, projectPaths } from '../domain/content.mjs';
 export class Repository {
   constructor(config, credential) { this.config = config; this.credential = credential; this.paths = projectPaths(config.projectRoot); }
   endpoint(target) {
@@ -10,12 +10,13 @@ export class Repository {
     return this.config.repositoryUrl + '/OData.svc' + target.slice(0, slash).split('/').map(encodeURIComponent).join('/') + "('" + encodeURIComponent(target.slice(slash + 1).replaceAll("'", "''")).replaceAll("'", '%27') + "')";
   }
   async request(url, { method = 'GET', body, maxBytes = 20 * 1024 * 1024 } = {}) {
+    if (this.config.signal?.aborted) throw new DomainError('function_deadline','The app invocation deadline expired before dispatch.',409);
     const target = new URL(url);
     if (target.origin !== this.config.repositoryUrl || target.username || target.password) throw new DomainError('repository_mismatch', 'Repository origin mismatch.', 403);
     const headers = { Accept: 'application/json', ...(this.credential ? { [this.credential.mode === 'ApiKey' ? 'ApiKey' : 'Authorization']: this.credential.mode === 'ApiKey' ? this.credential.value : 'Bearer ' + this.credential.value } : {}) };
     if (body !== undefined) { body = JSON.stringify(body); headers['Content-Type'] = 'application/json'; }
     return await new Promise((resolve, reject) => {
-      const req = https.request(target, { method, headers, ...(this.config.ca ? { ca: this.config.ca } : {}) }, res => {
+      const req = https.request(target, { method, headers, signal: this.config.signal, ...(this.config.ca ? { ca: this.config.ca } : {}) }, res => {
         const parts = []; let length = 0;
         res.on('data', part => { length += part.length; if (length > maxBytes) req.destroy(new DomainError('repository_limit', 'Repository response exceeds the byte limit.', 502)); else parts.push(part); });
         res.on('end', () => {

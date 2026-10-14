@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { StockRepository } from './stock-repository.mjs';
 import { MutationJournal } from './journal.mjs';
-import { DomainError, assertObject } from '../client/domain/content.mjs';
+import { DomainError, assertObject } from '../domain/content.mjs';
 import { hash } from './store.mjs';
 export const SCOPES = ['content:read','timelines:write','media:write','entries:write','covers:write','metadata:write','providers:read','exchange:read','exchange:write'];
 export const binding = config => hash({ repository: config.repositoryUrl, authority: config.authority, project: config.projectRoot });
@@ -16,7 +16,7 @@ export async function authenticate(req, config, store, { session = false, anonym
   const token = authorization.slice(7);
   if (token.startsWith('tta_')) {
     if (session) throw new DomainError('session_required','Use the authenticated owner session to issue a new grant.',403);
-    const grant = store.grant(token);
+    const grant = await store.grant(token);
     if (grant.binding !== binding(config)) throw new DomainError('target_binding_mismatch','Credential belongs to another repository/auth/project.',403);
     return makeContext(grant.credential,grant,grant.scopes,config,store);
   }
@@ -31,10 +31,10 @@ async function makeContext(credential, grant, scopes, config, store) {
   if (grant && identity.Id !== grant.identity) throw new DomainError('identity_mismatch','Backend credential identity changed.',401);
   const principal = grant ? 'grant:' + grant.id : credential ? 'session:' + identity.Id + ':' + hash(credential.value) : 'visitor';
   const context = { repo, journal:new MutationJournal(store,principal,repo), credential, grant, scopes, identity, principal, check: async () => {
-    if (grant && !store.active(grant.id)) throw new DomainError('credential_revoked','Credential expired or was revoked before dispatch.',401);
+    if (grant && !await store.active(grant.id)) throw new DomainError('credential_revoked','Credential expired or was revoked before dispatch.',401);
     const current = await repo.identity();
     if (current.Id !== identity.Id) throw new DomainError('identity_mismatch','Backend identity changed before dispatch.',401);
-    if (grant && !store.active(grant.id)) throw new DomainError('credential_revoked','Credential expired or was revoked during backend identity verification.',401);
+    if (grant && !await store.active(grant.id)) throw new DomainError('credential_revoked','Credential expired or was revoked during backend identity verification.',401);
   } };
   repo.beforeWrite=context.check;
   return context;
@@ -47,6 +47,6 @@ export async function issueGrant(context, input, config, store) {
   if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 60 || expiresInSeconds > 30 * 86400) throw new DomainError('invalid_expiry','Grant lifetime must be 60 seconds to 30 days.');
   await context.check();
   if (!context.credential) throw new DomainError('session_required','An authenticated backend user is required.',401);
-  const result = store.issue({id:randomUUID(),identity:context.identity.Id,binding:binding(config),scopes:input.scopes,credential:context.credential,expires:Date.now()+expiresInSeconds*1000});
-  store.audit(context.principal,'grant','issued',[]); return result;
+  const result = await store.issue({id:randomUUID(),identity:context.identity.Id,binding:binding(config),scopes:input.scopes,credential:context.credential,expires:Date.now()+expiresInSeconds*1000});
+  await store.audit(context.principal,'grant','issued',[]); return result;
 }

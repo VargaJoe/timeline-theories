@@ -180,6 +180,19 @@ async function main() {
     assert.deepEqual(plans[1].fields, { Description: 'Approved editor field' });
     assert.ok(f.rawCalls.every(call => call.method === 'GET'), 'Pinned updates must never dispatch raw repository mutations');
   });
+  await test('numeric SDK string IDs use numeric API targets and preserve the editor baseline', async () => {
+    const f = await fixture({ discovery: 'ready', mode: 'm0-local' });
+    const editor = (await f.load()).d, original = globalThis.fetch, readinessTargets = [];
+    globalThis.fetch = async (url, init) => { if (new URL(url).pathname.endsWith('/lookup')) { readinessTargets.push(JSON.parse(init.body).target); return response({ data: { ...editor, revision: 'gw:readiness-newer:5' } }); } return original(url, init); };
+    await f.native.requireNativeWriteReadiness('1');
+    assert.deepEqual(readinessTargets, [1]);
+    assert.equal(f.native.cachedNativeSnapshot(1).revision, editor.revision);
+    const sent = [];
+    globalThis.fetch = async (url, init) => { if (new URL(url).pathname.endsWith('/lookup')) sent.push(JSON.parse(init.body).target); return original(url, init); };
+    await f.native.nativeSnapshot('2', { refresh: true }); assert.deepEqual(sent, [2]);
+    await assert.rejects(f.native.nativeSnapshot('9007199254740992'), error => error.code === 'invalid_native_target');
+    assert.deepEqual(sent, [2]); assert.equal(f.rawCalls.filter(call => call.method !== 'GET').length, 0);
+  });
   process.stdout.write(checks + ' native read availability checks passed\n');
 }
 await main().catch(error => { process.stderr.write(String(error.message) + '\n'); process.exitCode = 1; });

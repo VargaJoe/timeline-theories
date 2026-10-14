@@ -1,329 +1,222 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import https from 'node:https';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
+import { createClient, followNativeResponse } from './m1-client.mjs';
 
-const require = createRequire(import.meta.url);
-const local = require('./m0-local-api.cjs');
-const GATEWAY = 'https://localhost:8081';
-const PROJECT = '/Root/Content/timelines';
-const STATE = path.join(local.ROOT, 'm1-restart-state.json');
-const REPORT = path.join(local.ROOT, 'm1-restart-report.json');
-const PENDING_REPORT = path.join(local.ROOT, 'm1-pending-recovery-report.json');
-const DATABASE = path.join(local.ROOT, 'm1-gateway/gateway.sqlite');
-const BINDING = { 'X-Timeline-Repository': local.REPOSITORY, 'X-Timeline-Authority': local.AUTHORITY, 'X-Timeline-Project': PROJECT };
-const SCOPES = ['content:read', 'timelines:write', 'media:write', 'entries:write'];
+const require = createRequire(import.meta.url), local = require('./m0-local-api.cjs');
+const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines', SOURCE_COUNT = 2998;
+const STATE = path.join(local.ROOT,'m1-restart-state.json'), REPORT = path.join(local.ROOT,'m1-restart-report.json');
+const SCOPES = ['content:read','timelines:write','media:write','entries:write'];
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const referenceId = value => Array.isArray(value) ? referenceId(value[0]) : value && typeof value === 'object' ? value.Id : value;
+const errorInfo = error => ({ status:error.status ?? null,code:error.code || (error.name === 'AssertionError' ? 'restart_assertion_failed':'restart_transport_failed'),location:error.stack?.split('\n').find(line=>/m1-restart-smoke\.mjs:\d+:\d+/.test(line))?.trim() });
+const client = () => createClient({baseUrl:GATEWAY+'/api/v1',repository:local.REPOSITORY,authority:local.AUTHORITY,project:PROJECT,caFile:path.join(local.ROOT,'certificates/localhost.pem')});
+let restoredIds;
+const protectedIds = () => restoredIds ||= new Set(Object.values(JSON.parse(fs.readFileSync(path.join(local.ROOT,'restore-journal.json'),'utf8')).idMap).map(Number));
 
-/** Independent HTTPS client. It cannot change origins, follow redirects, or disable TLS. */
-function request(route, { method = 'GET', token, headers = {}, body, discardResponse = false } = {}) {
-  const target = new URL('/api/v1/' + route, GATEWAY);
-  if (target.origin !== GATEWAY || !target.pathname.startsWith('/api/v1/') || target.username || target.password) throw new Error('Restart smoke local endpoint guard failed');
-  const outbound = { ...BINDING, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers };
-  const bytes = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
-  if (bytes) { outbound['Content-Type'] = 'application/json'; outbound['Content-Length'] = String(bytes.length); }
-  return new Promise((resolve, reject) => {
-    let discarded = false;
-    const req = https.request(target, { method, headers: outbound, ca: fs.readFileSync(path.join(local.ROOT, 'certificates/localhost.pem')) }, res => {
-      // A real client disconnect after response headers deliberately drops
-      // the result body. The separate own-row reset models the uncertain
-      // gateway completion window after the backend commit; it is fault
-      // injection into test-owned SQLite rows, not a claim of a power loss.
-      if (discardResponse && res.statusCode >= 200 && res.statusCode < 300) {
-        discarded = true; resolve({ status: res.statusCode, discarded: true }); res.destroy(); req.destroy(); return;
-      }
-      const chunks = []; let size = 0;
-      res.on('data', chunk => { size += chunk.length; if (size > 20 * 1024 * 1024) req.destroy(new Error('Restart smoke response limit exceeded')); else chunks.push(chunk); });
-      res.on('end', () => { let value; try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { value = null; } resolve({ status: res.statusCode, value }); });
-    });
-    req.setTimeout(60000, () => req.destroy(new Error('Restart smoke request timed out')));
-    req.on('error', error => { if (!discarded) reject(error); }); req.end(bytes);
-  });
+/** Plaintext grant exists only in an ignored, owner-only file; atomic replacement keeps that ACL. */
+function saveState(state) {
+  assert.equal(path.dirname(STATE),path.resolve(local.ROOT));
+  execFileSync('git',['check-ignore','--quiet',STATE],{stdio:'ignore',windowsHide:true});
+  const temporary = STATE+'.'+randomUUID()+'.tmp', handle = fs.openSync(temporary,'wx',0o600);
+  try {
+    if(process.platform==='win32') {
+      const user=process.env.USERDOMAIN ? process.env.USERDOMAIN+'\\'+process.env.USERNAME : process.env.USERNAME;
+      if(!user)throw new Error('Private state owner is unavailable.');
+      execFileSync('icacls.exe',[temporary,'/inheritance:r','/grant:r',user+':(F)'],{stdio:'ignore',windowsHide:true});
+    }
+    fs.writeFileSync(handle,JSON.stringify(state,null,2));fs.fsyncSync(handle);
+  }catch{fs.closeSync(handle);fs.unlinkSync(temporary);throw new Error('Private restart state could not be saved.');}
+  fs.closeSync(handle);fs.renameSync(temporary,STATE);
 }
-
-function success(response) {
-  if (response.status < 200 || response.status >= 300) throw new Error('Restart request HTTP ' + response.status + ': ' + (response.value?.error?.code || 'unexpected_response'));
-  return response.value;
-}
-function saveState(state) { fs.writeFileSync(STATE, JSON.stringify(state, null, 2), { mode: 0o600 }); }
 function loadState() {
-  const state = JSON.parse(fs.readFileSync(STATE, 'utf8'));
-  assert.ok([1, 2].includes(state.version)); assert.equal(state.gateway, GATEWAY); assert.equal(state.repository, local.REPOSITORY); assert.equal(state.project, PROJECT);
-  assert.match(state.prefix, /^m1-restart-[0-9a-f-]{36}$/); assert.ok(Array.isArray(state.fixtures) && Array.isArray(state.reservations));
-  return state;
+  const state=JSON.parse(fs.readFileSync(STATE,'utf8'));
+  assert.equal(state.version,3);assert.equal(state.gateway,GATEWAY);assert.equal(state.repository,local.REPOSITORY);assert.equal(state.project,PROJECT);
+  assert.match(state.prefix,/^m1-restart-[0-9a-f-]{36}$/);assert.ok(Array.isArray(state.fixtures)&&Array.isArray(state.reservations)&&Array.isArray(state.operations));return state;
 }
+/** Verify the explicitly supplied managed CLI tree owns the HTTPS app listener; never stop it here. */
 function processIdentity(pid) {
-  assert.ok(Number.isSafeInteger(pid) && pid > 0, 'Supply the explicitly tracked local gateway PID');
-  const command = `$taskRestartProcess=Get-Process -Id ${pid} -ErrorAction Stop; if($taskRestartProcess.ProcessName -ne 'node'){throw 'Tracked gateway process is not Node'}; @{pid=$taskRestartProcess.Id;startedAt=$taskRestartProcess.StartTime.ToUniversalTime().ToString('o')} | ConvertTo-Json -Compress`;
-  const value = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true }).trim());
-  assert.equal(value.pid, pid); assert.ok(typeof value.startedAt === 'string'); return value;
+  assert.ok(Number.isSafeInteger(pid)&&pid>0,'Supply the explicitly tracked Netlify CLI Node PID.');
+  const command = `$taskRestartProcess=Get-Process -Id ${pid} -ErrorAction Stop; if($taskRestartProcess.ProcessName -ne 'node'){throw 'Tracked app process is not Node'}; $taskRestartCli=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if($taskRestartCli.CommandLine -notmatch 'netlify'){throw 'Tracked process is not the managed Netlify CLI'}; $taskRestartListeners=@(Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique); $taskRestartOwnsListener=$false; foreach($taskRestartListener in $taskRestartListeners){$taskRestartCursor=[int]$taskRestartListener;for($taskRestartDepth=0;$taskRestartDepth -lt 10;$taskRestartDepth++){if($taskRestartCursor -eq ${pid}){$taskRestartOwnsListener=$true;break};$taskRestartAncestor=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$taskRestartCursor);if(!$taskRestartAncestor -or $taskRestartAncestor.ParentProcessId -eq 0){break};$taskRestartCursor=[int]$taskRestartAncestor.ParentProcessId}};if(!$taskRestartOwnsListener){throw 'Tracked Netlify tree does not own localhost 8080'};@{pid=$taskRestartProcess.Id;startedAt=$taskRestartProcess.StartTime.ToUniversalTime().ToString('o');ownsAppListener=$true}|ConvertTo-Json -Compress`;
+  const value=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',command],{encoding:'utf8',windowsHide:true}).trim());
+  assert.equal(value.pid,pid);assert.equal(value.ownsAppListener,true);return value;
 }
 async function sourceCount() {
-  const response = await local.request(local.REPOSITORY + '/OData.svc/Root/Content?' + new URLSearchParams({ query: '+InTree:' + PROJECT + ' .AUTOFILTERS:OFF .LIFESPAN:OFF', '$select': 'Id', '$top': '1', '$inlinecount': 'allpages', metadata: 'no' }), { account: local.readAccounts().admin });
-  assert.equal(response.status, 200); const count = Number(response.value?.d?.__count); assert.ok(Number.isSafeInteger(count)); return count;
+  const response=await local.request(local.REPOSITORY+'/OData.svc/Root/Content?'+new URLSearchParams({query:'+InTree:'+PROJECT+' .AUTOFILTERS:OFF .LIFESPAN:OFF','$top':'0','$inlinecount':'allpages',metadata:'no'}),{account:local.readAccounts().admin});
+  assert.equal(response.status,200);const count=Number(response.value?.d?.__count);assert.ok(Number.isSafeInteger(count));return count;
 }
-const sourceIds = () => new Set(Object.values(JSON.parse(fs.readFileSync(path.join(local.ROOT, 'restore-journal.json'), 'utf8')).idMap));
-const referenceId = value => Array.isArray(value) ? referenceId(value[0]) : value && typeof value === 'object' ? value.Id : value;
-const read = async (state, id) => success(await request('content/' + id, { token: state.grant.token })).data;
-const list = async state => success(await request('entries?' + new URLSearchParams({ timelineId: String(state.timelineId), top: '100', includeHidden: 'true' }), { token: state.grant.token })).items;
-async function preview(state, commands) {
-  const plan = success(await request('plans', { method: 'POST', token: state.grant.token, body: { commands } }));
-  assert.equal(plan.repositoryWrites, 0); return plan;
+async function assertApp(api) {
+  const capabilities=await api.verify();assert.equal(capabilities.runtime,'Netlify Functions in the Timeline app');assert.equal(capabilities.backendProtocolRequired,'gateway-coordinated-v1');return capabilities;
 }
-async function apply(state, plan, key, discardResponse = false) {
-  const response = await request('plans/' + plan.id + '/apply', { method: 'POST', token: state.grant.token, headers: { 'Idempotency-Key': key }, body: {}, discardResponse });
-  if (discardResponse) { assert.equal(response.status, 200); assert.equal(response.discarded, true); return; }
-  const result = success(response); assert.equal(result.ok, true); return result;
+function success(response) {
+  const value=response.value??JSON.parse(response.body.toString());
+  if(response.status<200||response.status>=300||value?.ok===false){const error=new Error('Application request rejected.');Object.assign(error,{status:response.status,code:value?.error?.code||'native_request_failed',result:value});throw error;}
+  return value;
 }
-function remember(state, content) {
-  assert.ok(!sourceIds().has(content.Id), 'A fixture resolved to a source ID');
-  assert.ok(content.Name.startsWith(state.prefix) && content.Path.startsWith(PROJECT + '/'), 'Fixture UUID path ownership failed');
-  const existing = state.fixtures.find(fixture => fixture.id === content.Id);
-  const fixture = { id: content.Id, name: content.Name, path: content.Path, type: content.Type };
-  if (existing) Object.assign(existing, fixture); else state.fixtures.push(fixture); saveState(state); return content;
+async function request(api,state,route,options={}) {
+  const original={token:state.grant.token};
+  return followNativeResponse(await api.rawRequest(route,{...options,...original}),(nextRoute,nextOptions)=>api.rawRequest(nextRoute,{...nextOptions,...original}));
 }
-function reserveName(state, type, name, parentPath) {
-  assert.ok(name.startsWith(state.prefix)); state.reservations.push({ type, name, path: parentPath + '/' + name }); saveState(state);
+const read=async(api,state,id)=>(await api.request('/content/'+id,{token:state.grant.token})).data;
+const lookup=async(api,state,target)=>(await api.request('/lookup',{method:'POST',token:state.grant.token,body:{target}})).data;
+const list=async(api,state)=>(await api.request('/entries?'+new URLSearchParams({timelineId:String(state.timelineId),top:'100',includeHidden:'true'}),{token:state.grant.token})).items;
+async function preview(api,state,commands){const plan=await api.request('/plans',{method:'POST',token:state.grant.token,body:{commands}});assert.equal(plan.repositoryWrites,0);return plan;}
+function own(state,content) {
+  assert.ok(!protectedIds().has(content.Id),'Fixture resolved to a restored source ID.');
+  assert.ok(content.Name.startsWith(state.prefix)&&content.Path.startsWith(PROJECT+'/'));
+  const exact=state.reservations.find(row=>row.name===content.Name&&row.path===content.Path&&row.type===content.Type);assert.ok(exact,'Exact reserved UUID/type/path ownership is unavailable.');return content;
 }
-async function assertGateway() {
-  const capabilities = success(await request('capabilities'));
-  assert.equal(capabilities.repository, local.REPOSITORY); assert.equal(capabilities.authority, local.AUTHORITY); assert.equal(capabilities.project, PROJECT);
+function remember(state,content) {
+  own(state,content);const value={id:content.Id,name:content.Name,path:content.Path,type:content.Type,deleted:false};
+  const existing=state.fixtures.find(row=>row.id===content.Id);if(existing)Object.assign(existing,value);else state.fixtures.push(value);saveState(state);return content;
 }
+function reserveName(state,type,name,parentPath){assert.ok(name.startsWith(state.prefix));state.reservations.push({type,name,path:parentPath+'/'+name});saveState(state);}
+function operation(state,kind,plan,lost=false){const row={kind,plan,key:randomUUID(),lost};state.operations.push(row);saveState(state);return row;}
 
-function resetOwnCompletions(state, resetMutationReceipts = false) {
-  assert.ok(fs.existsSync(DATABASE), 'Owned gateway SQLite store is missing');
-  const db = new DatabaseSync(DATABASE); db.exec('PRAGMA busy_timeout=5000; BEGIN IMMEDIATE;');
-  try {
-    const grant = db.prepare('SELECT identity,revoked FROM grants WHERE id=?').get(state.grant.id);
-    assert.equal(grant.identity, state.grant.identity); assert.equal(grant.revoked, 0);
-    const ownIds = new Set(state.fixtures.map(fixture => fixture.id));
-    for (const step of state.lost) {
-      const plan = db.prepare('SELECT principal,request_hash,body FROM plans WHERE id=?').get(step.plan.id);
-      assert.equal(plan.principal, state.principal); assert.equal(plan.request_hash, step.plan.requestHash);
-      const privatePlan = JSON.parse(plan.body); assert.equal(privatePlan.id, step.plan.id);
-      for (const entry of privatePlan.steps) {
-        const payload = entry.payload;
-        if (payload.action === 'create') { assert.ok(payload.fields.Name.startsWith(state.prefix)); assert.equal(payload.type, 'MediaItem'); }
-        else assert.ok(ownIds.has(payload.targetId), 'Fault injection targeted a nonfixture plan');
-        if (payload.action === 'order') assert.ok(payload.entries.every(entry => ownIds.has(entry.id)));
-        const mutation = db.prepare('SELECT state,result,request_hash,before_state FROM mutations WHERE principal=? AND operation_id=?').get(state.principal, payload.operationId);
-        assert.equal(mutation.request_hash, payload.requestHash); assert.equal(mutation.state, 'completed'); assert.ok(mutation.result, 'Durable application mutation receipt is missing');
-        if (resetMutationReceipts) {
-          assert.equal(payload.action, 'create', 'Pending-receipt injection is restricted to the own unrenamed create');
-          const committed = JSON.parse(mutation.result), before = JSON.parse(mutation.before_state);
-          assert.equal(committed.id, state.mediaId); assert.ok(ownIds.has(committed.id));
-          assert.equal(before.path, state.fixtures.find(fixture => fixture.id === committed.id).path);
-          const changed = db.prepare("UPDATE mutations SET result=NULL,state='pending' WHERE principal=? AND operation_id=? AND request_hash=? AND state='completed'").run(state.principal, payload.operationId, payload.requestHash);
-          assert.equal(changed.changes, 1);
-        }
-      }
-      const operation = db.prepare('SELECT * FROM operations WHERE principal=? AND key=?').get(state.principal, step.key);
-      assert.equal(operation.plan_id, step.plan.id); assert.equal(operation.request_hash, step.plan.requestHash); assert.equal(operation.state, 'completed');
-      const completed = JSON.parse(operation.result); assert.equal(completed.ok, true);
-      for (const result of completed.completed) {
-        if (result.result.id) assert.ok(ownIds.has(result.result.id));
-        if (result.result.completed) assert.ok(result.result.completed.every(entry => ownIds.has(entry.id)));
-      }
-      const changed = db.prepare("UPDATE operations SET result=NULL,state='pending',updated=? WHERE principal=? AND key=? AND plan_id=? AND request_hash=? AND state='completed'").run(Date.now(), state.principal, step.key, step.plan.id, step.plan.requestHash);
-      assert.equal(changed.changes, 1);
+/** Drain and discard an actual final HTTPS job body. It is never parsed as an apply receipt. */
+async function discardCompletedResponse(api,state,step,initial) {
+  assert.equal(initial.status,202,'Fresh apply did not return an asynchronous app job.');
+  const queued=JSON.parse(initial.body.toString());assert.equal(queued.pending,true);assert.match(queued.job?.id,/^[0-9a-f-]{36}$/);
+  step.jobId=queued.job.id;saveState(state);
+  const deadline=Date.now()+15*60*1000;let response=initial;
+  for(;;) {
+    if(response.status!==202) {
+      assert.equal(response.status,200,'The discarded apply response did not fully complete.');
+      step.discarded={status:response.status,bytes:response.body.length,sha256:sha256(response.body),completedAt:new Date().toISOString()};
+      response.body.fill(0);saveState(state);return;
     }
-    db.exec('COMMIT;');
-  } catch (error) { db.exec('ROLLBACK;'); throw error; } finally { db.close(); }
+    const pending=JSON.parse(response.body.toString());assert.equal(pending.pending,true);assert.equal(pending.job?.id,step.jobId);
+    assert.ok(Date.now()<deadline,'Job remains pending; retain the original plan/key for recovery.');
+    await new Promise(resolve=>setTimeout(resolve,500));
+    response=await api.rawRequest('/jobs/'+step.jobId,{token:state.grant.token});
+  }
+}
+async function apply(api,state,step) {
+  const initial=await api.rawRequest('/plans/'+step.plan.id+'/apply',{method:'POST',token:state.grant.token,body:{},idempotencyKey:step.key});
+  if(step.lost){await discardCompletedResponse(api,state,step,initial);return;}
+  const result=success(await followNativeResponse(initial,(route,options)=>api.rawRequest(route,{...options,token:state.grant.token}),{onJob:id=>{step.jobId=id;saveState(state);}}));
+  assert.equal(result.ok,true);step.completed=true;saveState(state);return result;
+}
+async function create(api,state,type,fields,parentId,parentPath) {
+  reserveName(state,type,fields.Name,parentPath);
+  const plan=await preview(api,state,[{action:'create',type,fields,...(parentId?{parentId}:{})}]);
+  const result=await apply(api,state,operation(state,'setup-create',plan));return remember(state,await read(api,state,result.completed[0].result.id));
 }
 
-/** Prepare creates only UUID fixtures, drops three HTTP result bodies and resets only their verified gateway rows. It never stops a process. */
+/** Prepare only UUID fixtures; leave the managed Netlify app running for the parent-controlled restart. */
 export async function prepare(pid) {
-  if (fs.existsSync(STATE)) assert.ok(['completed', 'cleaned'].includes(loadState().phase), 'A previous restart fixture is still pending; resume or clean it first');
-  const state = { version: 2, architecture: 'standard-sensenet-shared-application-coordinator', phase: 'preparing', preparedAt: new Date().toISOString(), prefix: 'm1-restart-' + randomUUID(), gateway: GATEWAY, repository: local.REPOSITORY, project: PROJECT, processBefore: processIdentity(pid), fixtures: [], reservations: [], lost: [], checks: [] };
-  saveState(state);
+  if(fs.existsSync(STATE)){const previous=JSON.parse(fs.readFileSync(STATE,'utf8'));assert.ok(['completed','cleaned'].includes(previous.phase),'Resume or clean the previous restart fixture first.');}
+  const state={version:3,architecture:'one-netlify-app-private-blobs-restart',phase:'preparing',preparedAt:new Date().toISOString(),gateway:GATEWAY,repository:local.REPOSITORY,project:PROJECT,prefix:'m1-restart-'+randomUUID(),processBefore:processIdentity(pid),fixtures:[],reservations:[],operations:[],checks:[]};
+  saveState(state);const api=client();
   try {
-    await assertGateway(); state.initialCount = await sourceCount(); saveState(state);
-    const grant = success(await request('grants', { method: 'POST', token: local.readAccounts().editor.apiKey, headers: { 'X-Timeline-Backend-Auth': 'ApiKey' }, body: { scopes: SCOPES, expiresInSeconds: 3600 } }));
-    state.grant = grant; state.principal = 'grant:' + grant.id; saveState(state);
-    const timelineName = state.prefix + '-timeline'; reserveName(state, 'Timeline', timelineName, PROJECT + '/Timelines');
-    const timelinePlan = await preview(state, [{ action: 'create', type: 'Timeline', fields: { Name: timelineName, DisplayName: 'Restart proof timeline', Description: 'Own UUID restart fixture', IsVisible: false } }]);
-    const timelineResult = await apply(state, timelinePlan, randomUUID()); state.timelineId = timelineResult.completed[0].result.id; remember(state, await read(state, state.timelineId));
+    await assertApp(api);protectedIds();state.initialCount=await sourceCount();assert.equal(state.initialCount,SOURCE_COUNT,'Other owned fixture phases must finish first.');saveState(state);
+    state.grant=await api.request('/grants',{method:'POST',token:local.readAccounts().editor.apiKey,backendAuth:'ApiKey',body:{scopes:SCOPES,expiresInSeconds:3600}});saveState(state);
+    const timelineName=state.prefix+'-timeline',timeline=await create(api,state,'Timeline',{Name:timelineName,DisplayName:'Owned Netlify restart timeline',Description:'Own UUID fixture',IsVisible:false},undefined,PROJECT+'/Timelines');
+    state.timelineId=timeline.Id;saveState(state);
 
-    const mediaName = state.prefix + '-media'; reserveName(state, 'MediaItem', mediaName, PROJECT + '/MediaLibrary');
-    const mediaPlan = await preview(state, [{ action: 'create', type: 'MediaItem', fields: { Name: mediaName, DisplayName: 'Restart proof media', Title: 'Own UUID media', MediaType: 'movie' } }]);
-    const mediaKey = state.prefix + '-create'; state.lost.push({ kind: 'create', plan: mediaPlan, key: mediaKey }); saveState(state);
-    await apply(state, mediaPlan, mediaKey, true);
-    const media = success(await request('lookup', { method: 'POST', token: state.grant.token, body: { target: PROJECT + '/MediaLibrary/' + mediaName } })).data;
-    assert.ok(typeof media.revision === 'string' && media.revision.length > 0 && media.revision.length <= 200, 'Stock content needs an opaque application revision');
-    state.checks.push({name:'Standard repository content supplies opaque application revisions; no backend rowversion format assumed',passed:true});
-    state.mediaId = media.Id; remember(state, media);
+    const mediaName=state.prefix+'-media';reserveName(state,'MediaItem',mediaName,PROJECT+'/MediaLibrary');
+    const createPlan=await preview(api,state,[{action:'create',type:'MediaItem',fields:{Name:mediaName,DisplayName:'Owned restart media',Title:'One restored receipt creation',MediaType:'movie'}}]);
+    await apply(api,state,operation(state,'create',createPlan,true));
+    const media=remember(state,await lookup(api,state,PROJECT+'/MediaLibrary/'+mediaName));state.mediaId=media.Id;saveState(state);
+    const entryNames=[state.prefix+'-first',state.prefix+'-second'];entryNames.forEach(name=>reserveName(state,'TimelineEntry',name,timeline.Path));
+    const entriesPlan=await preview(api,state,entryNames.map((Name,index)=>({action:'create',type:'TimelineEntry',parentId:timeline.Id,fields:{Name,DisplayName:'Owned restart occurrence '+(index+1),MediaItem:media.Id,Position:index+1,Notes:'Own occurrence '+(index+1)}})));
+    const entriesResult=await apply(api,state,operation(state,'setup-entries',entriesPlan));state.entryIds=entriesResult.completed.map(row=>row.result.id);assert.equal(new Set(state.entryIds).size,2);saveState(state);
+    for(const id of state.entryIds)remember(state,await read(api,state,id));
+    let first=await read(api,state,state.entryIds[0]);
+    const updatePlan=await preview(api,state,[{action:'update',targetId:first.Id,expectedRevision:first.revision,fields:{Notes:'Notes survive discarded job response and Netlify restart'}}]);
+    await apply(api,state,operation(state,'update',updatePlan,true));
+    first=await read(api,state,first.Id);const second=await read(api,state,state.entryIds[1]);
+    const orderPlan=await preview(api,state,[{action:'order',timelineId:timeline.Id,entries:[{id:second.Id,revision:second.revision},{id:first.Id,revision:first.revision}]}]);
+    await apply(api,state,operation(state,'order',orderPlan,true));
 
-    const entryNames = [state.prefix + '-first', state.prefix + '-second']; entryNames.forEach(name => reserveName(state, 'TimelineEntry', name, PROJECT + '/Timelines/' + timelineName));
-    const occurrences = await preview(state, entryNames.map((Name, index) => ({ action: 'create', type: 'TimelineEntry', parentId: state.timelineId, fields: { Name, DisplayName: 'Restart occurrence ' + (index + 1), MediaItem: state.mediaId, Position: index + 1, Notes: 'Own occurrence ' + (index + 1) } })));
-    const occurrenceResult = await apply(state, occurrences, randomUUID());
-    state.entryIds = occurrenceResult.completed.map(result => result.result.id); assert.equal(new Set(state.entryIds).size, 2);
-    for (const id of state.entryIds) remember(state, await read(state, id));
-    let first = await read(state, state.entryIds[0]);
-    const updatePlan = await preview(state, [{ action: 'update', targetId: first.Id, expectedRevision: first.revision, fields: { Notes: 'Notes survive lost response and gateway restart' } }]);
-    const updateKey = state.prefix + '-update'; state.lost.push({ kind: 'update', plan: updatePlan, key: updateKey }); saveState(state); await apply(state, updatePlan, updateKey, true);
-    first = await read(state, state.entryIds[0]); const second = await read(state, state.entryIds[1]);
-    const orderPlan = await preview(state, [{ action: 'order', timelineId: state.timelineId, entries: [{ id: second.Id, revision: second.revision }, { id: first.Id, revision: first.revision }] }]);
-    const orderKey = state.prefix + '-order'; state.lost.push({ kind: 'order', plan: orderPlan, key: orderKey }); saveState(state); await apply(state, orderPlan, orderKey, true);
-    // Another coordinated application mutation after the create response was lost. Recovery
-    // must follow the committed create ID rather than recreate its old Name.
-    const renamedName = state.prefix + '-media-renamed';
-    const beforeRename = await read(state, state.mediaId);
-    const renamePlan = await preview(state, [{action:'update',targetId:state.mediaId,expectedRevision:beforeRename.revision,fields:{Name:renamedName}}]);
-    await apply(state,renamePlan,randomUUID());
-    remember(state, await read(state, state.mediaId));
-    const beforeCompeting = await read(state, state.entryIds[1]);
-    state.stalePlan = await preview(state,[{action:'update',targetId:beforeCompeting.Id,expectedRevision:beforeCompeting.revision,fields:{Notes:'Stale saved edit must not replace competing app edit'}}]);
-    const competing = await preview(state,[{action:'update',targetId:beforeCompeting.Id,expectedRevision:beforeCompeting.revision,fields:{Notes:'Competing coordinated application edit survives restart'}}]);
-    await apply(state,competing,randomUUID());
-    state.baseline = {};
-    for (const fixture of state.fixtures) { const current = await read(state, fixture.id); state.baseline[fixture.id] = { revision: current.revision, name: current.Name }; }
-    const entries = await list(state); assert.equal(entries.length, 2); assert.ok(entries.every(entry => referenceId(entry.MediaItem) === state.mediaId));
-    assert.equal((await read(state, first.Id)).Position, 2); assert.equal((await read(state, second.Id)).Position, 1);
-    assert.equal(await sourceCount(), state.initialCount + state.fixtures.length);
-    resetOwnCompletions(state); state.phase = 'prepared'; state.rowsReset = state.lost.length; saveState(state);
-    console.log(JSON.stringify({ phase: state.phase, stateFile: 'deployment/.local/m1-restart-state.json', ledgerRowsReset: state.rowsReset, ownedFixtures: state.fixtures.length, sourceCount: state.initialCount, readyForGatewayRestart: true }));
-  } catch (error) { state.phase = 'prepare_failed'; state.error = error.message; saveState(state); throw error; }
+    const disposable=await create(api,state,'MediaItem',{Name:state.prefix+'-deleted',DisplayName:'Owned lost delete fixture',Title:'Deletion receipt proof',MediaType:'movie'},undefined,PROJECT+'/MediaLibrary');
+    const deletePlan=await preview(api,state,[{action:'delete',targetId:disposable.Id,expectedRevision:disposable.revision}]);
+    await apply(api,state,operation(state,'delete',deletePlan,true));
+    await assert.rejects(read(api,state,disposable.Id),error=>error.status===404);state.deletedId=disposable.Id;state.fixtures.find(row=>row.id===disposable.Id).deleted=true;saveState(state);
+
+    const renamed=state.prefix+'-media-renamed';reserveName(state,'MediaItem',renamed,PROJECT+'/MediaLibrary');
+    const beforeRename=await read(api,state,media.Id),renamePlan=await preview(api,state,[{action:'update',targetId:media.Id,expectedRevision:beforeRename.revision,fields:{Name:renamed}}]);
+    await apply(api,state,operation(state,'setup-rename',renamePlan));remember(state,await read(api,state,media.Id));
+    const competingTarget=await read(api,state,second.Id);
+    const stalePlan=await preview(api,state,[{action:'update',targetId:second.Id,expectedRevision:competingTarget.revision,fields:{Notes:'Stale saved edit must not overwrite'}}]);state.stale=operation(state,'stale-after-restart',stalePlan);
+    const competingPlan=await preview(api,state,[{action:'update',targetId:second.Id,expectedRevision:competingTarget.revision,fields:{Notes:'Competing app update survives Netlify restart'}}]);
+    await apply(api,state,operation(state,'setup-competing-edit',competingPlan));
+    state.baseline={};for(const fixture of state.fixtures.filter(row=>!row.deleted)){const current=await read(api,state,fixture.id);state.baseline[fixture.id]={revision:current.revision,name:current.Name,path:current.Path};}
+    assert.equal((await list(api,state)).length,2);assert.equal((await read(api,state,first.Id)).Position,2);assert.equal((await read(api,state,second.Id)).Position,1);
+    assert.equal(await sourceCount(),SOURCE_COUNT+4);state.phase='prepared';state.resumeBefore=stalePlan.expiresAt;state.preparedAt=new Date().toISOString();saveState(state);
+    console.log(JSON.stringify({phase:state.phase,stateFile:STATE,lostCompletedBodies:state.operations.filter(row=>row.lost).length,activeOwnedFixtures:4,sourceCount:SOURCE_COUNT,readyForManagedAppRestart:true,resumeBefore:state.resumeBefore}));return state;
+  }catch(error){state.phase='prepare_failed';state.error=errorInfo(error);saveState(state);throw error;}
 }
 
-async function cleanup(state, { allowFallback = true } = {}) {
-  const results = [], accounts = local.readAccounts(), protectedIds = sourceIds();
-  // Recover only explicitly reserved UUID Names if a response was dropped
-  // before the normal client could remember its generated ID.
-  for (const reservation of state.reservations) {
-    const response = await local.request(local.endpoint(reservation.path) + '?' + new URLSearchParams({ '$select': 'Id,Name,Path,Type', metadata: 'no' }), { account: accounts.admin });
-    if (response.status === 404) continue;
-    assert.equal(response.status, 200); const content = response.value.d;
-    assert.equal(content.Name, reservation.name); assert.equal(content.Path, reservation.path); assert.equal(content.Type, reservation.type);
-    if (!state.fixtures.some(fixture => fixture.id === content.Id)) remember(state, content);
-  }
-  const sorted = [...state.fixtures].sort((a, b) => ({ TimelineEntry: 0, Timeline: 1, MediaItem: 2 }[a.type] - { TimelineEntry: 0, Timeline: 1, MediaItem: 2 }[b.type]));
-  for (const fixture of sorted) {
-    assert.ok(!protectedIds.has(fixture.id) && fixture.name.startsWith(state.prefix) && fixture.path.startsWith(PROJECT + '/'));
-    const exact = await local.request(local.endpoint(fixture.id) + '?' + new URLSearchParams({ '$select': 'Id,Name,Path,Type', metadata: 'no' }), { account: accounts.admin });
-    if (exact.status === 404) continue;
-    assert.equal(exact.status, 200); assert.equal(exact.value.d.Name, fixture.name); assert.equal(exact.value.d.Path, fixture.path); assert.equal(exact.value.d.Type, fixture.type);
-    let fallback = false;
-    try {
-      const current = await read(state, fixture.id);
-      const plan = await preview(state, [{ action: 'delete', targetId: fixture.id, expectedRevision: current.revision }]); await apply(state, plan, randomUUID());
-    } catch {
-      if (!allowFallback) throw new Error('Native UUID cleanup failed; preserve the fixture and journal for recovery');
-      // Cleanup is explicitly privileged and restricted to the verified own
-      // UUID IDs/paths above. It never substitutes admin for proof operations.
-      fallback = true; await local.api(fixture.id, { method: 'DELETE', account: accounts.admin, query: { permanent: 'true' } });
+/** All fixture discovery and deletion uses the scoped application API, with no raw cleanup fallback. */
+export async function cleanup(state=loadState()) {
+  const api=client(),results=[];await assertApp(api);
+  if(state.grant?.token) {
+    for(const reservation of state.reservations) {
+      let content;try{content=await lookup(api,state,reservation.path);}catch(error){if(error.status===404)continue;throw error;}
+      assert.equal(content.Name,reservation.name);assert.equal(content.Path,reservation.path);assert.equal(content.Type,reservation.type);remember(state,content);
     }
-    assert.equal((await local.request(local.endpoint(fixture.id), { account: accounts.admin })).status, 404); results.push({ type: fixture.type, fallback });
-  }
-  if (state.grant?.token) {
-    const revoked = await request('grants/' + state.grant.id + '/revoke', { method: 'POST', token: state.grant.token, body: {} });
-    assert.equal(revoked.status, 200); state.grant.token = null;
-  }
-  if (state.initialCount !== undefined) assert.equal(await sourceCount(), state.initialCount);
-  state.cleanup = results; saveState(state); return results;
-}
-
-/** Models only the verified own commit-before-receipt window; no external request is resent. */
-export async function pendingRecovery() {
-  if (fs.existsSync(STATE)) assert.ok(['completed', 'cleaned'].includes(loadState().phase), 'Previous restart fixtures must be completed or cleaned first');
-  const state = { version: 2, architecture: 'standard-sensenet-shared-application-coordinator', phase: 'pending_preparing', preparedAt: new Date().toISOString(), prefix: 'm1-restart-' + randomUUID(), gateway: GATEWAY, repository: local.REPOSITORY, project: PROJECT, fixtures: [], reservations: [], lost: [], checks: [] };
-  const report = { version: 1, architecture: state.architecture, ranAt: new Date().toISOString(), repository: local.REPOSITORY, project: PROJECT, checks: [], passed: false, instrumentation: 'Only the known completed mutation and operation receipt rows for one verified own unrenamed UUID create are reset to pending. Actual repository postconditions and actual 60-second credential expiry are checked through HTTPS. No unowned rows or global state are changed.' };
-  let failure;
-  const record = name => { report.checks.push({ name, passed: true }); console.log(JSON.stringify(report.checks.at(-1))); };
-  const ownerRecover = async () => success(await request('recovery', { method: 'POST', token: local.readAccounts().editor.apiKey, headers: { 'X-Timeline-Backend-Auth': 'ApiKey' }, body: { planId: state.lost[0].plan.id } }));
-  saveState(state); fs.writeFileSync(PENDING_REPORT, JSON.stringify(report, null, 2));
-  try {
-    await assertGateway(); state.initialCount = await sourceCount(); report.initialCount = state.initialCount;
-    state.grant = success(await request('grants', { method: 'POST', token: local.readAccounts().editor.apiKey, headers: { 'X-Timeline-Backend-Auth': 'ApiKey' }, body: { scopes: SCOPES, expiresInSeconds: 60 } }));
-    state.principal = 'grant:' + state.grant.id; saveState(state);
-    const name = state.prefix + '-pending-media'; reserveName(state, 'MediaItem', name, PROJECT + '/MediaLibrary');
-    const plan = await preview(state, [{ action: 'create', type: 'MediaItem', fields: { Name: name, DisplayName: 'Own pending recovery fixture', Title: 'Unrenamed UUID recovery media', Description: 'Original approved create postcondition', MediaType: 'movie' } }]);
-    const key = randomUUID(), result = await apply(state, plan, key); state.mediaId = result.completed[0].result.id;
-    const media = remember(state, await read(state, state.mediaId)); state.lost = [{ kind: 'create', plan, key }]; saveState(state);
-    const unrelated = await preview(state, [{ action: 'update', targetId: media.Id, expectedRevision: media.revision, fields: { Description: 'Blocked unrelated plan must never save' } }]);
-    resetOwnCompletions(state, true); state.phase = 'pending_receipt'; saveState(state);
-    const denied = await request('plans/' + unrelated.id + '/apply', { method: 'POST', token: state.grant.token, headers: { 'Idempotency-Key': randomUUID() }, body: {} });
-    assert.equal(denied.status, 409); assert.equal(denied.value.error.code, 'pending_recovery_required'); assert.equal((await read(state, media.Id)).revision, media.revision);
-    record('Pending own create receipt fences an unrelated application apply before any repository write');
-    const reconciled = await apply(state, plan, key); assert.equal(reconciled.completed[0].result.id, media.Id); assert.equal(reconciled.completed[0].replayed, true); assert.equal(reconciled.completed[0].result.reconciled, true);
-    assert.equal((await read(state, media.Id)).revision, media.revision); assert.equal(await sourceCount(), state.initialCount + 1);
-    record('Original saved plan/key reconciles the reserved unrenamed postcondition to the same ID with zero saves or duplicate creates');
-    resetOwnCompletions(state, true); state.phase = 'pending_expiry'; saveState(state);
-    const expiry = Date.parse(state.grant.expiresAt); assert.ok(Number.isFinite(expiry)); report.grantLifetimeSeconds = 60;
-    while (Date.now() <= expiry + 100) await new Promise(resolve => setTimeout(resolve, Math.min(20000, expiry + 101 - Date.now())));
-    const expired = await request('content/' + media.Id, { token: state.grant.token }); assert.equal(expired.status, 401); assert.equal(expired.value.error.code, 'invalid_credential');
-    record('The original scoped credential expires after its actual minimum 60-second lifetime');
-    const recovery = await ownerRecover(); assert.equal(recovery.repositoryWrites, 0); assert.equal(recovery.pending, false); assert.equal(recovery.operations.length, 1); assert.equal(recovery.operations[0].confirmed, true); assert.equal(recovery.operations[0].result.id, media.Id);
-    const raw = await local.api(media.Id, { account: local.readAccounts().editor, query: { '$select': 'Id,Name,Description', metadata: 'no' } }); assert.equal(raw.Name, media.Name); assert.equal(raw.Description, media.Description);
-    assert.equal(await sourceCount(), state.initialCount + 1);
-    record('Same backend owner POST/recovery confirms the expired-grant create receipt with zero repository writes');
-    state.expiredGrant = { id: state.grant.id, identity: state.grant.identity, expiresAt: state.grant.expiresAt };
-    state.grant = success(await request('grants', { method: 'POST', token: local.readAccounts().editor.apiKey, headers: { 'X-Timeline-Backend-Auth': 'ApiKey' }, body: { scopes: SCOPES, expiresInSeconds: 3600 } })); saveState(state);
-    assert.equal((await read(state, media.Id)).revision, media.revision);
-  } catch (error) { failure = error; report.error = error.message; }
-  try {
-    if (state.lost.length) { const recovery = await ownerRecover(); assert.equal(recovery.pending, false, 'Own pending receipt must reconcile before cleanup'); }
-    if (state.grant && Date.parse(state.grant.expiresAt) <= Date.now()) {
-      state.grant = success(await request('grants', { method: 'POST', token: local.readAccounts().editor.apiKey, headers: { 'X-Timeline-Backend-Auth': 'ApiKey' }, body: { scopes: SCOPES, expiresInSeconds: 3600 } })); saveState(state);
+    const sorted=[...state.fixtures].sort((a,b)=>({TimelineEntry:0,Timeline:1,MediaItem:2,BookMediaItem:2}[a.type]-{TimelineEntry:0,Timeline:1,MediaItem:2,BookMediaItem:2}[b.type]));
+    for(const fixture of sorted) {
+      let current;try{current=await read(api,state,fixture.id);}catch(error){
+        if(error.status===404){const pending=state.operations.find(row=>row.kind==='cleanup'&&row.targetId===fixture.id&&!row.completed);if(pending)await apply(api,state,pending);results.push({id:fixture.id,deleted:true,alreadyAbsent:true});continue;}
+        throw error;
+      }
+      own(state,current);assert.equal(current.Name,fixture.name);assert.equal(current.Path,fixture.path);
+      let step=state.operations.find(row=>row.kind==='cleanup'&&row.targetId===fixture.id&&!row.completed);
+      if(!step){step=operation(state,'cleanup',await preview(api,state,[{action:'delete',targetId:fixture.id,expectedRevision:current.revision}]));step.targetId=fixture.id;saveState(state);}
+      await apply(api,state,step);await assert.rejects(read(api,state,fixture.id),error=>error.status===404);
+      fixture.deleted=true;results.push({id:fixture.id,deleted:true,via:'native-app'});state.cleanup=results;saveState(state);
     }
-    report.cleanup = await cleanup(state, { allowFallback: false }); report.finalCount = await sourceCount();
-    state.phase = failure ? 'cleaned' : 'completed'; saveState(state);
-  } catch (error) { failure ??= error; report.error ??= error.message; state.phase = 'cleanup_failed'; saveState(state); }
-  report.passed = !failure; fs.writeFileSync(PENDING_REPORT, JSON.stringify(report, null, 2));
-  console.log(JSON.stringify({ passed: report.passed, checks: report.checks.length, sourceCountBefore: report.initialCount, sourceCountAfter: report.finalCount, nativeCleanup: report.cleanup?.length ?? 0 }));
-  if (failure) throw failure; return report;
+    assert.equal(await sourceCount(),SOURCE_COUNT,'Restored source count changed after cleanup.');
+    await api.request('/grants/'+state.grant.id+'/revoke',{method:'POST',token:state.grant.token,body:{}});state.grant.token=null;
+  }
+  assert.equal(await sourceCount(),SOURCE_COUNT);state.phase='cleaned';state.cleanup=results;saveState(state);return results;
 }
 
-/** Resume verifies a different actual process, retries unchanged plans/keys via HTTPS, then removes only own fixtures. */
+/** Resume after the parent actually restarts its managed CLI, preserving the private app Blobs store. */
 export async function resume(pid) {
-  const state = loadState(); assert.equal(state.version,2); assert.equal(state.phase, 'prepared');
-  const processAfter = processIdentity(pid);
-  assert.notDeepEqual(processAfter, state.processBefore, 'The gateway process was not restarted');
-  const report = { version: 2, architecture:state.architecture,ranAt: new Date().toISOString(), gateway: GATEWAY, repository: local.REPOSITORY, project: PROJECT, processBefore: state.processBefore, processAfter, simulatedUncertainLedgerRows: state.rowsReset, droppedResponseBodies: state.lost.length, initialCount: state.initialCount, checks: [...state.checks], passed: false,
-    limitation: 'Actual response-body loss and process restart recover completed durable application receipts. Only the verified own operations cache rows are reset; mutation receipts remain committed. This does not simulate an unknown upstream commit before its mutation receipt, automatic partial-order resume, direct raw repository writers, or a multi-node transaction.' };
-  let failure;
+  const state=loadState();assert.equal(state.phase,'prepared');const processAfter=processIdentity(pid);assert.notDeepEqual(processAfter,state.processBefore,'The managed Netlify app process did not restart.');
+  const report={version:3,architecture:state.architecture,ranAt:new Date().toISOString(),gateway:GATEWAY,repository:local.REPOSITORY,project:PROJECT,fixturePrefix:state.prefix,processBefore:state.processBefore,processAfter,lostCompletedBodies:state.operations.filter(row=>row.lost).length,initialCount:state.initialCount,checks:[],cleanup:[],passed:false,
+    limitation:'Real completed HTTP bodies are consumed and discarded, then the managed Netlify CLI is restarted with its normal app Blobs preserved. This proves completed receipt/job durability; it does not inject an unknown upstream commit or recover an interrupted writer.'};
+  const api=client();let failure;
+  const record=(name,details={})=>{report.checks.push({name,...details,passed:true});console.log(JSON.stringify(report.checks.at(-1)));};
   try {
-    await assertGateway();
-    const db = new DatabaseSync(DATABASE, { readOnly: true });
-    try { for (const step of state.lost) { const row = db.prepare('SELECT state,result,plan_id FROM operations WHERE principal=? AND key=?').get(state.principal, step.key); assert.equal(row.state, 'pending'); assert.equal(row.result, null); assert.equal(row.plan_id, step.plan.id); } } finally { db.close(); }
-    for (const step of state.lost) {
-      const result = await apply(state, step.plan, step.key); assert.ok(result.completed.length && result.completed.every(item => item.replayed === true), 'Retry did not use durable application receipt recovery');
-      if (step.kind === 'create') assert.equal(result.completed[0].result.id, state.mediaId);
-      report.checks.push({ name: step.kind + ' lost-response replay recovers the committed application receipt', passed: true });
+    await assertApp(api);assert.ok(Date.now()<Date.parse(state.resumeBefore),'Resume before the saved stale plan expires to distinguish revision conflict from expiry.');
+    for(const step of state.operations.filter(row=>row.lost)) {
+      const original=await api.rawRequest('/jobs/'+step.jobId,{token:state.grant.token});
+      assert.equal(original.status,step.discarded.status);assert.equal(original.body.length,step.discarded.bytes);assert.equal(sha256(original.body),step.discarded.sha256);
+      const result=success(original);assert.equal(result.ok,true);
+      if(step.kind==='create')assert.equal(result.completed[0].result.id,state.mediaId);
+      if(step.kind==='delete'){assert.equal(result.completed[0].result.id,state.deletedId);assert.equal(result.completed[0].result.deleted,true);}
+      const replay=await request(api,state,'/plans/'+step.plan.id+'/apply',{method:'POST',body:{},idempotencyKey:step.key});assert.equal(replay.status,original.status);assert.equal(sha256(replay.body),step.discarded.sha256);
+      record(step.kind+' original job and original plan/key return the exact discarded durable receipt',{jobId:step.jobId});
     }
-    for (const fixture of state.fixtures) { const current = await read(state, fixture.id); assert.equal(current.revision, state.baseline[fixture.id].revision); assert.equal(current.Name, state.baseline[fixture.id].name); }
-    const entries = await list(state); assert.equal(entries.length, 2); assert.equal(new Set(entries.map(entry => entry.Id)).size, 2); assert.ok(entries.every(entry => referenceId(entry.MediaItem) === state.mediaId));
-    assert.equal((await read(state, state.entryIds[0])).Notes, 'Notes survive lost response and gateway restart'); assert.equal((await read(state, state.entryIds[0])).Position, 2); assert.equal((await read(state, state.entryIds[1])).Position, 1);
-    const oldName = state.reservations.find(reservation => reservation.type === 'MediaItem').path;
-    assert.equal((await local.request(local.endpoint(oldName), { account: local.readAccounts().admin })).status, 404);
-    assert.equal(await sourceCount(), state.initialCount + state.fixtures.length);
-    report.checks.push({ name: 'Create rename is preserved; two occurrences retain one media ID; update/order retries cause zero new saves', passed: true });
-    const stale = await request('plans/'+state.stalePlan.id+'/apply',{method:'POST',token:state.grant.token,headers:{'Idempotency-Key':randomUUID()},body:{}});
-    assert.equal(stale.status,409);assert.equal(stale.value.error.code,'revision_conflict');assert.equal((await read(state,state.entryIds[1])).Notes,'Competing coordinated application edit survives restart');
-    report.checks.push({name:'A stale saved edit fails after restart and preserves the competing application writer',passed:true});
-  } catch (error) { failure = error; report.error = error.message; }
-  try {
-    report.cleanup = await cleanup(state); report.finalCount = await sourceCount();
-    report.cleanupFallbacks = report.cleanup.filter(item => item.fallback).length;
-    if (report.cleanupFallbacks) { failure ??= new Error('Restart smoke needed privileged cleanup fallback'); report.error ??= failure.message; }
-    state.phase = failure ? 'cleaned' : 'completed'; state.processAfter = processAfter; saveState(state);
-  } catch (error) { failure ??= error; report.error ??= error.message; state.phase = 'cleanup_failed'; saveState(state); }
-  report.passed = !failure; fs.writeFileSync(REPORT, JSON.stringify(report, null, 2));
-  console.log(JSON.stringify({ passed: report.passed, checks: report.checks.length, actualGatewayRestart: true, ledgerRowsReset: state.rowsReset, cleanupFallbacks: report.cleanupFallbacks, sourceCountBefore: report.initialCount, sourceCountAfter: report.finalCount }));
-  if (failure) throw failure;
-  return report;
+    for(const fixture of state.fixtures.filter(row=>!row.deleted)){const current=own(state,await read(api,state,fixture.id));assert.equal(current.revision,state.baseline[fixture.id].revision);assert.equal(current.Name,state.baseline[fixture.id].name);assert.equal(current.Path,state.baseline[fixture.id].path);}
+    await assert.rejects(read(api,state,state.deletedId),error=>error.status===404);
+    const entries=await list(api,state);assert.equal(entries.length,2);assert.equal(new Set(entries.map(row=>row.Id)).size,2);assert.ok(entries.every(row=>referenceId(row.MediaItem)===state.mediaId));
+    assert.equal((await read(api,state,state.entryIds[0])).Notes,'Notes survive discarded job response and Netlify restart');assert.equal((await read(api,state,state.entryIds[0])).Position,2);assert.equal((await read(api,state,state.entryIds[1])).Position,1);
+    const oldMediaPath=state.reservations.find(row=>row.type==='MediaItem'&&row.name===state.prefix+'-media').path;await assert.rejects(lookup(api,state,oldMediaPath),error=>error.status===404);
+    assert.equal(await sourceCount(),SOURCE_COUNT+4);
+    record('One creation retains its renamed ID; revisions, two shared-media occurrences, order and deletion remain unchanged');
+    const stale=await request(api,state,'/plans/'+state.stale.plan.id+'/apply',{method:'POST',body:{},idempotencyKey:state.stale.key});assert.equal(stale.status,409);assert.equal(stale.value?.error?.code,'revision_conflict');
+    assert.equal((await read(api,state,state.entryIds[1])).Notes,'Competing app update survives Netlify restart');
+    record('Saved stale revision fails after restart with 409 and preserves the competing app update');
+  }catch(error){failure=error;report.error=errorInfo(error);}
+  try{report.cleanup=await cleanup(state);report.finalCount=await sourceCount();assert.equal(report.finalCount,SOURCE_COUNT);state.phase=failure?'cleaned':'completed';state.processAfter=processAfter;saveState(state);}
+  catch(error){failure ||= error;report.cleanupError=errorInfo(error);state.phase='cleanup_failed';saveState(state);}
+  report.passed=!failure;fs.writeFileSync(REPORT,JSON.stringify(report,null,2));
+  console.log(JSON.stringify({passed:report.passed,checks:report.checks.length,actualManagedAppRestart:true,lostCompletedBodies:report.lostCompletedBodies,cleaned:report.cleanup.length,sourceCountBefore:report.initialCount,sourceCountAfter:report.finalCount,report:REPORT}));
+  if(failure)throw new Error('Netlify app restart acceptance failed; inspect the sanitized report and retained private state.');return report;
 }
-
 async function main() {
-  const args = process.argv.slice(2); const phase = args[0]; const index = args.indexOf('--gateway-pid');
-  if (!['--prepare', '--resume', '--cleanup', '--pending'].includes(phase) || args.some((value, i) => i > 0 && value !== '--gateway-pid' && i !== index + 1)) throw new Error('Use --prepare or --resume --gateway-pid <tracked PID>, --pending, or --cleanup');
-  const pid = index >= 0 ? Number(args[index + 1]) : undefined;
-  if (phase === '--prepare') await prepare(pid);
-  else if (phase === '--resume') await resume(pid);
-  else if (phase === '--pending') await pendingRecovery();
-  else { const state = loadState(); const result = await cleanup(state); state.phase = 'cleaned'; saveState(state); console.log(JSON.stringify({ phase: state.phase, cleaned: result.length, cleanupFallbacks: result.filter(item => item.fallback).length })); }
+  const args=process.argv.slice(2),phase=args[0];
+  if(phase==='--cleanup'&&args.length===1){const rows=await cleanup();console.log(JSON.stringify({phase:'cleaned',cleaned:rows.length,sourceCount:SOURCE_COUNT}));return;}
+  if(!['--prepare','--resume'].includes(phase)||args.length!==3||!['--app-pid','--gateway-pid'].includes(args[1])||!/^\d+$/.test(args[2]))throw new Error('Use --prepare or --resume --app-pid <managed Netlify CLI Node PID>, or --cleanup.');
+  if(phase==='--prepare')await prepare(Number(args[2]));else await resume(Number(args[2]));
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(error=>{console.error(error.code||'netlify_restart_failed');process.exitCode=1;});

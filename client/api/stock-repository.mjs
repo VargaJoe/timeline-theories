@@ -1,7 +1,7 @@
 import https from 'node:https';
 import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from './repository.mjs';
-import { DomainError, TYPES, FIELDS, assertId, assertMembership, safeName, validateFields } from '../client/domain/content.mjs';
+import { DomainError, TYPES, FIELDS, assertId, assertMembership, safeName, validateFields } from '../domain/content.mjs';
 
 const HEADERS = ['Id', 'ParentId', 'Name', 'Path', 'Type'];
 const STAMPS = ['CreationDate', 'CreatedById', 'ModificationDate', 'ModifiedById', 'Version', 'VersionId'];
@@ -25,15 +25,17 @@ export class StockRepository extends Repository {
   }
 
   async request(url, { method = 'GET', body, headers: extraHeaders = {}, maxBytes = 20 * 1024 * 1024 } = {}) {
+    if (this.config.signal?.aborted) fail('function_deadline', 'The app invocation deadline expired before dispatch.', 409);
     const target = new URL(url);
     if (target.origin !== this.config.repositoryUrl || target.username || target.password) fail('repository_mismatch', 'Repository origin mismatch.', 403);
     if (Object.keys(extraHeaders).some(key => ['authorization', 'apikey', 'host'].includes(key.toLowerCase()))) fail('invalid_headers', 'Repository credentials cannot be overridden.');
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method.toUpperCase()) && this.beforeWrite) await this.beforeWrite();
+    if (this.config.signal?.aborted) fail('function_deadline', 'The app invocation deadline expired before dispatch.', 409);
     const headers = { Accept: 'application/json', ...extraHeaders, ...(this.credential ? { [this.credential.mode === 'ApiKey' ? 'ApiKey' : 'Authorization']: this.credential.mode === 'ApiKey' ? this.credential.value : 'Bearer ' + this.credential.value } : {}) };
     if (body !== undefined && !Buffer.isBuffer(body) && typeof body !== 'string') { body = JSON.stringify(body); headers['Content-Type'] = 'application/json'; }
     if (body !== undefined) headers['Content-Length'] = Buffer.byteLength(body);
     return new Promise((resolve, reject) => {
-      const req = https.request(target, { method, headers, ...(this.config.ca ? { ca: this.config.ca } : {}) }, res => {
+      const req = https.request(target, { method, headers, signal: this.config.signal, ...(this.config.ca ? { ca: this.config.ca } : {}) }, res => {
         const parts = []; let length = 0;
         res.on('data', part => { length += part.length; if (length > maxBytes) req.destroy(new DomainError('repository_limit', 'Repository response exceeds the byte limit.', 502)); else parts.push(part); });
         res.on('error', () => reject(new DomainError('repository_transport', 'Repository response was interrupted.', 502)));

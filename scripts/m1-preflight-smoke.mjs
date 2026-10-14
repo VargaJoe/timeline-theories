@@ -5,28 +5,33 @@ import https from 'node:https';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { followNativeResponse } from './m1-client.mjs';
 
 const require = createRequire(import.meta.url), local = require('./m0-local-api.cjs');
-const GATEWAY = 'https://localhost:8081', PROJECT = '/Root/Content/timelines';
+const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines';
 const BINDING = { 'X-Timeline-Repository': local.REPOSITORY, 'X-Timeline-Authority': local.AUTHORITY, 'X-Timeline-Project': PROJECT };
 const SCOPES = ['content:read', 'timelines:write', 'media:write', 'entries:write', 'metadata:write'];
 const REPORT = path.join(local.ROOT, 'm1-preflight-report.json');
 
-function request(route, { method = 'GET', token, owner = false, body } = {}) {
-  const url = new URL('/api/v1/' + route, GATEWAY);
+function rawRequest(route, { method = 'GET', token, owner = false, body, idempotencyKey } = {}) {
+  const url = new URL('/api/v1/' + route.replace(/^\//, ''), GATEWAY);
   assert.equal(url.origin, GATEWAY); assert.ok(url.pathname.startsWith('/api/v1/'));
   const bytes = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
-  const headers = { ...BINDING, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(owner ? { 'X-Timeline-Backend-Auth': 'ApiKey' } : {}), ...(bytes ? { 'Content-Type': 'application/json', 'Content-Length': String(bytes.length) } : {}) };
+  const headers = { ...BINDING, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(owner ? { 'X-Timeline-Backend-Auth': 'ApiKey' } : {}), ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}), ...(bytes ? { 'Content-Type': 'application/json', 'Content-Length': String(bytes.length) } : {}) };
   return new Promise((resolve, reject) => {
     const req = https.request(url, { method, headers, ca: fs.readFileSync(path.join(local.ROOT, 'certificates/localhost.pem')) }, res => {
       const chunks = []; let size = 0;
       res.on('data', chunk => { size += chunk.length; if (size > 4 * 1024 * 1024) req.destroy(new Error('Preflight response exceeded the local test limit')); else chunks.push(chunk); });
-      res.on('end', () => { let value; try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { value = null; } resolve({ status: res.statusCode, value }); });
+      res.on('end', () => { const body = Buffer.concat(chunks); let value; try { value = JSON.parse(body.toString('utf8')); } catch { value = null; } resolve({ status: res.statusCode, headers: res.headers, body, value }); });
       res.on('error', () => reject(new Error('Preflight HTTP response was interrupted')));
     });
     req.setTimeout(60000, () => req.destroy(new Error('Preflight local HTTPS request timed out')));
     req.on('error', reject); req.end(bytes);
   });
+}
+async function request(route, options = {}) {
+  const auth = { token: options.token, owner: options.owner };
+  return followNativeResponse(await rawRequest(route, options), (nextRoute, nextOptions) => rawRequest(nextRoute, { ...nextOptions, ...auth }));
 }
 const success = response => {
   if (response.status < 200 || response.status >= 300) throw new Error('Preflight HTTPS ' + response.status + ': ' + (response.value?.error?.code || 'unexpected_response'));
@@ -52,13 +57,7 @@ export async function smoke() {
   const applyResponse = async plan => {
     // Idempotency keys are generated only for this owned plan; requests remain
     // an independent HTTPS client rather than direct planner invocations.
-    const url = new URL('/api/v1/plans/' + plan.id + '/apply', GATEWAY), bytes = Buffer.from('{}');
-    return new Promise((resolve, reject) => {
-      const req = https.request(url, { method: 'POST', ca: fs.readFileSync(path.join(local.ROOT, 'certificates/localhost.pem')), headers: { ...BINDING, Authorization: 'Bearer ' + editor.token, 'Idempotency-Key': randomUUID(), 'Content-Type': 'application/json', 'Content-Length': String(bytes.length) } }, res => {
-        const chunks = []; res.on('data', chunk => chunks.push(chunk)); res.on('end', () => { let value; try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { value = null; } resolve({ status: res.statusCode, value }); });
-      });
-      req.setTimeout(60000, () => req.destroy(new Error('Preflight local apply timed out'))); req.on('error', reject); req.end(bytes);
-    });
+    return request('plans/' + plan.id + '/apply', { method: 'POST', token: editor.token, idempotencyKey: randomUUID(), body: {} });
   };
   const apply = async plan => { const value = success(await applyResponse(plan)); assert.equal(value.ok, true); return value; };
   const create = async (type, suffix, fields = {}, parentId) => {

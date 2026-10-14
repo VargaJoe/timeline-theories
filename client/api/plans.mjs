@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { DomainError, assertObject, assertId, TYPES, validateFields, fieldDiff, metadataDiff } from '../client/domain/content.mjs';
+import { DomainError, assertObject, assertId, TYPES, validateFields, fieldDiff, metadataDiff } from '../domain/content.mjs';
 import { hash } from './store.mjs';
 
 const scopes = { Timeline: 'timelines:write', MediaItem: 'media:write', BookMediaItem: 'media:write', TimelineEntry: 'entries:write' };
@@ -9,6 +9,28 @@ export function requireScope(context, scope) {
 export function revision(content) {
   if (typeof content.revision !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(content.revision)) throw new DomainError('backend_revision_unavailable', 'The coordinated application snapshot revision is unavailable.', 503);
   return content.revision;
+}
+// Stored receipts are private, but current Open rights still apply when a
+// caller retrieves them later. Confirmed deleted IDs use their surviving
+// application folder; they cannot be read as existing content again.
+export async function receiptTargets(context, plan, result) {
+  const deleted = new Set(), targets = new Set();
+  for (const item of result.completed || []) {
+    const step = plan.steps[item.index];
+    if (step?.payload.action === 'delete') {
+      deleted.add(step.payload.targetId);
+      for (const entry of step.payload.entries || []) deleted.add(entry.id);
+    }
+    if (item.result?.id && !item.result.deleted) targets.add(item.result.id);
+    for (const entry of item.result?.completed || []) if (entry.id && !entry.deleted) targets.add(entry.id);
+  }
+  for (const step of plan.steps) {
+    const folder = step.payload.type === 'Timeline' || step.payload.type === 'TimelineEntry' ? context.repo.paths.timelines : context.repo.paths.media;
+    targets.add((await context.repo.read(folder,{parent:true})).Id);
+  }
+  for (const id of deleted) targets.delete(id);
+  await context.check(); await context.repo.assert([...targets].map(target=>({target,action:'read'}))); await context.check();
+  return [...targets];
 }
 export async function preview(context, input, store) {
   assertObject(input);
@@ -115,7 +137,7 @@ export async function preview(context, input, store) {
   }
   await context.check(); await repo.assert(allOperations); await context.check();
   const plan = { id: randomUUID(), principal: context.principal, requestHash: hash(input), expires: Date.now() + 15 * 60 * 1000, steps, targets: [...new Set(targets)], diff: diffs, effects };
-  store.savePlan(plan);
+  await store.savePlan(plan);
   return publicPlan(plan);
 }
 
@@ -131,10 +153,10 @@ function publicPlan(plan) {
   return { id: plan.id, requestHash: plan.requestHash, expiresAt: new Date(plan.expires).toISOString(), targets: plan.targets, diff: plan.diff, effects: plan.effects, counts: { commands: plan.steps.length, targets: plan.targets.length, changedFields: plan.diff.reduce((n,d) => n + d.fields.length, 0) }, repositoryWrites: 0 };
 }
 export async function apply(context, id, key, store) {
-  const plan = store.plan(id, context.principal); await context.check();
-  const previous = store.reserve(context.principal, key, plan);
-  if (previous) return previous;
-  context.journal.assertRecoveryBoundary(plan.steps.map(step=>step.payload.operationId));
+  const plan = await store.plan(id, context.principal); await context.check();
+  const previous = await store.reserve(context.principal, key, plan);
+  if (previous) { await receiptTargets(context,plan,previous); return previous; }
+  await context.journal.assertRecoveryBoundary(plan.steps.map(step=>step.payload.operationId));
   const receipts = new Map();
   for (const [index, step] of plan.steps.entries()) {
     await context.check();
@@ -191,12 +213,12 @@ export async function apply(context, id, key, store) {
       notApplied.push(...plan.steps.slice(index).map((s,offset) => ({ index: index + offset, operationId: s.payload.operationId, targetId: s.payload.targetId ?? s.payload.parentId })));
       const touchedIds=completed.flatMap(c=>c.result.id?[c.result.id]:Array.isArray(c.result.completed)?c.result.completed.map(e=>e.id):[]);
       const pendingTargets=plan.steps.slice(index).flatMap(s=>s.payload.action==='order'?s.payload.entries.map(e=>e.id):[s.payload.targetId??s.payload.parentId]);
-      const uncertain=error.details?.uncertain===true || context.journal.isPending(step.payload);
+      const uncertain=error.details?.uncertain===true || await context.journal.isPending(step.payload);
       const result = { ok: false, planId: id, completed, touchedIds, notApplied, notAppliedTargets:[...new Set(pendingTargets.filter(id=>!touchedIds.includes(id)))], error: { code: error.code || 'backend_failure', message: error instanceof DomainError?error.message:'Repository mutation failed.',status:error.status||502 }, conflicted: error.status === 409 ? [error.details?.failedId ?? step.payload.targetId ?? step.payload.parentId] : [], ...(uncertain?{retrySamePlan:true,uncertainTargets:[step.payload.targetId??step.payload.parentId]}:{}) };
-      if(!uncertain)store.finish(context.principal, key, result);
-      store.audit(context.principal, 'apply', uncertain?'uncertain':completed.length ? 'partial' : 'denied', plan.targets); return result;
+      if(!uncertain)await store.finish(context.principal, key, result);
+      await store.audit(context.principal, 'apply', uncertain?'uncertain':completed.length ? 'partial' : 'denied', plan.targets); return result;
     }
   }
   const result = { ok: true, planId: id, completed, touchedIds:completed.flatMap(c=>c.result.id?[c.result.id]:Array.isArray(c.result.completed)?c.result.completed.map(e=>e.id):[]), notApplied: [], notAppliedTargets:[], conflicted: [] };
-  store.finish(context.principal, key, result); store.audit(context.principal, 'apply', 'completed', plan.targets); return result;
+  await store.finish(context.principal, key, result); await store.audit(context.principal, 'apply', 'completed', plan.targets); return result;
 }

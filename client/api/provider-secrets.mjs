@@ -1,7 +1,5 @@
-import { createRequire } from 'node:module';
 import { Repository } from './repository.mjs';
-import { DomainError } from '../client/domain/content.mjs';
-const require=createRequire(import.meta.url);
+import { DomainError } from '../domain/content.mjs';
 const defaults={omdb:'/(structure)/apikeys/omdb',tmdb:'/(structure)/apikeys/tmdb',trakt:'/(structure)/apikeys/trakt'};
 export function configuredKeyPaths(env=process.env) {
   const paths={};
@@ -11,14 +9,6 @@ export function configuredKeyPaths(env=process.env) {
     paths[name]=value;
   }
   return paths;
-}
-/** Explicit test-only secret reader: three GETs to Joe's configured production
- * key store. This credential is never used for application content operations. */
-export async function productionReadOnlyKeySource() {
-  const {loadConfiguredMcp,PRODUCTION_URL}=require('../scripts/m0-snapshot.cjs');
-  const configured=await loadConfiguredMcp();
-  const repositoryUrl=new URL(PRODUCTION_URL).origin;
-  return {repositoryUrl,projectRoot:'/Root/Content/timelines',credential:{mode:'ApiKey',value:configured.apiKey},label:'explicit production read-only provider secret source'};
 }
 export async function resolveProviderKeys(context,config,operation,input,beforeFetch) {
   const keys={omdb:process.env.OMDB_API_KEY,tmdb:process.env.TMDB_API_KEY,trakt:process.env.TRAKT_API_KEY,googlebooks:process.env.GOOGLE_BOOKS_API_KEY};

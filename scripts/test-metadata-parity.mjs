@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import ts from '../client/node_modules/typescript/lib/typescript.js';
-import { createProviderService } from '../server/providers.mjs';
+import { createProviderService } from '../client/api/providers.mjs';
 
 // Contract tests exercise the real shared domain and browser service; external effects are injected.
 const root = new URL('../', import.meta.url);

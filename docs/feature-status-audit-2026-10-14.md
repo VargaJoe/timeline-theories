@@ -1,6 +1,6 @@
 # Timeline Theories — funkció- és dokumentációaudit
 
-M1 implementációs kiegészítés: a natív `/api/v1` és közös UI gateway a feature branchben elkészült; aktuális működés/telepítés/korlátok: [M1 API](m1-native-api.md), tényleges elfogadási bizonyíték: [M1 verification](m1-verification.md). Az alábbi audit a kiinduló develop állapotát őrzi meg, nem production deploy státusz.
+M1 implementációs kiegészítés: a natív `/api/v1` ugyanazon Netlify app Functions végpontjaiban fut; a tartalmak továbbra is a különálló SenseNet repositoryban vannak. A privát grant/terv/nyugta állapotot az app Blobs tárolója kezeli. A feature branch integrációs ellenőrzése folyamatban; működés és korlátok: [M1 API](m1-native-api.md), ellenőrzési bizonyíték: [M1 verification](m1-verification.md). Az alábbi audit a kiinduló develop állapotát őrzi meg, nem production deploy státusz.
 
 2026-10-14. Forrás: kanonikus checkout, develop `f53774acbc586f382d999e339bdb1b00d7f1d951`, Stories 01–32, M0 bizonyítékok és Joe aktuális visszajelzése. Ez forrásaudit és a meglevő tesztbizonyíték egyeztetése; minden korábbi funkció teljes production újratesztelése nem történt.
 

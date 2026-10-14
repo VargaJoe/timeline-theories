@@ -1,7 +1,7 @@
 import https from 'node:https';
 import dns from 'node:dns/promises';
 import net from 'node:net';
-import { DomainError, validatePublicUrl } from '../client/domain/content.mjs';
+import { DomainError, validatePublicUrl } from '../domain/content.mjs';
 export const DEFAULT_COVER_ORIGINS = ['https://image.tmdb.org','https://covers.openlibrary.org','https://books.google.com','https://m.media-amazon.com','https://images-na.ssl-images-amazon.com'];
 export function coverOrigins(extra = '') {
   const origins=new Set(DEFAULT_COVER_ORIGINS);

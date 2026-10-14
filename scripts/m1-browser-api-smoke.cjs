@@ -6,11 +6,39 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const local = require('./m0-local-api.cjs');
-const FRONTEND = 'https://localhost:8080', GATEWAY = 'https://localhost:8081', PROJECT = '/Root/Content/timelines';
+const FRONTEND = 'https://localhost:8080', GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines';
 const SCOPES = ['content:read', 'timelines:write', 'media:write', 'entries:write', 'covers:write', 'metadata:write', 'providers:read', 'exchange:read', 'exchange:write'];
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII=','base64');
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const reference = value => Array.isArray(value) ? reference(value[0]) : value && typeof value === 'object' ? value.Id : value;
+
+/** Observe the app's own poll, retaining the original logged-in browser flow.
+ * Install the listener before the action so even a fast job cannot be missed. */
+async function waitForBrowserCompletion(page, predicate, timeout = 15 * 60 * 1000) {
+  const completed = new Map(); let jobId, resolveFinal, rejectFinal, timer;
+  const onResponse = response => {
+    const url = new URL(response.url()), match = url.pathname.match(/^\/api\/v1\/jobs\/([0-9a-f-]{36})$/i);
+    if (url.origin !== FRONTEND || response.request().method() !== 'GET' || !match || response.status() === 202) return;
+    completed.set(match[1], response);
+    if (match[1] === jobId && resolveFinal) resolveFinal(response);
+  };
+  const onClose = () => rejectFinal?.(new Error('Browser closed before its background job completed.'));
+  page.on('response', onResponse); page.on('close', onClose);
+  try {
+    const acknowledgement = await page.waitForResponse(predicate, { timeout });
+    if (acknowledgement.status() !== 202) return { acknowledgement, response: acknowledgement };
+    const value = await acknowledgement.json();
+    assert.equal(value.pending, true, 'HTTP 202 must identify pending work.');
+    assert.match(value.job?.id || '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    jobId = value.job.id;
+    const response = completed.get(jobId) || await new Promise((resolve, reject) => {
+      resolveFinal = resolve; rejectFinal = reject;
+      timer = setTimeout(() => reject(new Error('The original browser background job did not finish within the test budget.')), timeout);
+      if (page.isClosed()) onClose();
+    });
+    return { acknowledgement, response, jobId };
+  } finally { clearTimeout(timer); page.off('response', onResponse); page.off('close', onClose); }
+}
 
 async function smoke() {
   assert.equal(local.REPOSITORY, 'https://localhost:41016'); assert.equal(local.AUTHORITY, 'https://localhost:41017');
@@ -141,9 +169,10 @@ async function smoke() {
     await page.getByTitle('Edit Entry', { exact: true }).first().click();
     assert.equal(await page.getByPlaceholder('Optional notes about this entry...').inputValue(), 'API occurrence one');
     await page.getByPlaceholder('Optional notes about this entry...').fill(notes);
-    const appliedResponse = page.waitForResponse(response => response.request().method() === 'POST' && /^\/api\/v1\/plans\/[^/]+\/apply$/.test(new URL(response.url()).pathname));
+    const appliedResponse = waitForBrowserCompletion(page, response => response.request().method() === 'POST' && /^\/api\/v1\/plans\/[^/]+\/apply$/.test(new URL(response.url()).pathname));
     await page.getByRole('button', { name: 'Save Changes', exact: true }).click();
-    const response = await appliedResponse; assert.equal(response.status(), 200);
+    const applied = await appliedResponse; assert.equal(applied.acknowledgement.status(), 202); assert.ok(applied.jobId);
+    const response = applied.response; assert.equal(response.status(), 200);
     const receipt = await response.json(); assert.equal(receipt.ok, true); assert.equal(receipt.completed[0].result.id, first.Id);
     await page.getByRole('heading', { name: 'Edit Timeline Entry', exact: true }).waitFor({ state: 'hidden' });
     assert.equal(nativeApplies.length, applyMark + 1); assert.equal(rawMutations.length, 0);
@@ -151,7 +180,7 @@ async function smoke() {
     const changed = await read(first.Id), untouched = await read(second.Id), backend = await rawRead(first.Id);
     assert.equal(changed.Notes, notes); assert.equal(backend.Notes, notes); assert.equal(untouched.Notes, 'API occurrence two');
     assert.notEqual(changed.revision, first.revision); assert.equal(reference(changed.MediaItem), media.Id); assert.equal(reference(untouched.MediaItem), media.Id);
-    record('UI note edit uses one native apply, persists in the independent repository and leaves the second occurrence distinct', { targetId: first.Id, nativeApplyPosts: nativeApplies.length - applyMark, rawRepositoryMutations: rawMutations.length });
+    record('UI note edit uses one native apply, persists in the independent repository and leaves the second occurrence distinct', { targetId: first.Id, nativeApplyPosts: nativeApplies.length - applyMark, enqueueStatus: applied.acknowledgement.status(), jobId: applied.jobId, completedStatus: response.status(), rawRepositoryMutations: rawMutations.length });
 
     await assert.rejects(native.request('/plans/' + stalePlan.id + '/apply', { method: 'POST', token: grant.token, body: {}, idempotencyKey: crypto.randomUUID() }), error => error.status === 409 && error.code === 'revision_conflict');
     assert.equal((await read(first.Id)).Notes, notes); assert.equal((await rawRead(first.Id)).Notes, notes);
@@ -167,14 +196,15 @@ async function smoke() {
     await page.evaluate(async ({ moduleUrl, target }) => (await import(moduleUrl)).nativeSnapshot(target, { refresh: true }), { moduleUrl: nativeModule, target: first.Id });
     const staleUiApplyMark = nativeApplies.length;
     await page.getByPlaceholder('Optional notes about this entry...').fill('Stale UI notes must never overwrite the independent client');
-    const conflictResponse = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/v1/plans');
+    const conflictResponse = waitForBrowserCompletion(page, response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/v1/plans');
     await page.getByRole('button', { name: 'Save Changes', exact: true }).click();
-    const rejected = await conflictResponse; assert.equal(rejected.status(), 409); assert.equal((await rejected.json()).error.code, 'revision_conflict');
+    const conflicted = await conflictResponse; assert.equal(conflicted.acknowledgement.status(), 202); assert.ok(conflicted.jobId);
+    const rejected = conflicted.response; assert.equal(rejected.status(), 409); assert.equal((await rejected.json()).error.code, 'revision_conflict');
     await modal().getByText('Target changed; reload and preview again.', { exact: true }).waitFor();
     assert.equal(nativeApplies.length, staleUiApplyMark); assert.equal(rawMutations.length, 0);
     assert.equal((await read(first.Id)).Notes, concurrentNotes); assert.equal((await rawRead(first.Id)).Notes, concurrentNotes);
     await modal().getByRole('button', { name: 'Cancel', exact: true }).click(); await reloadTimeline();
-    record('An unrelated browser cache refresh cannot replace the open editor revision or overwrite a newer native save', { status: 409, targetId: first.Id, browserApplyPosts: 0, rawRepositoryMutations: 0 });
+    record('An unrelated browser cache refresh cannot replace the open editor revision or overwrite a newer native save', { status: 409, enqueueStatus: conflicted.acknowledgement.status(), jobId: conflicted.jobId, targetId: first.Id, browserApplyPosts: 0, rawRepositoryMutations: 0 });
 
     const reorderMark = nativeApplies.length;
     await page.getByTitle('Reorder Entries', { exact: true }).click();

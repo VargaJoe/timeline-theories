@@ -26,6 +26,8 @@ export class NativeApiError extends Error {
   readonly retryAfter?: number;
   applyResult?: NativeApplyResult;
   transportFailure?: boolean;
+  jobId?: string;
+  recoverable?: boolean;
   constructor(message: string, status: number, code: string, source?: string, retryAfter?: number) {
     super(message); this.name = 'NativeApiError'; this.status = status; this.code = code;
     this.source = source; this.retryAfter = retryAfter;
@@ -37,17 +39,31 @@ let identity = '';
 const snapshots = new Map<number, NativeSnapshot>();
 const targets = new Map<string, number>();
 const pending = new Map<string, { planId: string; key: string }>();
-const nativeBase = import.meta.env.VITE_NATIVE_API_URL || '/api/v1';
+const activeJobs = new Map<string, { identity: string; headers: Headers }>();
+const CHUNK_BYTES = 2 * 1024 * 1024;
+const INLINE_BYTES = 3 * 1024 * 1024;
+const JSON_BYTES = 4 * 1024 * 1024;
+const MAX_TRANSFER_BYTES = 64 * 1024 * 1024;
+const generatedId = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const nativeBase = '/api/v1';
 export interface NativeGatewayAvailability { ready: boolean; writable: boolean; error?: NativeApiError; }
 let gatewayAvailability: { identity: string; expires: number; value: NativeGatewayAvailability } | undefined;
 let gatewayDiscovery: { identity: string; promise: Promise<NativeGatewayAvailability> } | undefined;
 let writeReadinessExpires = 0;
 
 export function configureNativeAuth(provider: () => string | undefined): void { getToken = provider; invalidateNativeSnapshots(); }
-export function invalidateNativeSnapshots(): void { snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; identity = ''; }
+function cancelActiveJobs(): void {
+  for (const [id, job] of activeJobs) {
+    // Retain the original token and binding: a new identity cannot cancel an old caller's job.
+    const headers = new Headers(job.headers); headers.set('Content-Type', 'application/json');
+    void fetch(nativeUrl(`/jobs/${id}/cancel`), { method: 'POST', body: '{}', headers, credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) }).catch(() => {});
+  }
+  activeJobs.clear();
+}
+export function invalidateNativeSnapshots(): void { cancelActiveJobs(); snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; identity = ''; }
 function currentIdentity(): string {
   const next = `${environment.repositoryUrl}\n${environment.projectRoot}\n${environment.authority}\n${getToken() || ''}`;
-  if (identity !== next) { snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; identity = next; }
+  if (identity !== next) { cancelActiveJobs(); snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; identity = next; }
   return next;
 }
 function nativeUrl(path: string): string {
@@ -81,11 +97,124 @@ function isNativeApplyResult(value: unknown): value is NativeApplyResult {
     Array.isArray(receipt[key]) && receipt[key].every(id => Number.isSafeInteger(id) && id > 0));
 }
 
+function assertNativeIdentity(subject: string): void {
+  if (currentIdentity() !== subject) throw new NativeApiError('The active repository identity changed during the request.', 409, 'identity_changed');
+}
+type SendNativeRoute = (route: string, init?: RequestInit) => Promise<Response>;
+async function responseJson(response: Response): Promise<Record<string, unknown>> {
+  let payload: unknown;
+  try { payload = await response.json(); } catch { throw new NativeApiError('The native gateway returned an invalid response.', 502, 'native_response_invalid'); }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new NativeApiError('The native gateway returned an invalid response.', 502, 'native_response_invalid');
+  return payload as Record<string, unknown>;
+}
+async function transferJson(send: SendNativeRoute, route: string, init: RequestInit): Promise<Record<string, unknown>> {
+  const response = await send(route, init), payload = await responseJson(response);
+  if (!response.ok) throw responseError(payload, response.status);
+  return payload;
+}
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const result = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer);
+  return Array.from(new Uint8Array(result), value => value.toString(16).padStart(2, '0')).join('');
+}
+function base64Bytes(value: unknown): Uint8Array {
+  if (typeof value !== 'string' || value.length > 14 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new NativeApiError('Invalid staged cover bytes.', 400, 'invalid_cover');
+  try { return Uint8Array.from(atob(value), character => character.charCodeAt(0)); }
+  catch { throw new NativeApiError('Invalid staged cover bytes.', 400, 'invalid_cover'); }
+}
+async function stageNativeUpload(send: SendNativeRoute, bytes: Uint8Array, input: Record<string, unknown>): Promise<string> {
+  if (bytes.length < 1 || bytes.length > (input.kind === 'cover' ? 10 * 1024 * 1024 : MAX_TRANSFER_BYTES)) throw new NativeApiError('Upload exceeds the application byte limit.', 413, 'native_payload_limit');
+  const sha = await sha256(bytes);
+  const initialized = await transferJson(send, '/uploads', { method: 'POST', body: JSON.stringify({ ...input, size: bytes.length, sha256: sha }), headers: { 'Content-Type': 'application/json' } });
+  const upload = initialized.upload as Record<string, unknown> | undefined;
+  if (!upload || !generatedId(upload.id) || upload.size !== bytes.length || upload.sha256 !== sha || upload.chunkSize !== CHUNK_BYTES || upload.chunks !== Math.ceil(bytes.length / CHUNK_BYTES)) throw new NativeApiError('The native gateway returned an invalid upload reservation.', 502, 'native_transfer_invalid');
+  for (let index = 0; index < Number(upload.chunks); index++) {
+    await transferJson(send, `/uploads/${upload.id}/chunks/${index}`, { method: 'POST', body: Uint8Array.from(bytes.subarray(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES)).buffer, headers: { 'Content-Type': 'application/octet-stream' } });
+  }
+  const completed = await transferJson(send, `/uploads/${upload.id}/complete`, { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+  const saved = completed.upload as Record<string, unknown> | undefined;
+  if (!saved || saved.id !== upload.id || saved.complete !== true || saved.size !== bytes.length || saved.sha256 !== sha) throw new NativeApiError('The native gateway returned an invalid completed upload.', 502, 'native_transfer_invalid');
+  return upload.id;
+}
+async function stageNativeInput(path: string, init: RequestInit, send: SendNativeRoute): Promise<RequestInit> {
+  if (/\/(?:api\/v1\/)?plans$/.test(path) && typeof init.body === 'string') {
+    let value: unknown; try { value = JSON.parse(init.body); } catch { return init; }
+    const input = value as { commands?: NativeCommand[] };
+    if (!input || !Array.isArray(input.commands)) return init;
+    const largeBatch = new TextEncoder().encode(init.body).byteLength > JSON_BYTES;
+    const commands: NativeCommand[] = [];
+    for (const command of input.commands) {
+      if (!command || typeof command !== 'object') { commands.push(command); continue; }
+      const cover = command.action === 'cover' ? command : command.action === 'metadata' ? command.cover as Record<string, unknown> | undefined : undefined;
+      if (!cover || typeof cover.bytesBase64 !== 'string' || (!largeBatch && cover.bytesBase64.length <= INLINE_BYTES)) { commands.push(command); continue; }
+      const bytes = base64Bytes(cover.bytesBase64);
+      const uploadId = await stageNativeUpload(send, bytes, { kind: 'cover', targetId: command.targetId, expectedRevision: command.expectedRevision, mimeType: cover.mimeType, fileName: cover.fileName || 'cover' });
+      const staged = { ...cover }; delete staged.bytesBase64;
+      commands.push(command.action === 'cover' ? { ...staged, action: command.action, uploadId } : { ...command, cover: { ...staged, uploadId } });
+    }
+    const body = JSON.stringify({ ...input, commands });
+    if (new TextEncoder().encode(body).byteLength > JSON_BYTES) throw new NativeApiError('The native plan JSON exceeds the wire limit.', 413, 'native_payload_limit');
+    return { ...init, body };
+  }
+  const zipTarget = path.match(/\/(?:api\/v1\/)?exchange\/(\d+)\/preview$/);
+  if (zipTarget && init.body && typeof init.body !== 'string') {
+    let bytes: Uint8Array | undefined;
+    if (init.body instanceof Blob) bytes = new Uint8Array(await init.body.arrayBuffer());
+    else if (init.body instanceof ArrayBuffer) bytes = new Uint8Array(init.body);
+    else if (ArrayBuffer.isView(init.body)) bytes = new Uint8Array(init.body.buffer, init.body.byteOffset, init.body.byteLength);
+    if (bytes && bytes.length > INLINE_BYTES) {
+      const uploadId = await stageNativeUpload(send, bytes, { kind: 'zip', targetId: Number(zipTarget[1]), mimeType: 'application/zip', fileName: 'timeline.zip' });
+      const headers = new Headers(init.headers); headers.set('Content-Type', 'application/json');
+      return { ...init, body: JSON.stringify({ uploadId }), headers };
+    }
+  }
+  return init;
+}
+async function followNativeBrowserResponse(initial: Response, send: SendNativeRoute, subject: string, originalHeaders: Headers): Promise<Response> {
+  let response = initial; const deadline = Date.now() + 15 * 60 * 1000; let jobId: string | undefined;
+  for (;;) {
+    assertNativeIdentity(subject);
+    const payload = response.headers.get('content-type')?.toLowerCase().includes('application/json') ? await responseJson(response.clone()) : undefined;
+    const job = payload?.job as Record<string, unknown> | undefined;
+    if (response.status === 202 && payload?.pending === true) {
+      if (!job || !generatedId(job.id) || jobId !== undefined && job.id !== jobId) throw new NativeApiError('The gateway returned an invalid pending job.', 502, 'native_job_invalid');
+      jobId = job.id; activeJobs.set(jobId, { identity: subject, headers: new Headers(originalHeaders) });
+      if (Date.now() >= deadline) {
+        const failure = new NativeApiError('The job is still pending. Retry the same saved plan and apply key to recover its receipt.', 504, 'native_job_pending');
+        failure.jobId = jobId; failure.recoverable = true; throw failure;
+      }
+      const retryAfter = Number(response.headers.get('retry-after') || 1);
+      const delay = Math.min(5000, Math.max(250, Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000));
+      await new Promise(resolve => setTimeout(resolve, delay)); assertNativeIdentity(subject);
+      try { response = await send(`/jobs/${jobId}`, { method: 'GET' }); }
+      catch (error) { if (error instanceof NativeApiError) { error.jobId = jobId; error.recoverable = true; } throw error; }
+      continue;
+    }
+    if (jobId) activeJobs.delete(jobId);
+    const download = payload?.download as Record<string, unknown> | undefined;
+    if (!download) return response;
+    const size = Number(download.size), chunkSize = Number(download.chunkSize), count = Number(download.chunks);
+    if (!generatedId(download.id) || !Number.isSafeInteger(size) || size < 1 || size > MAX_TRANSFER_BYTES || chunkSize !== CHUNK_BYTES || count !== Math.ceil(size / chunkSize) || typeof download.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(download.sha256) || download.status !== response.status || typeof download.contentType !== 'string') throw new NativeApiError('The native gateway returned an invalid download manifest.', 502, 'native_transfer_invalid');
+    const bytes = new Uint8Array(size);
+    for (let index = 0; index < count; index++) {
+      const part = await send(`/downloads/${download.id}/chunks/${index}`, { method: 'GET' });
+      if (!part.ok) throw responseError(await responseJson(part), part.status);
+      const chunk = new Uint8Array(await part.arrayBuffer()); assertNativeIdentity(subject);
+      if (chunk.length !== Math.min(chunkSize, size - index * chunkSize) || part.headers.get('x-content-sha256') !== await sha256(chunk)) throw new NativeApiError('Downloaded chunk failed integrity verification.', 502, 'native_transfer_integrity');
+      bytes.set(chunk, index * chunkSize);
+    }
+    if (await sha256(bytes) !== download.sha256) throw new NativeApiError('Downloaded bytes failed SHA-256 verification.', 502, 'native_transfer_integrity');
+    assertNativeIdentity(subject);
+    const headers = new Headers();
+    const original = download.headers as Record<string, string> | undefined;
+    for (const key of ['content-type','content-disposition','x-skipped-images','x-timeline-skipped-images','x-timeline-skipped-covers']) if (typeof original?.[key] === 'string') headers.set(key, original[key]);
+    headers.set('Content-Type', download.contentType); headers.set('Content-Length', String(size)); headers.set('Cache-Control', 'no-store');
+    return new Response(bytes, { status: response.status, headers });
+  }
+}
+
 /** Bearer and binding headers are supplied only to the configured gateway. */
 export async function nativeResponse(path: string, init: RequestInit = {}): Promise<Response> {
-  const startedIdentity = currentIdentity();
-  const token = getToken();
-  const headers = new Headers(init.headers);
+  const startedIdentity = currentIdentity(), token = getToken(), headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   headers.set('X-Timeline-Repository', environment.repositoryUrl);
   headers.set('X-Timeline-Project', environment.projectRoot);
@@ -93,21 +222,29 @@ export async function nativeResponse(path: string, init: RequestInit = {}): Prom
   // Same-origin GETs may omit Origin; this routes the session through actual backend token validation.
   headers.set('X-Timeline-Client-Origin', window.location.origin);
   if (token) headers.set('Authorization', `Bearer ${token}`); else headers.delete('Authorization');
-  if (!['GET', 'HEAD'].includes((init.method || 'GET').toUpperCase())) headers.set('Content-Type', 'application/json');
-  let response: Response;
-  try { response = await fetch(nativeUrl(path), { ...init, headers, credentials: 'omit', redirect: 'error' }); }
-  catch (error) {
-    if (error instanceof NativeApiError) throw error;
-    const failure = new NativeApiError('The native gateway is unavailable. Start the configured M1 gateway.', 503, 'native_gateway_unavailable');
-    // Browser fetch cannot distinguish DNS/TLS/CORS failures from an absent service. This is never read-fallback evidence.
-    failure.transportFailure = true;
-    throw failure;
-  }
-  if (currentIdentity() !== startedIdentity) throw new NativeApiError('The active repository identity changed during the request.', 409, 'identity_changed');
+  const send: SendNativeRoute = async (route, options = {}) => {
+    assertNativeIdentity(startedIdentity);
+    const requestHeaders = new Headers(headers);
+    for (const [key, value] of new Headers(options.headers)) requestHeaders.set(key, value);
+    for (const key of ['Authorization','X-Timeline-Repository','X-Timeline-Project','X-Timeline-Authority','X-Timeline-Client-Origin']) {
+      if (headers.has(key)) requestHeaders.set(key, headers.get(key)!); else requestHeaders.delete(key);
+    }
+    if (!['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase()) && !requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', 'application/json');
+    let result: Response;
+    try { result = await fetch(nativeUrl(route), { ...options, headers: requestHeaders, credentials: 'omit', redirect: 'error', signal: options.signal || AbortSignal.timeout(120000) }); }
+    catch (error) {
+      if (error instanceof NativeApiError) throw error;
+      const failure = new NativeApiError('The native gateway request failed. Recover an approved apply with the same saved plan and key.', 503, 'native_gateway_unavailable');
+      failure.transportFailure = true; throw failure;
+    }
+    assertNativeIdentity(startedIdentity); return result;
+  };
+  const staged = await stageNativeInput(path, init, send);
+  const response = await followNativeBrowserResponse(await send(path, staged), send, startedIdentity, headers);
   if (!response.ok) {
     let errorPayload: unknown;
     try { errorPayload = await response.json(); } catch { /* A failed transport may return a non-JSON error. */ }
-    if (currentIdentity() !== startedIdentity) throw new NativeApiError('The active repository identity changed during the request.', 409, 'identity_changed');
+    assertNativeIdentity(startedIdentity);
     throw responseError(errorPayload, response.status, /(?:^|\/)plans\/[A-Za-z0-9_-]+\/apply$/.test(path));
   }
   return response;
@@ -178,6 +315,14 @@ export async function nativeReadSidecarAvailable(): Promise<boolean> {
   if (canUseLegacyRead(availability.error)) return false;
   throw availability.error || new NativeApiError('The configured M1 gateway is required.', 503, 'native_gateway_unconfigured');
 }
+function nativeTarget(target: string | number): string | number {
+  if (typeof target === 'string' && /^\d+$/.test(target)) {
+    const id = Number(target);
+    if (!Number.isSafeInteger(id) || id < 1) throw new NativeApiError('The content ID is invalid.', 400, 'invalid_native_target');
+    return id;
+  }
+  return target;
+}
 export async function requireNativeWriteReadiness(target: string | number, parent = false): Promise<void> {
   const availability = await nativeGatewayAvailability();
   if (!availability.ready) throw availability.error || new NativeApiError('Editing requires the configured M1 gateway.', 503, 'native_gateway_unconfigured');
@@ -185,7 +330,7 @@ export async function requireNativeWriteReadiness(target: string | number, paren
   if (writeReadinessExpires > Date.now()) return;
   try {
     // Verify a same-caller repository snapshot through the application gateway. Do not refresh an editor's saved revision.
-    const snapshot = await nativeRequest<NativeSnapshot>('/lookup', { method: 'POST', body: JSON.stringify({ target, ...(parent ? { parent: true } : {}) }) });
+    const snapshot = await nativeRequest<NativeSnapshot>('/lookup', { method: 'POST', body: JSON.stringify({ target: nativeTarget(target), ...(parent ? { parent: true } : {}) }) });
     if (!cachedNativeSnapshot(target)) rememberNativeSnapshot(snapshot);
     writeReadinessExpires = Date.now() + 15000;
   } catch (caught) {
@@ -211,7 +356,7 @@ export function cachedNativeSnapshot(target: string | number): NativeSnapshot | 
 export async function nativeSnapshot(target: string | number, { parent = false, refresh = false } = {}): Promise<NativeSnapshot> {
   const cached = cachedNativeSnapshot(target);
   if (cached && !refresh) return cached;
-  const value = await nativeRequest<NativeSnapshot>('/lookup', { method: 'POST', body: JSON.stringify({ target, ...(parent ? { parent: true } : {}) }) });
+  const value = await nativeRequest<NativeSnapshot>('/lookup', { method: 'POST', body: JSON.stringify({ target: nativeTarget(target), ...(parent ? { parent: true } : {}) }) });
   rememberNativeSnapshot(value); targets.set(String(target), value.Id);
   return value;
 }

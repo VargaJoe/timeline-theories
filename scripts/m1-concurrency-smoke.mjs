@@ -2,96 +2,155 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { fork } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
-import { createClient } from './m1-client.mjs';
-const require=createRequire(import.meta.url), local=require('./m0-local-api.cjs');
-const PROJECT='/Root/Content/timelines', REPORT=path.join(local.ROOT,'m1-concurrency-report.json');
-const SCOPES=['content:read','media:write'];
-const timeout=(promise,ms,label)=>Promise.race([promise,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(new Error(label)),ms);timer.unref();})]);
+import { pathToFileURL } from 'node:url';
+import { createClient, followNativeResponse } from './m1-client.mjs';
 
-/** Only these two explicitly spawned worker processes are controlled by the harness. */
-async function worker(port,dataDir) {
-  assert.ok([8082,8083].includes(port));
-  const absolute=path.resolve(dataDir);assert.ok(absolute.startsWith(path.resolve(local.ROOT)+path.sep+'m1-concurrency-'));
-  const {Coordinator}=await import('../server/coordinator.mjs');
-  const originalRun=Coordinator.prototype.run;let arm=false, release;
-  Coordinator.prototype.run=function(action){return originalRun.call(this,async()=>{
-    if(arm){arm=false;process.send?.({type:'lockHeld',pid:process.pid});await new Promise(resolve=>{release=resolve;});release=undefined;}
-    return action();
-  });};
-  const {loadConfig}=await import('../server/config.mjs'),{createApp}=await import('../server/app.mjs');
-  const app=createApp({...loadConfig({local:true}),port,dataDir:absolute});
-  process.on('message',message=>{if(message?.type==='arm'){arm=true;process.send?.({type:'armed'});}if(message?.type==='release')release?.();if(message?.type==='stop'){release?.();app.server.close(()=>{app.coordinator?.close();app.store.close();process.exit(0);});}});
-  await new Promise((resolve,reject)=>{app.server.once('error',reject);app.server.listen(port,'127.0.0.1',resolve);});
-  process.send?.({type:'ready',pid:process.pid,port});
-}
-function waitMessage(child,type){return timeout(new Promise((resolve,reject)=>{
-  const onMessage=message=>{if(message?.type==='failed'){cleanup();reject(new Error('Owned worker startup failed'));}else if(message?.type===type){cleanup();resolve(message);}},onExit=()=>{cleanup();reject(new Error('Owned worker exited before '+type));};
-  const cleanup=()=>{child.off('message',onMessage);child.off('exit',onExit);};child.on('message',onMessage);child.on('exit',onExit);
-}),20000,'Owned worker did not reach '+type);}
-async function start(port,dataDir){const child=fork(fileURLToPath(import.meta.url),['--worker','--port',String(port),'--data-dir',dataDir],{cwd:path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),windowsHide:true,stdio:['ignore','ignore','ignore','ipc']});try{await waitMessage(child,'ready');return child;}catch(error){await stop(child);throw error;}}
-async function stop(child){if(!child||child.exitCode!==null)return;const exited=new Promise(resolve=>child.once('exit',resolve));if(child.connected)child.send({type:'stop'});else child.kill();try{await timeout(exited,5000,'Owned worker stop timeout');}catch{child.kill();await timeout(exited,5000,'Owned worker did not terminate');}}
-function createLocalClient(port){assert.ok([8082,8083].includes(port));return createClient({baseUrl:'https://localhost:'+port+'/api/v1',repository:local.REPOSITORY,authority:local.AUTHORITY,project:PROJECT,caFile:path.join(local.ROOT,'certificates/localhost.pem')});}
-async function count(){const response=await local.request(local.REPOSITORY+'/OData.svc/Root/Content?'+new URLSearchParams({query:'+InTree:'+PROJECT+' .AUTOFILTERS:OFF .LIFESPAN:OFF','$top':'0','$inlinecount':'allpages',metadata:'no'}),{account:local.readAccounts().admin});assert.equal(response.status,200);const value=Number(response.value.d.__count);assert.ok(Number.isSafeInteger(value));return value;}
-
-/** Two real API processes and real stock-repository requests share one durable writer database. */
-export async function run() {
-  const prefix='m1-concurrency-'+randomUUID(),dataDir=path.join(local.ROOT,prefix),owned=new Map(),checks=[];
-  const report={version:1,architecture:'standard-sensenet-shared-application-coordinator',ranAt:new Date().toISOString(),repository:local.REPOSITORY,project:PROJECT,fixturePrefix:prefix,dataDirectory:path.basename(dataDir),checks,cleanup:[],passed:false,scope:'Two independent gateway processes sharing this dataDir. No claim about direct raw repository admin writers or another coordinator deployment.',instrumentation:'Worker A pauses one coordinator callback after real BEGIN IMMEDIATE. A separate SQLite connection verifies the actual busy lock; Worker B remains pending until release. Server source is not modified.'};
-  fs.writeFileSync(REPORT,JSON.stringify(report,null,2));let a,b,grant,failure,initialCount,reservedCreate;
-  const record=(name,detail={})=>{checks.push({name,...detail,passed:true});console.log(JSON.stringify(checks.at(-1)));};
-  const ca=createLocalClient(8082),cb=createLocalClient(8083);
-  const read=async(client,id)=>(await client.request('/content/'+id,{token:grant.token})).data;
-  const preview=async(client,commands)=>{const plan=await client.request('/plans',{method:'POST',token:grant.token,body:{commands}});assert.equal(plan.repositoryWrites,0);return plan;};
-  const apply=(client,plan,key=randomUUID())=>client.request('/plans/'+plan.id+'/apply',{method:'POST',token:grant.token,body:{},idempotencyKey:key});
-  const remember=content=>{assert.ok(content.Name.startsWith(prefix)&&content.Path.startsWith(PROJECT+'/MediaLibrary/'));owned.set(content.Id,{id:content.Id,name:content.Name,path:content.Path});return content;};
+const require = createRequire(import.meta.url), local = require('./m0-local-api.cjs');
+const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines', SOURCE_COUNT = 2998;
+const REPORT = path.join(local.ROOT, 'm1-concurrency-report.json'), STATE = path.join(local.ROOT, 'm1-concurrency-state.json');
+const SCOPES = ['content:read','media:write'];
+const client = () => createClient({ baseUrl: GATEWAY + '/api/v1', repository: local.REPOSITORY, authority: local.AUTHORITY, project: PROJECT, caFile: path.join(local.ROOT, 'certificates/localhost.pem') });
+let restoredIds;
+const protectedIds = () => restoredIds ||= new Set(Object.values(JSON.parse(fs.readFileSync(path.join(local.ROOT, 'restore-journal.json'), 'utf8')).idMap).map(Number));
+const errorInfo = error => ({ status: error.status ?? null, code: error.code || (error.name === 'AssertionError' ? 'concurrency_assertion_failed' : 'concurrency_transport_failed'), location:error.stack?.split('\n').find(line=>/m1-concurrency-smoke\.mjs:\d+:\d+/.test(line))?.trim() });
+function saveState(state) {
+  assert.equal(path.dirname(STATE), path.resolve(local.ROOT));
+  execFileSync('git', ['check-ignore','--quiet',STATE], { stdio: 'ignore', windowsHide: true });
+  const temporary = STATE + '.' + randomUUID() + '.tmp', handle = fs.openSync(temporary, 'wx', 0o600);
   try {
-    initialCount=await count();report.initialCount=initialCount;
-    a=await start(8082,dataDir);b=await start(8083,dataDir);assert.notEqual(a.pid,b.pid);report.processes=[{port:8082,pid:a.pid},{port:8083,pid:b.pid}];await ca.verify();await cb.verify();
-    grant=await ca.request('/grants',{method:'POST',token:local.readAccounts().editor.apiKey,backendAuth:'ApiKey',body:{scopes:SCOPES,expiresInSeconds:3600}});
-    reservedCreate={name:prefix+'-same-key',path:PROJECT+'/MediaLibrary/'+prefix+'-same-key'};
-    const createPlan=await preview(ca,[{action:'create',type:'MediaItem',fields:{Name:reservedCreate.name,DisplayName:'Independent gateway concurrency fixture',Title:'Owned concurrency fixture',MediaType:'movie',Description:'Before coordinated race'}}]);
-    const key=randomUUID();report.reservedCreate={...reservedCreate,planId:createPlan.id,idempotencyKey:key};
-    const creates=await Promise.all([apply(ca,createPlan,key),apply(cb,createPlan,key)]);
-    assert.deepEqual(creates[0],creates[1]);const id=creates[0].completed[0].result.id;assert.ok(Number.isSafeInteger(id));const content=remember(await read(ca,id));assert.equal(await count(),initialCount+1);
-    assert.ok(typeof content.revision==='string'&&content.revision.length>0&&content.revision.length<=200);
-    record('Same saved create plan/key applied through two independent gateways creates exactly one content ID',{processes:2,ownedContents:1});
-    const pa=await preview(ca,[{action:'update',targetId:id,expectedRevision:content.revision,fields:{Description:'Worker A coordinated edit'}}]);
-    const pb=await preview(cb,[{action:'update',targetId:id,expectedRevision:content.revision,fields:{Description:'Worker B stale edit must not overwrite'}}]);
-    const armed=waitMessage(a,'armed');a.send({type:'arm'});await armed;
-    const updateKey=randomUUID(),held=waitMessage(a,'lockHeld'),first=apply(ca,pa,updateKey).then(value=>({value}),error=>({error}));await held;
-    const db=new DatabaseSync(path.join(dataDir,'coordination.sqlite'));let acquired=false;
-    try{db.exec('PRAGMA busy_timeout=0');try{db.exec('BEGIN IMMEDIATE');acquired=true;db.exec('ROLLBACK');}catch(error){assert.ok(/locked|busy/i.test(error.message));}}finally{db.close();}
-    assert.equal(acquired,false,'The application process did not hold the shared SQLite writer lock');
-    let settled=false;const second=apply(cb,pb).then(value=>{settled=true;return {value};},error=>{settled=true;return {error};});
-    await new Promise(resolve=>setTimeout(resolve,350));assert.equal(settled,false,'The second independent writer bypassed the held database lock');
-    const unchanged=await local.api(id,{account:local.readAccounts().editor,query:{'$select':'Description',metadata:'no'}});
-    assert.equal(unchanged.Description,'Before coordinated race');record('Actual SQLite lock blocks the other gateway and a direct stock read confirms no premature write',{blockedWriterPort:8083});
-    a.send({type:'release'});const winner=await first;if(winner.error)throw winner.error;assert.equal(winner.value.ok,true);const loser=await second;assert.equal(loser.error?.status,409);assert.equal(loser.error?.code,'revision_conflict');
-    const current=await read(cb,id);assert.equal(current.Description,'Worker A coordinated edit');assert.notEqual(current.revision,content.revision);
-    const replay=await apply(cb,pa,updateKey);assert.equal(replay.ok,true);assert.equal((await read(ca,id)).revision,current.revision);
-    record('After release one coordinated edit succeeds and the competing saved revision fails across processes',{winnerPort:8082,stalePort:8083,status:409});
-    record('Opaque revision changed once and a committed operation receipt replays from the other process without another save');
-  }catch(error){failure=error;report.error={status:error.status??null,code:error.code||'concurrency_assertion_or_transport_failure'};console.error(JSON.stringify({failure:report.error}));}
-  finally {
-    if(a?.connected)a.send({type:'release'});
-    if(grant&&reservedCreate&&!owned.size&&a?.connected){
-      try{const found=(await ca.request('/lookup',{method:'POST',token:grant.token,body:{target:reservedCreate.path}})).data;assert.equal(found.Name,reservedCreate.name);assert.equal(found.Path,reservedCreate.path);assert.equal(found.Type,'MediaItem');remember(found);}
-      catch(error){if(error.status!==404){failure||=error;report.cleanup.push({path:reservedCreate.path,deleted:false,code:error.code||'ownership_recovery_failed'});}}
+    if (process.platform === 'win32') {
+      const user = process.env.USERDOMAIN ? process.env.USERDOMAIN + '\\' + process.env.USERNAME : process.env.USERNAME;
+      if (!user) throw new Error('Private state owner is unavailable.');
+      execFileSync('icacls.exe', [temporary,'/inheritance:r','/grant:r',user + ':(F)'], { stdio: 'ignore', windowsHide: true });
     }
-    for(const fixture of owned.values()) {
-      try{const current=await read(ca,fixture.id);assert.equal(current.Name,fixture.name);assert.equal(current.Path,fixture.path);const plan=await preview(ca,[{action:'delete',targetId:fixture.id,expectedRevision:current.revision}]);await apply(ca,plan);let absent=false;try{await read(cb,fixture.id);}catch(error){absent=error.status===404;}assert.equal(absent,true);report.cleanup.push({id:fixture.id,deleted:true,via:'native'});}
-      catch(error){failure||=error;report.cleanup.push({id:fixture.id,deleted:false,code:error.code||'cleanup_failure'});}
-    }
-    if(grant){try{await ca.request('/grants/'+grant.id+'/revoke',{method:'POST',token:grant.token,body:{}});}catch(error){failure||=error;}}
-    try{report.finalCount=await count();assert.equal(report.finalCount,initialCount);}catch(error){failure||=error;}
-    for(const child of [b,a]){try{await stop(child);}catch(error){failure||=error;report.processStopFailed=true;}}
-    report.passed=!failure;fs.writeFileSync(REPORT,JSON.stringify(report,null,2));
-  }
-  console.log(JSON.stringify({passed:report.passed,checks:checks.length,independentProcesses:report.processes?.length??0,cleaned:report.cleanup.filter(item=>item.deleted).length,initialCount,finalCount:report.finalCount,report:REPORT}));
-  if(failure)throw new Error('Shared-coordinator concurrency acceptance failed; inspect sanitized report');return report;
+    fs.writeFileSync(handle, JSON.stringify(state,null,2)); fs.fsyncSync(handle);
+  } catch { fs.closeSync(handle); fs.unlinkSync(temporary); throw new Error('Private smoke state could not be saved.'); }
+  fs.closeSync(handle); fs.renameSync(temporary, STATE);
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){const args=process.argv.slice(2);if(args[0]==='--worker'){worker(Number(args[args.indexOf('--port')+1]),args[args.indexOf('--data-dir')+1]).catch(error=>{process.send?.({type:'failed',code:error.code||'worker_start_failed'});process.exit(1);});}else if(args.length===1&&args[0]==='--run')run().catch(error=>{console.error(error.message);process.exitCode=1;});else{console.error('Use --run after the stock runtime is ready.');process.exitCode=1;}}
+function loadState() {
+  const state = JSON.parse(fs.readFileSync(STATE,'utf8'));
+  assert.equal(state.version, 3); assert.equal(state.gateway,GATEWAY); assert.equal(state.repository,local.REPOSITORY); assert.equal(state.project,PROJECT);
+  assert.match(state.prefix,/^m1-concurrency-[0-9a-f-]{36}$/); assert.ok(Array.isArray(state.fixtures)); return state;
+}
+function assertOwned(state, value) {
+  assert.ok(!protectedIds().has(value.Id));
+  assert.equal(value.Type,'MediaItem'); assert.equal(value.Name,state.reservation.name); assert.equal(value.Path,state.reservation.path);
+  assert.ok(value.Name.startsWith(state.prefix)); return value;
+}
+async function sourceCount() {
+  const response = await local.request(local.REPOSITORY + '/OData.svc/Root/Content?' + new URLSearchParams({ query: '+InTree:' + PROJECT + ' .AUTOFILTERS:OFF .LIFESPAN:OFF', '$top':'0', '$inlinecount':'allpages', metadata:'no' }), { account:local.readAccounts().admin });
+  assert.equal(response.status,200); const count = Number(response.value?.d?.__count); assert.ok(Number.isSafeInteger(count)); return count;
+}
+function success(response) {
+  const value = response.value ?? JSON.parse(response.body.toString());
+  if (response.status < 200 || response.status >= 300 || value?.ok === false) {
+    const error = new Error('Application request rejected.'); Object.assign(error, { status:response.status, code:value?.error?.code || 'native_request_failed', result:value }); throw error;
+  }
+  return value;
+}
+async function request(api, route, options = {}) {
+  const auth = { token: options.token, backendAuth: options.backendAuth };
+  return followNativeResponse(await api.rawRequest(route,options), (nextRoute,nextOptions) => api.rawRequest(nextRoute,{...nextOptions,...auth}));
+}
+const read = async (api,state,id) => (await api.request('/content/'+id,{token:state.grant.token})).data;
+async function preview(api,state,commands) { const plan = await api.request('/plans',{method:'POST',token:state.grant.token,body:{commands}}); assert.equal(plan.repositoryWrites,0); return plan; }
+const apply = (api,state,plan,key) => request(api,'/plans/'+plan.id+'/apply',{method:'POST',token:state.grant.token,body:{},idempotencyKey:key});
+
+/** Public app API only for writes. Preserve private state if native cleanup needs recovery. */
+export async function cleanup(state = loadState()) {
+  const api = client(), results = [];
+  await api.verify();
+  if (state.grant?.token) {
+    try {
+      const found = (await api.request('/lookup',{method:'POST',token:state.grant.token,body:{target:state.reservation.path}})).data;
+      assertOwned(state,found);
+      if (!state.fixtures.some(row => row.id === found.Id)) { state.fixtures.push({id:found.Id,name:found.Name,path:found.Path}); saveState(state); }
+    } catch (error) { if (error.status !== 404) throw error; }
+    for (const fixture of state.fixtures) {
+      let current;
+      try { current = await read(api,state,fixture.id); } catch (error) {
+        if (error.status === 404) {
+          if (state.cleanupOperation?.targetId === fixture.id && !state.cleanupOperation.completed) { const result = success(await apply(api,state,state.cleanupOperation.plan,state.cleanupOperation.key)); assert.equal(result.ok,true);state.cleanupOperation.completed=true;saveState(state); }
+          results.push({id:fixture.id,deleted:true,alreadyAbsent:true});continue;
+        }
+        throw error;
+      }
+      assertOwned(state,current); assert.equal(current.Name,fixture.name); assert.equal(current.Path,fixture.path);
+      if (state.cleanupOperation?.targetId !== fixture.id || state.cleanupOperation.completed) { const plan = await preview(api,state,[{action:'delete',targetId:current.Id,expectedRevision:current.revision}]);state.cleanupOperation = {targetId:fixture.id,plan,key:randomUUID(),completed:false};saveState(state); }
+      const result = success(await apply(api,state,state.cleanupOperation.plan,state.cleanupOperation.key)); assert.equal(result.ok,true);state.cleanupOperation.completed=true;saveState(state);
+      await assert.rejects(read(api,state,fixture.id), error => error.status === 404);
+      results.push({id:fixture.id,deleted:true,via:'native-app'}); state.cleanup = results; saveState(state);
+    }
+    assert.equal(await sourceCount(),SOURCE_COUNT,'Restored source count changed after native cleanup.');
+    await api.request('/grants/'+state.grant.id+'/revoke',{method:'POST',token:state.grant.token,body:{}});
+    state.grant.token = null;
+  }
+  assert.equal(await sourceCount(),SOURCE_COUNT); state.phase = 'cleaned'; state.cleanup = results; saveState(state); return results;
+}
+
+/** Two independent simultaneous HTTPS callers exercise the one Netlify application. */
+export async function run() {
+  if (fs.existsSync(STATE)) {
+    const previous = JSON.parse(fs.readFileSync(STATE,'utf8')); assert.ok(['completed','cleaned'].includes(previous.phase),'A previous concurrency fixture needs --cleanup first.');
+  }
+  const state = {version:3,phase:'preparing',gateway:GATEWAY,repository:local.REPOSITORY,project:PROJECT,prefix:'m1-concurrency-'+randomUUID(),fixtures:[]};
+  state.reservation = {name:state.prefix+'-same-key',path:PROJECT+'/MediaLibrary/'+state.prefix+'-same-key'};
+  saveState(state);
+  const checks = [], report = {version:3,architecture:'one-netlify-app-private-blobs-coordination',gateway:GATEWAY,repository:local.REPOSITORY,project:PROJECT,ranAt:new Date().toISOString(),fixturePrefix:state.prefix,checks,cleanup:[],passed:false,
+    limitation:'Actual concurrent HTTPS callers and repository postconditions through one local Netlify app. Cloud CAS, interrupted upstream commits and raw external writers need separate validation.'};
+  const record = (name,details={}) => { checks.push({name,...details,passed:true}); console.log(JSON.stringify(checks.at(-1))); };
+  const a = client(), b = client(); let failure;
+  try {
+    const capabilities = await a.verify(); await b.verify();
+    assert.equal(capabilities.runtime,'Netlify Functions in the Timeline app'); assert.equal(capabilities.backendProtocolRequired,'gateway-coordinated-v1');
+    protectedIds(); report.initialCount = await sourceCount(); assert.equal(report.initialCount,SOURCE_COUNT,'Run only after other owned fixture phases finish.');
+    state.grant = await a.request('/grants',{method:'POST',token:local.readAccounts().editor.apiKey,backendAuth:'ApiKey',body:{scopes:SCOPES,expiresInSeconds:3600}}); saveState(state);
+    state.createPlan = await preview(a,state,[{action:'create',type:'MediaItem',fields:{Name:state.reservation.name,DisplayName:'Owned app concurrency fixture',Title:'Owned concurrent media',MediaType:'movie',Description:'Before concurrent updates'}}]);
+    state.createKey = randomUUID(); saveState(state);
+    const options = {method:'POST',token:state.grant.token,body:{},idempotencyKey:state.createKey};
+    const initial = await Promise.all([a.rawRequest('/plans/'+state.createPlan.id+'/apply',options),b.rawRequest('/plans/'+state.createPlan.id+'/apply',options)]);
+    const pending = initial.map(response => JSON.parse(response.body.toString()));
+    assert.ok(initial.every(response => response.status === 202)); assert.ok(pending.every(value => value.pending === true && typeof value.job?.id === 'string'));
+    assert.equal(pending[0].job.id,pending[1].job.id,'Simultaneous same-key requests did not observe the same durable app job.');
+    state.createJobId = pending[0].job.id; saveState(state);
+    const finalized = await Promise.all(initial.map((response,index) => followNativeResponse(response,(route,init) => [a,b][index].rawRequest(route,{...init,token:state.grant.token}))));
+    const creates = finalized.map(success); assert.deepEqual(creates[0],creates[1]);
+    const id = creates[0].completed[0].result.id; assert.ok(Number.isSafeInteger(id));
+    const content = assertOwned(state,await read(a,state,id)); state.fixtures.push({id,name:content.Name,path:content.Path}); saveState(state);
+    assert.equal(await sourceCount(),SOURCE_COUNT+1);
+    record('Two simultaneous same-plan/key HTTP callers share one durable job and exactly one content ID',{callers:2,jobId:state.createJobId,ownedContents:1});
+
+    state.competing = [
+      {plan:await preview(a,state,[{action:'update',targetId:id,expectedRevision:content.revision,fields:{Description:'Caller A reviewed update'}}]),key:randomUUID(),description:'Caller A reviewed update'},
+      {plan:await preview(b,state,[{action:'update',targetId:id,expectedRevision:content.revision,fields:{Description:'Caller B reviewed update'}}]),key:randomUUID(),description:'Caller B reviewed update'},
+    ]; saveState(state);
+    const responses = await Promise.all(state.competing.map((operation,index) => apply([a,b][index],state,operation.plan,operation.key)));
+    const winners = responses.map((response,index) => ({response,index})).filter(({response}) => response.status === 200 && response.value?.ok === true);
+    assert.equal(winners.length,1,'Competing saved revisions did not produce exactly one successful update.');
+    const winner = winners[0].index, loser = 1-winner; assert.equal(responses[loser].status,409);
+    const current = await read(b,state,id); assert.equal(current.Description,state.competing[winner].description); assert.notEqual(current.revision,content.revision);
+    // A conclusive before-dispatch busy result may be retried explicitly with the SAME saved key.
+    // It must now reject the stale revision without another repository write.
+    const loserReplay = await apply([a,b][loser],state,state.competing[loser].plan,state.competing[loser].key);
+    assert.equal(loserReplay.status,409); assert.equal(loserReplay.value?.error?.code,'revision_conflict');
+    const winnerReplay = success(await apply([a,b][loser],state,state.competing[winner].plan,state.competing[winner].key));
+    assert.deepEqual(winnerReplay,responses[winner].value); assert.equal((await read(a,state,id)).revision,current.revision); assert.equal(await sourceCount(),SOURCE_COUNT+1);
+    record('Competing keys pinned to one revision yield one save and a 409; explicit same-key retry confirms the stale revision',{winner: winner === 0 ? 'A':'B',initialLoserCode:responses[loser].value?.error?.code,staleStatus:409});
+    record('Committed winner receipt replays through the other HTTP caller without another save');
+  } catch (error) { failure=error; report.error=errorInfo(error); state.phase='failed'; saveState(state); }
+  finally {
+    try { report.cleanup = await cleanup(state); report.finalCount = await sourceCount(); assert.equal(report.finalCount,SOURCE_COUNT); }
+    catch (error) { failure ||= error; report.cleanupError=errorInfo(error); state.phase='cleanup_failed'; saveState(state); }
+    report.passed=!failure; if(report.passed){state.phase='completed';saveState(state);} fs.writeFileSync(REPORT,JSON.stringify(report,null,2));
+  }
+  console.log(JSON.stringify({passed:report.passed,checks:checks.length,cleaned:report.cleanup.filter(item=>item.deleted).length,initialCount:report.initialCount,finalCount:report.finalCount,report:REPORT}));
+  if(failure)throw new Error('Netlify app concurrency acceptance failed; inspect the sanitized report and retained private state.'); return report;
+}
+if(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const args=process.argv.slice(2);
+  if(args.length===1 && args[0]==='--run')run().catch(()=>{console.error('netlify_concurrency_failed');process.exitCode=1;});
+  else if(args.length===1 && args[0]==='--cleanup')cleanup().then(result=>console.log(JSON.stringify({cleaned:result.length,sourceCount:SOURCE_COUNT}))).catch(()=>{console.error('netlify_concurrency_cleanup_failed');process.exitCode=1;});
+  else {console.error('Use --run after the managed Netlify app is ready, or --cleanup for a retained owned fixture.');process.exitCode=1;}
+}

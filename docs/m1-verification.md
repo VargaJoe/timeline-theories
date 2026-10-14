@@ -1,105 +1,98 @@
 # M1 operation parity and verification
 
-The milestone uses a real standalone HTTPS application gateway and stock SenseNet HTTP API. All content-writing acceptance probes run against the isolated localhost M0 repository, with UUID fixtures and cleanup. Production SenseNet MCP is used only for read-only schema/content/provider-key inspection. Production deployment and credential/ACL provisioning remain Joe's work.
+The native API runs in the existing Netlify app's Functions. UI and native clients share plans, validation, permission checks and receipts; SenseNet stores the content. Private app Blobs store grants, reviewed plans, jobs and durable results. All content-writing acceptance tests use the isolated M0 repository and owned UUID fixtures. Production SenseNet inspection is read-only.
 
 ## Operation map
 
-| Operation | UI path | Shared domain / gateway | HTTP route and actual rights | Evidence |
-| --- | --- | --- | --- | --- |
-| Browse/search/page/detail | Timeline/media services, guarded `repository.fetch/load` | Membership validation, stock snapshots, opaque revision | timelines/media/books/entries GET; content/lookup/snapshots; exact Open, caller-filtered pages | Native HTTP, M0 browser/privacy/reference gates |
-| Timeline create/edit/visibility/delete | timelineService, TimelineViewPage | content field validation, saved plans, complete descendants | plans create/update/delete; parent AddNew+type, target Save/Delete, every child Delete | Stock15, native22, browser gates |
-| Media/book create/update/delete | mediaLibraryService, book import/edit | same field rules and plan path | plans; AddNew/Save/Delete, actual schema, complete media references/leaf preflight | Stock15, native22, live Open Library book |
-| Reuse distinct occurrences | entry create/select/edit/delete | TimelineEntry fields, project media reference, unique Name | plans; timeline AddNew, referenced media Open, occurrence Save/Delete | Native HTTP creates two IDs for one media; browser reload/edit proof |
-| Notes/chronology/labels/arc/importance | TimelineEntryEditModal | field/date/choice validation | update with expectedRevision and exact Save | Native22, browser gates |
-| Complete order | TimelineViewPage `Save New Order` | exact full inventory, membership and every revision | order command; every current child Open+Save | Stock15, native22, real two-process contention and browser order |
-| Binary/URL cover | mediaLibraryService, timeline cover, import | signature/byte limits, standard upload, guarded public URL fetch | cover/metadata command; target Save, covers:write; content/{id}/cover exact Open | Stock exact bytes, native ZIP bytes, live cover/ZIP gate |
-| Metadata proposal/preview/apply | BulkUpdateDialog, mediaUpdateService | metadataDiff, missing-only/explicit overwrite, source confidence/uncertainty; exact reviewed bytes/data | providers/media/lookup + metadata plan; metadata:write, target Save before provider/image fetch | 14 parity checks, native manual-field preservation, live provider gate |
-| Provider media/book/Trakt list | provider/browser adapters | bounded fixed provider transports, server-only key loading | providers/*; application scopes and actual library/media rights before fetch | Live provider report; Trakt result recorded separately |
-| Active ZIP import/export | timelineImportService, timelineExportService | one import batch; shared 19-column format, strict bounds, media-ID references, cover dedup | exchange/{id}/export/preview then saved apply; every target/create/cover right preflight | 20 exchange tests, native real PNG ZIP, M0 browser gate |
-| Native grant/revoke/recovery | independent `m1-client.mjs` | backend identity validation, encrypted credential, explicit scopes/binding, durable receipts | grants/revoke/recovery; self-revoke or actual backend owner | Native22, two-process/restart gates |
+| Operation | Shared code | Native route and actual rights |
+| --- | --- | --- |
+| Browse/search/page/detail | Stock snapshots and membership, nativeApi/timeline/media services | timelines/media/books/entries, content/lookup/snapshots; caller Open |
+| Timeline/media/book create/edit/delete | domain/content, api/plans and stock-repository | plans then saved apply; parent AddNew + allowed type, target Save/Delete, complete descendants/references |
+| Distinct occurrences reusing media | entry services and shared field validation | TimelineEntry create/update/delete; timeline AddNew, referenced media Open, occurrence Save/Delete |
+| Notes/chronology/labels/arc/importance | entry editor, real ISO date and Choice rules | update with pinned expectedRevision and exact Save |
+| Complete order | exact membership/inventory and per-entry revisions | order command; every current occurrence Open + Save |
+| Binary/URL covers | bounded owned transfers, standard upload, guarded public URL fetch | cover/metadata command; covers:write and target Save; reads recheck Open |
+| Metadata proposals and approval | missing-only or explicit overwrite, reviewed source/data/cover | providers/media/lookup then metadata plan; Save checked before provider fetch |
+| Media/book/Trakt providers | fixed transports and private key loading | providers/*; scopes and backend rights before each fetch |
+| Active ZIP import/export | shared 19-column TSV format and safe archive bounds | exchange export/preview then apply; existing local media IDs, every target/create/cover right |
+| Grants/revoke/recovery | encrypted credentials, original principal, durable intents | grants/revoke/recovery; current backend identity and exact owned plan/request |
+| Jobs/chunks | private app Blobs and conditional claims | jobs, uploads, downloads; original principal, current credential and exact target permissions |
 
-Unimplemented stories in the feature audit remain deferred: clone/fork, new social-login/account sync, universe/cross-reference models, rating/trending/discovery, publisher feed sync and lossless cross-repository backup. The capability endpoint does not advertise them.
+Clone/fork, new account synchronization, universe models, trending/discovery and lossless cross-repository backup remain deferred. Batches, full order and fields plus cover are not backend transactions. App writers share the Blobs coordinator; direct repository administrators remain outside that boundary.
 
 ## Verification commands
 
-Run fixture-writing gates sequentially against the already restored isolated repository. The HTTP gates require `npm run api:local`; browser gates also require `npm run dev:m0`.
+For an already provisioned/restored M0 repository, run one managed app:
 
 ```powershell
 npm ci
 npm ci --prefix client
+npm run dev:m0
+```
+
+In a second terminal, run fixture gates sequentially:
+
+```powershell
 npm test
+npm run test:parity
 npm run lint
 npm run build
-npm run build:m0 --prefix client
 npm run build:readonly --prefix client
-node scripts/test-metadata-parity.mjs
-node scripts/test-native-read-availability.mjs
-node scripts/test-native-receipts.mjs
-node scripts/m1-readonly-smoke.mjs
+npm run build:m0 --prefix client
 node scripts/m1-native-smoke.mjs --providers
 node scripts/m1-preflight-smoke.mjs
 node scripts/m1-concurrency-smoke.mjs --run
-# Capture the actual owned gateway PID, then:
-node scripts/m1-restart-smoke.mjs --prepare --gateway-pid OWNED-PID
-# Restart only that owned gateway process, preserving its data directory.
-node scripts/m1-restart-smoke.mjs --resume --gateway-pid NEW-OWNED-PID
-node scripts/m1-restart-smoke.mjs --pending --gateway-pid NEW-OWNED-PID
-node scripts/m1-provider-live.mjs
+node scripts/m1-large-transfer-smoke.mjs --run
 node scripts/m1-browser-api-smoke.cjs
-npm run test:backend
-npm run test:privacy
-npm run test:reference
-npm run test:auth-storage
-npm run test:browser
-node scripts/m0-restore.cjs deployment/.local/snapshots/2026-10-13T14-32-10-703Z --verify
-./deployment/scripts/m0-preservation.ps1
+node scripts/m0-browser-smoke.cjs
 ```
 
-Evidence reports and browser screenshots live under ignored `deployment/.local/`; they include safe counts, routes and results, never credentials. Restart evidence distinguishes completed durable receipt replay from an unconfirmed upstream commit; it does not claim a backend transaction, automatic partial-order resume or direct administrator writer protection. The gateway's durable pending fence/recovery rule is described in [M1 API operations](m1-native-api.md).
+Restart verification uses the exact managed Netlify CLI Node PID, keeps private app Blobs, and must resume before the printed saved-plan expiry:
 
-## Hungarian manual smoke
+```powershell
+node scripts/m1-restart-smoke.mjs --prepare --app-pid OWNED-CLI-PID
+# Restart only the owned app process tree, preserving deployment/.local.
+node scripts/m1-restart-smoke.mjs --resume --app-pid NEW-OWNED-CLI-PID
+```
 
-1. Indítsd a helyi API-t és `dev:m0` UI-t. A normál `.env` fájlokat hagyd meg; a helyi profil kiválasztása explicit. A CLI `discover` mutassa pontosan a localhost repository/auth/project kötést.
-2. `Login with IdentityServer` → M0Editor. A jelszót az ignored helyi accountfájlból használd, ne másold chatbe. A CLI-vel adott writer credential és create terv hozzon létre saját, könnyen felismerhető timeline-t és médiát.
-3. Két külön create operationnal add ugyanazt a médiát a timeline-hoz. `/timelines/<Name>` újratöltése után két előfordulás legyen, külön Notes/chronology mezőkkel. `Edit Entry` → `Save Changes`: csak az egyik módosuljon; native read ugyanazt mutassa.
-4. Native preview után szerkeszd ugyanazt az entryt az UI-ban, majd alkalmazd a régi native tervet. 409 konfliktus, a kézi UI-módosítás maradjon meg. A teljes sorrendet `Save New Order` mentse; újratöltés és native list ugyanazt a Position-sorrendet adja.
-5. Metadata preview mutassa a forrásokat és diffet, a meglévő kézi Title/Description ne módosuljon missing-only módban. Csak a jóváhagyott mezők/borító mentődjenek. Providerhiány vagy hibás provider-hitelesítés egyértelmű hiba legyen.
-6. Exportálj ZIP-et, majd importáld saját második teszt-timeline-ba. Két külön Name és ugyanaz a local media-ID maradjon; a PNG/URL borító látszódjon. A ZIP nem hordozható más repositoryba.
-7. Ugyanazt a mentett plan/key párost küldd újra: eredeti ID/eredmény, nincs másolat vagy új mentés. Más payload ugyanazzal a keyvel konfliktus. A revoked token olvasásra is 401-et kapjon; Reader/readonly ne küldjön írást.
-8. Előbb töröld a saját occurrence-okat és timeline-okat, utána a médiát. Hivatkozott média törlése 409. Logout után új tesztcontent ne maradjon, a forrásadatok és korábbi listák maradjanak meg.
+For the readonly gate, stop only the owned managed app and restart it with `node scripts/m1-dev.mjs --local --readonly`; then run `node scripts/m1-readonly-smoke.mjs`. Restore the normal `--local` app afterwards. This checks actual HTTPS denial and unchanged content; handler tests separately verify zero write dispatch.
+
+For live providers, the explicit local `--production-provider-keys` launcher option reads exactly three existing production key nodes into local Function memory. It provides no production content credential to the app. Run `node scripts/m1-provider-live.mjs`; report provider failures separately. Do not create/link provider accounts during this gate.
+
+The local Blobs SDK emulator needs documented compatibility fixes for conditional writes, ETags and Windows paths. Its tests do not prove cloud atomicity. `scripts/m1-cloud-state-smoke.mjs --url VERIFIED-PR53-PREVIEW-ORIGIN` is restricted to the actual PR53 Deploy Preview. It verifies simultaneous first writes, strong reads, current/stale ETag conditions and cleanup of one owned app-metadata UUID. The endpoint performs only SenseNet identity/Open reads, with zero SenseNet writes. Production exposes no verification endpoint.
 
 ## Current acceptance record
 
-Validated on `feature/m1-native-agent-api`, 2026-10-14, with strict trusted HTTPS against the isolated M0 repository. Source inspection, adapter tests and health checks alone are not end-to-end acceptance.
+Netlify integration is being verified on `feature/m1-native-agent-api`, 2026-10-14. PR #53 remains draft until the new app/runtime gates are complete. Previous standalone/SQLite process results are superseded and are not Netlify acceptance evidence.
 
-| Gate | Actual result |
+| Gate | Current result |
 | --- | --- |
-| Unit / shared contract | 77 passed, including 20 exchange and 6 shared content-domain cases |
-| UI/native adapter parity | 14 metadata + 25 read availability + 6 partial/uncertain receipt checks passed |
-| Static / profiles | ESLint and normal, readonly and explicit M0 builds passed; existing bundle-size/dynamic-import warnings remain |
-| Independent native HTTPS client | 24 passed: scoped Reader/Writer, revoked/expired/wrong-binding denial, real CRUD/reuse, metadata/manual protection, full order, actual PNG ZIP, stale conflict, stable retry, calendar validation and zoned readback |
-| Actual Chromium UI/native proof | 7 passed; native-created data visible in UI, UI save visible natively, stale open UI editor conflicts despite cache refresh; raw repository writes 0 |
-| Actual M0 Chromium regression | 33 passed; Visitor/Reader apply POSTs 0, Editor 15 native applies, raw repository mutations 0; cleanup succeeded |
-| M0 backend / privacy / reference | 13 + 46 + 74 passed; real OIDC/Visitor and private reference/binary coverage |
-| Authentication storage | Actual Chromium profile/tab/reopen storage isolation passed; does not claim an SNAuth server login |
-| Whole-plan preflight | 10 passed: grant ownership/revoke, hidden children, gained references, duplicate/late-claimed Names, empty metadata; denied mixed plans saved no earlier target |
-| Two independent gateway processes | 4 passed, including direct confirmation of the held SQLite lock and cross-process stored receipt replay |
-| Actual gateway restart / pending recovery | 6 restart + 4 pending/expired-owner-recovery checks passed; no redispatch and original content IDs preserved |
-| Actual readonly HTTPS gateway | 4 passed, same target readable, repository writes 0 and no Save probe/mutation intent for denied update |
-| Independent CLI input guards | Documented discovery worked; missing stable apply key and encoded plan traversal rejected before a mutating request |
+| Independent native HTTPS client | 24 passed on the shared 8080 app; CRUD/reuse, scoped/auth/ACL/expiry/revoke/binding deny, zero-write preview, real dates, metadata protection, complete order, stable retry, stale conflict, PNG ZIP and Open Library; cleanup 2998 |
+| Whole-plan preflight | 10 passed on the shared app; hidden children, gained references, duplicate/late Name, invalid metadata, owner-only revoke; denied mixed plans write no earlier target; cleanup 2998 |
+| Concurrent actual app requests | 3 passed; same plan/key shares one job and creates one ID, competing revisions yield one save/409, stored result replay; cleanup 2998 |
+| SDK state / handler / transfer tests | 136 unit/contract tests passed, including real SDK HTTP, immutable state, cancellation, uncertainty retry, wire/large-envelope and OpenAPI/config checks. Controlled HTTPS fault test commits one PATCH, loses readback, then same-key retry reconciles with PATCH count still 1; this is explicitly not real SenseNet acceptance |
+| UI/native Chromium | 7 passed on the shared app, waiting for actual terminal job responses; real native-created UI data, UI save read natively, pinned stale editor conflict, complete order; raw repository mutations 0 |
+| M0 Chromium regression | Job-aware terminal-response gate pending |
+| Large actual cover/ZIP | 5 passed; valid 6,294,468-byte RGB PNG and 12,590,252-byte ZIP, 11 upload/15 download chunks, exact hashes and real import referencing existing media; cleanup 2998 |
+| Actual app restart | Pending |
+| Real Deploy Preview CAS | Pending; emulator evidence alone is insufficient |
+| Static, full source integrity and privacy | ESLint and three profile builds passed; final source integrity/privacy refresh pending |
 
-All fixture-writing native/browser/provider/coordination/preflight gates restored the source count to **2998**, with ownership-checked UUID cleanup. Native accepted-path cleanup used application API deletes. Actual M0 backend regression fixtures use their original guarded local cleanup. No production content, ACL or schema mutation was performed.
+Reports, screenshots, local grant files and runtime state remain ignored under `deployment/.local/`. Uncertain writes are checked with their saved plan/key. A stopped writer requires current original backend identity and exact stopped request confirmation; there is no clock-based takeover. Read-only recovery reconciles receipts but does not automatically resume a killed background job. Inspect its returned operations and explicitly review any remaining plan.
 
-The final full snapshot verification passed for all **2998 records and 1503 binary fields**: field/reference/order/binary mismatches all **0**, against `2026-10-13T14-32-10-703Z`. The original **18 legacy/environment/certificate files** retained their SHA256 hashes. The final file-content privacy scan covered **103 reviewed candidate files**, with **0 known-secret matches**; runtime accounts, inventory credentials, grant tokens, database/certificates, reports and build artifacts are ignored. This checks the committed file contents; it does not rewrite Git author metadata or history.
+## Hungarian manual smoke
 
-Latest ignored reports: `m1-native-report.json`, `m1-preflight-report.json`, `m1-readonly-report.json`, `m1-concurrency-report.json`, `m1-restart-report.json`, `m1-pending-recovery-report.json`; UI proof `m1-browser-api-smoke/23a3e6c0-5774-4421-844f-cfb329f086b0/report.json`; M0 browser `browser-smoke/5f285aa0-1066-4efd-b32f-7f019967a659/report.json`, all under `deployment/.local/`.
+1. `npm run dev:m0` indítsa a közös appot. A localhost:8080 UI és `/api/v1` ugyanazt a repository/auth/project kötést mutassa a CLI `discover` eredményével. A korábbi `.env`, account, cert és source snapshot maradjon meg.
+2. `Login with IdentityServer` → M0Editor. A helyi jelszót a private accountfájlból használd. Saját writer granttal készíts elő, nézz át, majd alkalmazz egy új timeline/media tervet.
+3. Két külön create operationnel add ugyanazt a médiát a timeline-hoz. Reload után két eltérő előfordulás látszódjon. `Edit Entry` → `Save Changes` csak az egyik Notes mezőjét módosítsa; native read ugyanazt mutassa.
+4. Native preview után módosítsd az entryt az UI-ban. A régi terv apply-ja 409 legyen, a kézi módosítás megmaradjon. `Save New Order` után UI reload és native list azonos sorrendet adjon.
+5. Metadata preview mutassa a forrásokat/diffet; missing-only őrizze a kézi Title/Description mezőket. Jóváhagyás a tényleges végső eredményt várja meg. Providerhiba egyértelműen jelenjen meg.
+6. Nagy borító/ZIP esetén a háttérmunka és chunk átvitel után a pontos bájtok érkezzenek vissza. Saját második timeline-ba importált ZIP külön előfordulás-Name-eket és a meglévő local media-ID-t használjon.
+7. Ugyanaz a mentett plan/key eredeti ID/nyugta legyen, más plan ugyanazzal a keyvel konfliktus. Revoked grant 401, Reader/readonly írási deny legyen.
+8. A saját előfordulásokat/timeline-okat töröld a média előtt. Hivatkozott média törlése 409. A teszt végén ne maradjon saját fixture; a forrásadatok maradjanak meg.
 
-### Live provider and production limits
+## Provider and production limits
 
-Eight actual provider workflow checks passed: OMDb and TMDB metadata/provenance, zero-write lookup, selected TMDB apply preserving manual fields, Open Library search/detail/local BookMediaItem, URL-only cover (87,458 actual WebP bytes), cover-containing native ZIP (88,399 bytes) and cleanup. The overall `m1-provider-live-report.json` intentionally remains **passed: false** because the stored Trakt credential returned `provider_auth_failed`; no mocked Trakt success substitutes for it.
+The configured Trakt credential previously returned `provider_auth_failed`; its API account access was inspected without account creation/linking. The exact cause is not proven. No mocked success replaces that provider failure. Google Books has not been exercised live. OMDb/TMDB/Open Library and cover/ZIP evidence will be refreshed on the new runtime.
 
-Google Books has an implemented bounded adapter; its live search/detail path was not freshly verified in this gate.
-
-The logged-in Trakt Developer/My Apps inspection showed no registered application and required GitHub connection before creating one; no app/key/connection was created. A paywall cause was not verified. Official [app registration](https://developer.trakt.tv/docs/create-an-app) and [API use policy](https://developer.trakt.tv/docs/api-use-policy) document GitHub verification and deletion of inactive registrations. The exact cause of this old credential's rejection remains unconfirmed.
-
-Production SenseNet was inspected read-only: actual existing content and snapshots work, but optional `Year`/`SeriesName` are absent and Choice multiplicity differs from M0. Unsupported field/choice writes fail whole-plan preflight. Production gateway hosting, inventory coverage and actual visibility ACL transitions were not deployed/tested. Local visibility/privacy gates retain the original M0 security policy. The gateway requires all Timeline writers to share its persistent coordination boundary; raw repository administrators and multi-host/serverless writers are outside the verified guarantee.
+Production read inspection found optional Year/SeriesName absent and Choice multiplicity different from M0. Unsupported field/choice writes fail the complete preflight. The production read-only inventory credential must be explicitly configured and verified in the app; missing coverage fails closed. No production content/schema/ACL migration, merge or production deployment is performed by these acceptance tests.

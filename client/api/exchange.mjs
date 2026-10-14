@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { decodeTimelineArchive, encodeTimelineArchive } from '../client/domain/exchange.mjs';
+import { decodeTimelineArchive, encodeTimelineArchive } from '../domain/exchange.mjs';
 const require = createRequire(new URL('../client/package.json', import.meta.url));
 const JSZip = require('jszip');
 
