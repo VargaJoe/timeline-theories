@@ -28,10 +28,55 @@ export class NativeApiError extends Error {
   transportFailure?: boolean;
   jobId?: string;
   recoverable?: boolean;
+  planId?: string;
+  idempotencyKey?: string;
+  details?: unknown;
   constructor(message: string, status: number, code: string, source?: string, retryAfter?: number) {
     super(message); this.name = 'NativeApiError'; this.status = status; this.code = code;
     this.source = source; this.retryAfter = retryAfter;
   }
+}
+
+const creationApplyStart = Symbol('creationApplyStart');
+type CreationRequestInit = RequestInit & { [creationApplyStart]?: () => void };
+
+/** One user-owned form/import occurrence, never a deduplication of its fields. */
+export class NativeCreationIntent {
+  readonly name: string;
+  private subject?: string;
+  private input?: string;
+  private complete = false;
+  private result: unknown;
+  private running?: Promise<unknown>;
+  private applyStarted = false;
+  private checkContext?: () => void;
+  constructor(prefix = '') { this.name = prefix + crypto.randomUUID(); }
+  get hasStartedApply(): boolean { return this.applyStarted; }
+  requestInit(): RequestInit {
+    // The SDK copies symbol properties; fetch never serializes them as headers.
+    return { [creationApplyStart]: () => { this.applyStarted = true; } } as CreationRequestInit;
+  }
+  async run<T>(input: unknown, create: (name: string) => Promise<T>, checkContext: () => void = () => {}): Promise<T> {
+    const subject = currentIdentity(), serialized = JSON.stringify(input);
+    if (this.subject !== undefined && this.subject !== subject) throw new NativeApiError('Start a new create form after changing repository identity.', 409, 'identity_changed');
+    try { this.checkContext?.(); } catch { throw new NativeApiError('The operation context changed. Check the saved outcome before starting a new create form.', 409, 'operation_context_changed'); }
+    if (this.input !== undefined && this.input !== serialized) throw new NativeApiError('This create attempt has a saved outcome. Retry its original values, or check its outcome before starting a new form.', 409, 'creation_intent_changed');
+    this.subject = subject; this.input = serialized; this.checkContext ??= checkContext;
+    if (this.complete) return this.result as T;
+    if (this.running) return this.running as Promise<T>;
+    this.running = Promise.resolve().then(() => { assertNativeIdentity(subject); this.checkContext!(); return create(this.name); }).then(value => {
+      assertNativeIdentity(subject); this.checkContext!(); this.result = value; this.complete = true; return value;
+    }).catch(error => {
+      // A preparation failure cannot write. Once apply starts, even a 400/403
+      // may follow a committed write or a failed readback, so keep exact input.
+      if (!this.applyStarted) this.input = undefined;
+      throw error;
+    }).finally(() => { this.running = undefined; });
+    return this.running as Promise<T>;
+  }
+}
+export function nativeCreationApplyStart(init?: RequestInit): () => void {
+  return (init as CreationRequestInit | undefined)?.[creationApplyStart] ?? (() => {});
 }
 
 let getToken: () => string | undefined = () => undefined;
@@ -82,6 +127,7 @@ function responseError(payload: unknown, status: number, applyReceipt = false): 
   const retryAfter = detail.retryAfter ?? value.retryAfter;
   const source = detail.source ?? value.source;
   const failure = new NativeApiError(message, status, String(detail.code || value.code || 'native_request_failed'), typeof source === 'string' ? source : undefined, typeof retryAfter === 'number' ? retryAfter : undefined);
+  failure.details = detail.details;
   if (applyReceipt && isNativeApplyResult(payload)) failure.applyResult = payload;
   return failure;
 }
@@ -372,6 +418,13 @@ export async function nativeSnapshots(ids: number[]): Promise<NativeSnapshot[]> 
 export function acknowledgeNativeCommands(commands: NativeCommand[]): void {
   currentIdentity(); pending.delete(JSON.stringify({ commands }));
 }
+export function nativeCommandFailure(commands: NativeCommand[], error: unknown): NativeApiError {
+  const operation = pending.get(JSON.stringify({ commands }));
+  const failure = error instanceof NativeApiError ? error : new NativeApiError('The created content could not be read back. Retry the original create attempt to recover its saved result.', 503, 'native_readback_unavailable');
+  if (operation) { failure.planId = operation.planId; failure.idempotencyKey = operation.key; failure.recoverable = true; }
+  if (!(error instanceof NativeApiError)) failure.transportFailure = true;
+  return failure;
+}
 export interface NativeCoverPayload { bytesBase64: string; mimeType: string; fileName: string; }
 export async function nativeCoverPayload(file: Blob, fileName = 'cover'): Promise<NativeCoverPayload> {
   if (file.size < 1 || file.size > 10 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Cover must be PNG, JPEG or WebP, at most 10 MiB');
@@ -386,7 +439,7 @@ export async function nativeCoverPayload(file: Blob, fileName = 'cover'): Promis
 }
 
 /** Retains an apply key across an uncertain transport outcome so UI retry cannot duplicate a create. */
-export async function applyNativeCommands(commands: NativeCommand[], checkContext: () => void = () => {}): Promise<NativeApplyResult> {
+export async function applyNativeCommands(commands: NativeCommand[], checkContext: () => void = () => {}, onApplyStart: () => void = () => {}): Promise<NativeApplyResult> {
   const startedIdentity = currentIdentity();
   const serialized = JSON.stringify({ commands });
   checkContext();
@@ -400,9 +453,11 @@ export async function applyNativeCommands(commands: NativeCommand[], checkContex
   }
   checkContext();
   if (currentIdentity() !== startedIdentity) throw new NativeApiError('The active repository identity changed before apply.', 409, 'identity_changed');
-  const result = await nativeRequest<NativeApplyResult>(`/plans/${operation.planId}/apply`, {
+  let result: NativeApplyResult;
+  onApplyStart();
+  try { result = await nativeRequest<NativeApplyResult>(`/plans/${operation.planId}/apply`, {
     method: 'POST', body: '{}', headers: { 'Idempotency-Key': operation.key },
-  });
+  }); } catch (error) { throw nativeCommandFailure(commands, error); }
   checkContext();
   if (!isNativeApplyResult(result)) throw new NativeApiError('The native gateway returned an invalid apply receipt.', 502, 'native_receipt_invalid');
   if (!result.ok) {

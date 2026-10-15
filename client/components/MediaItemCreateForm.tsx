@@ -1,5 +1,6 @@
 // src/client/components/MediaItemCreateForm.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { NativeCreationIntent } from '../services/nativeApi';
 import { MediaLibraryService, type CreateMediaItemRequest, type MediaItem } from '../services/mediaLibraryService';
 import { assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
 import { mediaLibraryPath } from '../projectPaths';
@@ -144,6 +145,7 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
 }) => {
   const operations: Operation[] = [...requiredOperations, { target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }];
   const canCreate = usePermissions(operations);
+  const creation = useRef(new NativeCreationIntent());
   const [formData, setFormData] = useState<CreateMediaItemRequest>({
     DisplayName: '',
     Description: '',
@@ -230,7 +232,7 @@ export const MediaItemCreateForm: React.FC<MediaItemCreateFormProps> = ({
     try {
       await assertOperations(operations);
       checkContext();
-      const mediaItem = await MediaLibraryService.createMediaItem(formData);
+      const mediaItem = await MediaLibraryService.createMediaItem(formData, creation.current);
       setSuccess(true);
       
       // Save series metadata for future book creation

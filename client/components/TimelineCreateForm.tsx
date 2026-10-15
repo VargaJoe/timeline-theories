@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { NativeCreationIntent } from '../services/nativeApi';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +11,7 @@ import { usePermissions } from '../hooks/usePermissions';
 
 export const TimelineCreateForm: React.FC = () => {
   const [name, setName] = useState('');
+  const creation = useRef(new NativeCreationIntent());
   const [displayName, setDisplayName] = useState('');  
   const [description, setDescription] = useState('');
   const [sortOrder, setSortOrder] = useState<'chronological' | 'release'>('chronological');
@@ -45,7 +47,7 @@ export const TimelineCreateForm: React.FC = () => {
         description: description.trim() || undefined, 
         sortOrder,
         timelineType
-      });
+      }, creation.current);
       setSuccess(true);
       setLoading(false);
       setTimeout(() => {

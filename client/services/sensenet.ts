@@ -2,7 +2,7 @@ import { Repository } from '@sensenet/client-core';
 import { repositoryUrl, environment } from '../configuration';
 import { createOperationGuard, guardRepository, snapshotRequestInit } from './operationGuard.mjs';
 import { TYPES, validateFields } from '../domain/content.mjs';
-import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, canUseLegacyRead, configureNativeAuth, invalidateNativeSnapshots, markNativeGatewayUnavailable, nativeCoverPayload, nativeReadSidecarAvailable, nativeSnapshot, nativeSnapshots, requireNativeWriteReadiness } from './nativeApi';
+import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, canUseLegacyRead, configureNativeAuth, invalidateNativeSnapshots, markNativeGatewayUnavailable, nativeCommandFailure, nativeCreationApplyStart, NativeApiError, nativeCoverPayload, nativeReadSidecarAvailable, nativeSnapshot, nativeSnapshots, requireNativeWriteReadiness } from './nativeApi';
 import type { NativeCommand, NativeSnapshot } from './nativeApi';
 export type { Operation } from './operationGuard.mjs';
 
@@ -102,19 +102,21 @@ async function checkedRepositoryFetch(input: RequestInfo, init?: RequestInit, aw
     }
     if (before !== rawRepository.configuration.token || !isConfiguredWriteTarget()) throw new Error('Identity/repository changed before dispatch');
     checkContext();
-    const result = await applyNativeCommands(commands, checkContext);
+    const result = await applyNativeCommands(commands, checkContext, nativeCreationApplyStart(init));
     if (commands[0]?.action === 'create') readBackId = result.completed[0]?.result.id;
     if (readBackId) {
+      try {
       const snapshot = await nativeSnapshot(readBackId, { refresh: true });
       const readUrl = new URL(input, repositoryUrl);
       readUrl.pathname = `/odata.svc/content(${readBackId})`;
       const response = await originalFetch(readUrl.href, { method: 'GET' }, false);
       checkContext();
-      if (!response.ok) return response;
+      if (!response.ok) throw new NativeApiError('The created or updated content could not be read back. Retry the original attempt to recover its saved result.', response.status, 'native_readback_unavailable');
       const value = await response.json() as { d: Record<string, unknown> };
       checkContext();
       acknowledgeNativeCommands(commands);
       return jsonResponse({ ...value, d: oDataSnapshot(snapshot, value.d) });
+      } catch (error) { throw nativeCommandFailure(commands, error); }
     }
     acknowledgeNativeCommands(commands);
     return commands[0]?.action === 'cover' ? jsonResponse(result) : jsonResponse({ d: { results: result.completed.map(item => ({ Id: item.result.id, Deleted: true })) } });

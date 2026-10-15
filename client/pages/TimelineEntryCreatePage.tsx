@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { NativeCreationIntent } from '../services/nativeApi';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MediaLibrarySelector } from '../components/MediaLibrarySelector';
 import { MediaItemCreateForm } from '../components/MediaItemCreateForm';
@@ -15,6 +16,7 @@ export default function TimelineEntryCreatePage() {
   const { timelineId: timelineName } = useParams<{ timelineId: string }>();
   const navigate = useNavigate();
   const [selectionMode, setSelectionMode] = useState<MediaSelectionMode>('select');
+  const creation = useRef(new NativeCreationIntent('entry-'));
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [position, setPosition] = useState<number>(1);
   const [chronologicalDate, setChronologicalDate] = useState('');
@@ -61,10 +63,10 @@ export default function TimelineEntryCreatePage() {
         notes,
         entryLabel,
         importance,
-      }, parentPath);
+      }, parentPath, creation.current);
       navigate(`/timelines/${timelineName}`);
-    } catch {
-      setError('Failed to create timeline entry.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to create timeline entry.');
     } finally {
       setSaving(false);
     }

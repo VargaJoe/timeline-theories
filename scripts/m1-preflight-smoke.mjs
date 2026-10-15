@@ -132,6 +132,18 @@ export async function smoke() {
     const collision = await create('MediaItem', 'raced-name', { Title: 'Competing gateway creation', MediaType: 'movie' });
     deny(await applyResponse(racedPlan), 409, 'name_conflict'); await unchanged(sentinel); assert.equal((await read(collision.Id)).Title, 'Competing gateway creation');
     record('Name claimed by a later gateway plan rejects the whole saved mixed apply before its first write', { repositoryWrites: 0 });
+
+    const plannedName = prefix + '-planned-collision';
+    const plannedCreate = { action: 'create', type: 'MediaItem', fields: { Name: plannedName, DisplayName: plannedName, Title: 'Must not create', MediaType: 'movie' } };
+    const plannedRename = { action: 'update', targetId: media.Id, expectedRevision: media.revision, fields: { Name: plannedName } };
+    for (const [order, commands] of [['create then rename', [plannedCreate, plannedRename]], ['rename then create', [plannedRename, plannedCreate]]]) {
+      deny(await previewResponse([update(sentinel, 'must not save before planned Name collision'), ...commands]), 409, 'intra_plan_conflict');
+      await unchanged(sentinel); await unchanged(media);
+      record('Same-plan ' + order + ' destination collision rejects the whole preview before any write', { repositoryWrites: 0 });
+    }
+    deny(await previewResponse([update(sentinel, 'must not save before two renames collide'), plannedRename, { action: 'update', targetId: collision.Id, expectedRevision: collision.revision, fields: { Name: plannedName.toUpperCase() } }]), 409, 'intra_plan_conflict');
+    await unchanged(sentinel); await unchanged(media); await unchanged(collision);
+    record('Two planned renames cannot claim the same case-insensitive destination', { repositoryWrites: 0 });
   } catch (error) { failure = error; report.error = scrub(error.message); }
   finally {
     try { await setDenied(false); } catch (error) { failure ??= error; report.aclCleanupError = scrub(error.message); }

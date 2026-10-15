@@ -10,22 +10,23 @@ export function revision(content) {
   if (typeof content.revision !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(content.revision)) throw new DomainError('backend_revision_unavailable', 'The coordinated application snapshot revision is unavailable.', 503);
   return content.revision;
 }
+const receiptFolder = (repo, type) => type === 'Timeline' || type === 'TimelineEntry' ? repo.paths.timelines : repo.paths.media;
 // Stored receipts are private, but current Open rights still apply when a
 // caller retrieves them later. Confirmed deleted IDs use their surviving
 // application folder; they cannot be read as existing content again.
 export async function receiptTargets(context, plan, result) {
-  const deleted = new Set(), targets = new Set();
+  const deleted = new Set(), targets = new Set(), folders = new Set();
   for (const item of result.completed || []) {
     const step = plan.steps[item.index];
-    if (step?.payload.action === 'delete') {
+    if (step?.payload.action === 'delete' && item.result?.deleted) {
       deleted.add(step.payload.targetId);
       for (const entry of step.payload.entries || []) deleted.add(entry.id);
+      folders.add(receiptFolder(context.repo, step.payload.type));
     }
     if (item.result?.id && !item.result.deleted) targets.add(item.result.id);
     for (const entry of item.result?.completed || []) if (entry.id && !entry.deleted) targets.add(entry.id);
   }
-  for (const step of plan.steps) {
-    const folder = step.payload.type === 'Timeline' || step.payload.type === 'TimelineEntry' ? context.repo.paths.timelines : context.repo.paths.media;
+  for (const folder of folders) {
     targets.add((await context.repo.read(folder,{parent:true})).Id);
   }
   for (const id of deleted) targets.delete(id);
@@ -39,12 +40,13 @@ export async function preview(context, input, store) {
   if (!Array.isArray(commands) || !commands.length || commands.length > 5000) throw new DomainError('invalid_commands', 'Supply 1..5000 application commands.');
   const repo = context.repo, steps = [], targets = [], diffs = [], effects = [], allOperations = [];
   const mutableIds = new Set(), reservedNames = new Set();
-  const addStep = (payload, operations, preconditions) => {
-    if (payload.action === 'create') {
-      const name=payload.parentId+'/'+payload.fields.Name;
+  const addStep = (payload, operations, preconditions, destination) => {
+    if (destination) {
+      const name=destination.toLowerCase();
       if (reservedNames.has(name)) throw new DomainError('intra_plan_conflict','Two commands reserve the same parent/Name.',409);
       reservedNames.add(name);
-    } else {
+    }
+    if (payload.action !== 'create') {
       const ids=payload.action==='order'?payload.entries.map(e=>e.id):[payload.targetId,...(payload.action==='delete'?payload.entries.map(e=>e.id):[])];
       if(ids.some(id=>mutableIds.has(id)))throw new DomainError('intra_plan_conflict','A plan may mutate each target once. Combine metadata and cover in one command.',409);
       ids.forEach(id=>mutableIds.add(id));
@@ -70,7 +72,7 @@ export async function preview(context, input, store) {
       await repo.assertNameAvailable(parent.Path+'/'+fields.Name);
       const ops = [{ target: parent.Id, action: 'create', type: command.type }];
       if (command.type === 'TimelineEntry') { await repo.read(assertId(fields.MediaItem), { expectedType: 'MediaItem' }); ops.push({ target: fields.MediaItem, action: 'read' }); }
-      addStep({ operationId, action: 'create', type: command.type, parentId: parent.Id, expectedRevision: revision(parent), fields }, ops, [{ id: parent.Id, revision: revision(parent), parent: true }]);
+      addStep({ operationId, action: 'create', type: command.type, parentId: parent.Id, expectedRevision: revision(parent), fields }, ops, [{ id: parent.Id, revision: revision(parent), parent: true }], parent.Path+'/'+fields.Name);
       targets.push(parent.Id); diffs.push({ command: index, action: 'create', parentId: parent.Id, fields: fieldDiff({}, fields) }); continue;
     }
     if (command.action === 'order') {
@@ -98,8 +100,11 @@ export async function preview(context, input, store) {
     const action = command.action === 'metadata' ? 'update' : command.action;
     const ops = [{ target: before.Id, action }], guards = [{ id: before.Id, revision: revision(before) }];
     const payload = { operationId, action, type: before.Type, targetId: before.Id, expectedRevision: revision(before) };
+    let destination;
     targets.push(before.Id);
     if (action === 'delete') {
+      const folder=await repo.read(receiptFolder(repo,before.Type),{parent:true});
+      ops.push({target:folder.Id,action:'read'});
       if(before.Type!=='Timeline')await repo.assertLeaf(before.Id);
       const children = before.Type === 'Timeline' ? await repo.children(before.Id,'delete') : [];
       const references = ['MediaItem','BookMediaItem'].includes(before.Type) ? await repo.references(before.Id) : {hasReferences:false,readableReferences:[]};
@@ -124,7 +129,7 @@ export async function preview(context, input, store) {
       if (fields.MediaItem) { await repo.read(assertId(fields.MediaItem), { expectedType: 'MediaItem' }); ops.push({ target: fields.MediaItem, action: 'read' }); }
       payload.fields = fields; diffs.push({ command: index, targetId: before.Id, fields: fieldDiff(before, fields) });
       if(Object.keys(fields).length)await repo.writableFields(before.Type,fields);
-      if(fields.Name&&fields.Name!==before.Name)await repo.assertNameAvailable(before.Path.slice(0,before.Path.lastIndexOf('/'))+'/'+fields.Name,before.Id);
+      if(fields.Name&&fields.Name!==before.Name){destination=before.Path.slice(0,before.Path.lastIndexOf('/'))+'/'+fields.Name;await repo.assertNameAvailable(destination,before.Id);}
       if (command.cover !== undefined) {
         assertObject(command.cover); requireScope(context,'covers:write');
         if (!['MediaItem','BookMediaItem'].includes(before.Type) || Object.keys(command.cover).some(k=>!['bytesBase64','mimeType','fileName'].includes(k))) throw new DomainError('invalid_cover','Metadata cover requires a valid media cover object.');
@@ -133,7 +138,7 @@ export async function preview(context, input, store) {
         diffs.at(-1).fields.push({field:'CoverImageBin',before:'existing binary',after:{byteLength:bytes.length,sha256:hash(bytes.toString('base64'))}});
       }
     }
-    addStep(payload, ops, guards);
+    addStep(payload, ops, guards, destination);
   }
   await context.check(); await repo.assert(allOperations); await context.check();
   const plan = { id: randomUUID(), principal: context.principal, requestHash: hash(input), expires: Date.now() + 15 * 60 * 1000, steps, targets: [...new Set(targets)], diff: diffs, effects };
@@ -170,6 +175,7 @@ export async function apply(context, id, key, store) {
   for (const [index, step] of plan.steps.entries()) {
     if(receipts.has(index))continue;
     await context.repo.assert(step.operations);
+    if(step.payload.action==='delete')await context.repo.read(receiptFolder(context.repo,step.payload.type),{parent:true});
     if(step.payload.targetId&&step.payload.action!=='order')await context.repo.assertWritableTarget(await context.repo.read(step.payload.targetId));
     if(step.payload.action==='create') {
       const parent=await context.repo.read(step.payload.parentId,{parent:true});

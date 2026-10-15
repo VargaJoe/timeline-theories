@@ -2,7 +2,7 @@ import { repository, assertOperations, captureOperationContext, patchContentWith
 import { mediaLibraryPath } from '../projectPaths';
 import { TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 import { singleChoice } from './contentValues';
-import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, nativeSnapshot } from './nativeApi';
+import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, nativeSnapshot, NativeCreationIntent } from './nativeApi';
 
 // Minimal MediaItem reference type for expanded reference
 export interface MediaItemRef {
@@ -130,18 +130,21 @@ export class TimelineEntryService {
    * @param data TimelineEntry data (excluding id)
    * @param parentPath Path of the parent timeline (required)
    */
-  static async createTimelineEntry(data: Omit<TimelineEntry, 'id'>, parentPath: string): Promise<TimelineEntry & { mediaItemPath?: string }> {
+  static async createTimelineEntry(data: Omit<TimelineEntry, 'id'>, parentPath: string, intent = new NativeCreationIntent('entry-')): Promise<TimelineEntry & { mediaItemPath?: string }> {
+    data = structuredClone(data);
     const checkContext = captureOperationContext();
+    return intent.run({ kind: 'entry', parentPath, data }, async name => {
     await assertOperations([{ target: parentPath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }]);
     if (!data.mediaItem?.Id) throw new Error('An entry needs a local media reference');
     const media = await repository.load({ idOrPath: data.mediaItem.Id, oDataOptions: { select: ['Path'] } });
     if (!media.d.Path?.startsWith(mediaLibraryPath + '/')) throw new Error('Media reference is outside the project library');
     checkContext();
     const result = await repository.post({
+      requestInit: intent.requestInit(),
       parentPath,
       contentType: TIMELINE_ENTRY_CONTENT_TYPE,
       content: {
-        Name: data.name || 'entry-' + crypto.randomUUID(),
+        Name: data.name || name,
         DisplayName: data.displayName || data.mediaItem?.DisplayName || 'Unnamed Entry',
         MediaItem: data.mediaItem?.Id, // Reference field (id)
         Position: data.position,
@@ -164,6 +167,7 @@ export class TimelineEntryService {
       ...data,
       mediaItemPath,
     };
+    }, checkContext);
   }
 
   // Update a timeline entry

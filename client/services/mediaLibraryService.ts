@@ -86,11 +86,12 @@ export async function uploadCoverImageBinary(
 }
 
 // src/client/services/mediaLibraryService.ts
-import { repository, assertOperations, uploadBinary, patchContentWithRevision } from './sensenet';
+import { repository, assertOperations, captureOperationContext, uploadBinary, patchContentWithRevision } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { MEDIA_ITEM_CONTENT_TYPE, BOOK_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
 import { singleChoice } from './contentValues';
+import { NativeApiError, NativeCreationIntent } from './nativeApi';
 
 export interface MediaItem {
   Id: number;
@@ -205,7 +206,9 @@ export class MediaLibraryService {
   /**
    * Creates a new media item in the global library
    */
-  static async createMediaItem(data: CreateMediaItemRequest): Promise<MediaItem> {
+  static async createMediaItem(data: CreateMediaItemRequest, intent = new NativeCreationIntent()): Promise<MediaItem> {
+    data = structuredClone(data);
+    return intent.run({ kind: 'media', data }, async name => {
     try {
       console.log('Creating media item with data:', data);
 
@@ -271,7 +274,7 @@ export class MediaLibraryService {
 
       // Build content object, excluding undefined fields
       const content: Partial<CreateMediaItemRequest> = {
-        Name: data.Name || crypto.randomUUID(),
+        Name: data.Name || name,
         DisplayName: data.DisplayName,
         Title: data.Title,
         Subtitle: data.Subtitle,
@@ -296,6 +299,7 @@ export class MediaLibraryService {
       };
 
       const response = await repository.post({
+        requestInit: intent.requestInit(),
         parentPath: this.MEDIA_LIBRARY_PATH,
         contentType: contentType,
         oDataOptions: {
@@ -309,8 +313,10 @@ export class MediaLibraryService {
       return this.mapMemoToMediaItem(response.d);
     } catch (error) {
       console.error('Error creating media item:', error);
+      if (error instanceof NativeApiError) throw error;
       throw new Error('Failed to create media item. Please check your connection and try again.');
     }
+    }, captureOperationContext());
   }
 
   /**

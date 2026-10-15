@@ -53,6 +53,7 @@ async function smoke() {
   const secrets = Object.values(accounts).flatMap(account => [account.password, account.apiKey, account.token]).filter(value => typeof value === 'string' && value.length > 7);
   secrets.push(inventory.credential.value);
   const redact = value => secrets.reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(value))
+    .replace(/(^|\n)[ \t]*-[ \t]*(?:authorization|cookie|set-cookie|idempotency-key)[ \t]*:[^\r\n]*/gi, '$1    - [private request header redacted]')
     .replace(/([?&](?:code|auth_code|state|session_state|access_token|refresh_token|id_token)=)[^&"\s]+/gi, '$1[redacted]');
   const owned = new Map(), rawMutations = [], nativeApplies = [], nativePlans = [], nativeGets = [], nativeFailures = [], externalOrigins = [], blockedOptionalAssets = [];
   let browser, context, page, grant, timeline, media, first, second, primaryFailure;
@@ -86,7 +87,7 @@ async function smoke() {
     const count = Number(value.__count); assert.ok(Number.isSafeInteger(count) && count >= 0); return count;
   };
   const modal = () => page.getByRole('heading', { name: 'Edit Timeline Entry', exact: true }).locator('..').locator('..');
-  const rawRead = target => local.api(target, { account: editor, query: { '$select': 'Id,Name,Path,Notes,Position,MediaItem/Id', '$expand': 'MediaItem', metadata: 'no' } });
+  const rawRead = target => local.api(target, { account: editor, query: { '$select': 'Id,ParentId,Name,DisplayName,Path,Notes,Position,MediaItem/Id', '$expand': 'MediaItem', metadata: 'no' } });
   const reloadTimeline = async () => {
     await page.goto(FRONTEND + '/timelines/' + timeline.Name);
     await page.getByText(timeline.DisplayName, { exact: true }).waitFor({ timeout: 60000 });
@@ -96,6 +97,7 @@ async function smoke() {
   try {
     const capabilities = await native.verify(); assert.equal(capabilities.backendProtocolRequired, 'gateway-coordinated-v1');
     report.sourceCountBefore = await sourceCount();
+    assert.equal(report.sourceCountBefore, 2998, 'The M0 browser gate requires the clean source baseline.');
     grant = await native.request('/grants', { method: 'POST', token: editor.apiKey, backendAuth: 'ApiKey', body: { scopes: SCOPES, expiresInSeconds: 3600 } });
     secrets.push(grant.token); assert.match(grant.token, /^tta_/);
     timeline = await create('Timeline', { Name: prefix + '-timeline', DisplayName: prefix + ' timeline', Description: 'Own native/browser parity fixture', IsVisible: false, SortOrder: 'chronological', TimelineType: 'chronological' });
@@ -126,7 +128,8 @@ async function smoke() {
       if (url.origin === local.REPOSITORY && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) rawMutations.push({ method, path: url.pathname });
       if ([FRONTEND, GATEWAY].includes(url.origin) && method === 'GET' && url.pathname.startsWith('/api/v1/content/')) nativeGets.push({ path: url.pathname, clientOrigin: request.headers()['x-timeline-client-origin'] });
       if ([FRONTEND, GATEWAY].includes(url.origin) && method === 'POST') {
-        if (/^\/api\/v1\/plans\/[^/]+\/apply$/.test(url.pathname)) nativeApplies.push({ path: url.pathname });
+        // Keep keys only in memory for exact retry assertions; never include them in reports.
+        if (/^\/api\/v1\/plans\/[^/]+\/apply$/.test(url.pathname)) nativeApplies.push({ path: url.pathname, key: request.headers()['idempotency-key'] });
         if (url.pathname === '/api/v1/plans') nativePlans.push(request.postDataJSON());
       }
     });
@@ -218,6 +221,129 @@ async function smoke() {
     assert.equal(nativeApplies.length, reorderMark + 1); assert.equal(rawMutations.length, 0);
     assert.ok(nativePlans.some(plan => plan.commands.some(command => command.action === 'order' && command.timelineId === timeline.Id && command.entries.length === 2)));
     record('UI keyboard reorder submits one complete native order command without raw PATCH requests', { nativeApplyPosts: nativeApplies.length - reorderMark, rawRepositoryMutations: rawMutations.length });
+
+    const entries = async () => (await native.request('/entries?' + new URLSearchParams({ timelineId: String(timeline.Id), top: '100' }), { token: grant.token })).items;
+    const originalEntryIds = (await entries()).map(entry => entry.Id).sort((a, b) => a - b);
+    assert.deepEqual(originalEntryIds, [first.Id, second.Id].sort((a, b) => a - b));
+    const creationNotes = 'Owned Chromium creation retry ' + id;
+    const assertCreatedOwnership = snapshot => {
+      // Generated entry names belong to the form, so ownership comes from the
+      // exact isolated parent, media reference and independently expected fields.
+      assert.equal(snapshot.Type, 'TimelineEntry'); assert.equal(snapshot.ParentId, timeline.Id);
+      assert.equal(reference(snapshot.MediaItem), media.Id); assert.equal(snapshot.DisplayName, media.DisplayName);
+      assert.equal(snapshot.Notes, creationNotes); assert.equal(snapshot.Position, 3);
+      assert.ok(snapshot.Path.startsWith(timeline.Path + '/')); assert.ok(!originalEntryIds.includes(snapshot.Id));
+      return snapshot;
+    };
+    const assertRepositoryCreation = async snapshot => {
+      const actual = await rawRead(snapshot.Id);
+      assert.equal(actual.Id, snapshot.Id); assert.equal(actual.ParentId, timeline.Id); assert.equal(actual.Name, snapshot.Name);
+      assert.equal(actual.Path, snapshot.Path); assert.equal(actual.DisplayName, media.DisplayName);
+      assert.equal(reference(actual.MediaItem), media.Id); assert.equal(actual.Notes, creationNotes); assert.equal(actual.Position, 3);
+    };
+    const openCreationForm = async () => {
+      await page.goto(FRONTEND + '/timelines/' + timeline.Name + '/add-entry');
+      await page.getByRole('heading', { name: 'Add Media to Timeline', exact: true }).waitFor({ timeout: 60000 });
+      await page.getByPlaceholder('Search media...', { exact: true }).fill(media.DisplayName);
+      const ownMedia = page.getByRole('listitem').filter({ has: page.getByText(media.DisplayName, { exact: true }) });
+      await ownMedia.getByRole('button', { name: 'Select', exact: true }).click({ timeout: 60000 });
+      await page.getByRole('heading', { name: 'Configure Timeline Entry', exact: true }).waitFor();
+      assert.equal(await ownMedia.count(), 0, 'The real selection must open the entry form.');
+      await page.locator('input[type="number"]').fill('3');
+      await page.getByPlaceholder('Optional notes about this entry...', { exact: true }).fill(creationNotes);
+    };
+    const isApplyResponse = response => {
+      const url = new URL(response.url());
+      return url.origin === FRONTEND && response.request().method() === 'POST' && /^\/api\/v1\/plans\/[^/]+\/apply$/.test(url.pathname);
+    };
+    await openCreationForm();
+    const creationApplyMark = nativeApplies.length, creationPlanMark = nativePlans.length;
+    let resolveApplyJob, formApplyStarted = false, droppedReceipt, interceptedFailure;
+    const originalApplyJob = new Promise(resolve => { resolveApplyJob = resolve; });
+    const observeFormApply = request => {
+      const url = new URL(request.url());
+      if (url.origin === FRONTEND && request.method() === 'POST' && /^\/api\/v1\/plans\/[^/]+\/apply$/.test(url.pathname)) formApplyStarted = true;
+    };
+    const ownJobRoute = url => url.origin === FRONTEND && /^\/api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(url.pathname);
+    const dropOneCommittedResponse = async route => {
+      const request = route.request(), jobId = new URL(request.url()).pathname.split('/').at(-1);
+      if (!formApplyStarted || request.method() !== 'GET') return route.continue();
+      // Preview polling must finish normally. Once apply starts, wait for its
+      // actual 202 acknowledgement before selecting the exact original job.
+      if (jobId !== await originalApplyJob) return route.continue();
+      try {
+        const forwarded = await route.fetch({ maxRetries: 0 });
+        if (!droppedReceipt && forwarded.status() === 200) {
+          const value = await forwarded.json();
+          assert.equal(value.ok, true); assert.ok(Array.isArray(value.completed)); assert.equal(value.completed.length, 1);
+          const createdId = value.completed[0]?.result?.id; assert.ok(Number.isSafeInteger(createdId) && createdId > 0);
+          const snapshot = assertCreatedOwnership(await read(createdId)); await assertRepositoryCreation(snapshot);
+          droppedReceipt = { jobId, id: createdId, status: forwarded.status(), snapshot };
+          return route.abort('failed'); // The genuine write and reads already completed; only the browser loses the response.
+        }
+        return route.fulfill({ response: forwarded });
+      } catch (error) { interceptedFailure = error; await route.abort('failed').catch(() => {}); }
+    };
+    page.on('request', observeFormApply);
+    await page.route(ownJobRoute, dropOneCommittedResponse);
+    try {
+      const firstAcknowledgement = page.waitForResponse(isApplyResponse, { timeout: 15 * 60 * 1000 });
+      await page.getByRole('button', { name: 'Add to Timeline', exact: true }).click();
+      const acknowledgement = await firstAcknowledgement; assert.equal(acknowledgement.status(), 202);
+      const queued = await acknowledgement.json(); assert.equal(queued.pending, true);
+      assert.match(queued.job?.id || '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      resolveApplyJob(queued.job.id);
+      await page.getByText('The native gateway request failed. Recover an approved apply with the same saved plan and key.', { exact: true }).waitFor({ timeout: 15 * 60 * 1000 });
+      if (interceptedFailure) throw interceptedFailure;
+      assert.ok(droppedReceipt, 'The terminal successful backend receipt must actually have been dropped.');
+      assert.equal(droppedReceipt.jobId, queued.job.id); assert.equal(nativeApplies.length, creationApplyMark + 1);
+      assert.equal(new URL(page.url()).pathname, '/timelines/' + timeline.Name + '/add-entry');
+      assert.equal(await page.getByPlaceholder('Optional notes about this entry...', { exact: true }).inputValue(), creationNotes);
+      assert.equal(await page.locator('input[type="number"]').inputValue(), '3');
+      assert.deepEqual((await entries()).map(entry => entry.Id).sort((a, b) => a - b), [...originalEntryIds, droppedReceipt.id].sort((a, b) => a - b));
+      assert.equal(rawMutations.length, 0);
+      record('Chromium loses one successful creation response only after the real owned repository write, leaving the original form retryable', { targetId: droppedReceipt.id, jobId: droppedReceipt.jobId, backendStatus: droppedReceipt.status, newOccurrences: 1, rawRepositoryMutations: 0 });
+
+      const recoveredCompletion = waitForBrowserCompletion(page, isApplyResponse);
+      await page.getByRole('button', { name: 'Add to Timeline', exact: true }).click();
+      const recovered = await recoveredCompletion; assert.equal(recovered.response.status(), 200);
+      const receipt = await recovered.response.json(); assert.equal(receipt.ok, true); assert.equal(receipt.completed.length, 1); assert.equal(receipt.completed[0].result.id, droppedReceipt.id);
+      await page.waitForURL(url => url.origin === FRONTEND && url.pathname === '/timelines/' + timeline.Name, { timeout: 60000 });
+      await page.getByTitle('Edit Entry', { exact: true }).nth(2).waitFor({ timeout: 60000 }); assert.equal(await page.getByTitle('Edit Entry', { exact: true }).count(), 3);
+      assert.equal(nativePlans.length, creationPlanMark + 1); assert.equal(nativeApplies.length, creationApplyMark + 2);
+      const [originalApply, retryApply] = nativeApplies.slice(creationApplyMark);
+      assert.ok(originalApply.key); assert.equal(retryApply.path, originalApply.path); assert.ok(retryApply.key === originalApply.key, 'Retry must keep the original idempotency key.');
+      const ownCreate = nativePlans[creationPlanMark].commands;
+      assert.equal(ownCreate.length, 1); assert.equal(ownCreate[0].action, 'create'); assert.equal(ownCreate[0].parentId, timeline.Id);
+      assert.equal(ownCreate[0].fields.Name, droppedReceipt.snapshot.Name); assert.equal(ownCreate[0].fields.MediaItem, media.Id); assert.equal(ownCreate[0].fields.Notes, creationNotes);
+      const recoveredSnapshot = assertCreatedOwnership(await read(droppedReceipt.id)); assert.equal(recoveredSnapshot.Name, droppedReceipt.snapshot.Name); await assertRepositoryCreation(recoveredSnapshot);
+      assert.deepEqual((await entries()).map(entry => entry.Id).sort((a, b) => a - b), [...originalEntryIds, droppedReceipt.id].sort((a, b) => a - b));
+      assert.equal(rawMutations.length, 0);
+      record('Retrying the original Chromium entry form reuses the same plan and key and recovers exactly one committed occurrence', { targetId: droppedReceipt.id, nativeApplyPosts: 2, completedStatus: recovered.response.status(), newOccurrences: 1, rawRepositoryMutations: 0 });
+    } finally {
+      resolveApplyJob(undefined); page.off('request', observeFormApply);
+      await page.unroute(ownJobRoute, dropOneCommittedResponse);
+    }
+
+    // A separate form with the exact same media and fields is a deliberate new
+    // occurrence. The original timeline owns both generated names for cleanup.
+    await openCreationForm(); const deliberateMark = nativeApplies.length, deliberatePlanMark = nativePlans.length;
+    const deliberateCompletion = waitForBrowserCompletion(page, isApplyResponse);
+    await page.getByRole('button', { name: 'Add to Timeline', exact: true }).click();
+    const deliberate = await deliberateCompletion; assert.equal(deliberate.response.status(), 200);
+    const deliberateReceipt = await deliberate.response.json(); assert.equal(deliberateReceipt.ok, true); assert.equal(deliberateReceipt.completed.length, 1);
+    const deliberateSnapshot = assertCreatedOwnership(await read(deliberateReceipt.completed[0].result.id)); await assertRepositoryCreation(deliberateSnapshot);
+    assert.notEqual(deliberateSnapshot.Id, droppedReceipt.id); assert.notEqual(deliberateSnapshot.Name, droppedReceipt.snapshot.Name);
+    await page.waitForURL(url => url.origin === FRONTEND && url.pathname === '/timelines/' + timeline.Name, { timeout: 60000 });
+    await page.getByTitle('Edit Entry', { exact: true }).nth(3).waitFor({ timeout: 60000 }); assert.equal(await page.getByTitle('Edit Entry', { exact: true }).count(), 4);
+    assert.equal(nativeApplies.length, deliberateMark + 1); assert.equal(nativePlans.length, deliberatePlanMark + 1);
+    assert.notEqual(nativeApplies[deliberateMark].path, nativeApplies[creationApplyMark].path); assert.ok(nativeApplies[deliberateMark].key !== nativeApplies[creationApplyMark].key, 'A deliberate new form must use a fresh idempotency key.');
+    const originalFields = { ...nativePlans[creationPlanMark].commands[0].fields }, deliberateFields = { ...nativePlans[deliberatePlanMark].commands[0].fields };
+    delete originalFields.Name; delete deliberateFields.Name; assert.deepEqual(deliberateFields, originalFields);
+    assert.deepEqual((await entries()).map(entry => entry.Id).sort((a, b) => a - b), [...originalEntryIds, droppedReceipt.id, deliberateSnapshot.Id].sort((a, b) => a - b));
+    assert.equal(rawMutations.length, 0);
+    record('A separate Chromium form deliberately creates a distinct same-media occurrence with identical fields and fresh Name, plan and key', { entryIds: [droppedReceipt.id, deliberateSnapshot.Id], newOccurrences: 2, completedStatus: deliberate.response.status(), rawRepositoryMutations: 0 });
+
     await page.screenshot({ path: path.join(directory, 'native-ui-parity.png'), fullPage: true });
     assert.equal(externalOrigins.length, 0); report.rawRepositoryMutations = rawMutations.length; report.browserNativeApplyPosts = nativeApplies.length;
     report.passed = true;
@@ -255,6 +381,7 @@ async function smoke() {
         await wait(250); report.sourceCountAfter = await sourceCount();
       }
       if (report.sourceCountAfter !== report.sourceCountBefore) { report.passed = false; report.failure = report.failure || 'Local source count changed after UUID native cleanup'; }
+      assert.equal(report.sourceCountAfter, 2998, 'The source must return to 2998 records after native cleanup.');
     }
     catch (error) { report.passed = false; report.failure = report.failure || redact(error.message); }
     fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify(report, null, 2) + '\n');
@@ -266,4 +393,16 @@ async function smoke() {
   return report;
 }
 module.exports = { smoke };
-if (require.main === module) smoke().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (require.main === module) {
+  // Chromium uses the installed local CA; Playwright route.fetch uses Node's
+  // trust store. Load the same explicit local certificate at Node startup,
+  // without disabling TLS verification or changing the caller's environment.
+  const caFile = path.join(local.ROOT, 'certificates/localhost.pem');
+  if (process.env.NODE_EXTRA_CA_CERTS !== caFile) {
+    const child = require('node:child_process').spawnSync(process.execPath, [__filename, ...process.argv.slice(2)], {
+      stdio: 'inherit', env: { ...process.env, NODE_EXTRA_CA_CERTS: caFile },
+    });
+    if (child.error) console.error('Could not start the browser gate with its local certificate.');
+    process.exitCode = child.status ?? 1;
+  } else smoke().catch(error => { console.error(error.message); process.exitCode = 1; });
+}

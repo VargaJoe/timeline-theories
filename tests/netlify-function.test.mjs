@@ -30,7 +30,7 @@ after(async () => { await fixture?.close(); });
 
 async function setup(t, extra = {}) {
   const projectRoot = '/Root/Content/FunctionFixture-' + randomUUID();
-  const state = { requests: [], patches: 0, allowSave: true, allowRead: true, onSave: null, interruptNextReadback: false };
+  const state = { requests: [], patches: 0, allowSave: true, allowRead: true, allowRootRead: true, onSave: null, interruptNextReadback: false };
   const content = { Id: 10, ParentId: 2, Name: 'media', DisplayName: 'Fixture media', Path: projectRoot + '/MediaLibrary/media', Type: 'MediaItem', Title: 'Before', CreationDate: '2026-10-01T00:00:00Z', CreatedById: 42, ModificationDate: '2026-10-01T00:00:00Z', ModifiedById: 42, Version: 'V1.0', VersionId: 1 };
   const send = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ d: value })); };
   const server = https.createServer(tls, async (req, res) => {
@@ -40,14 +40,14 @@ async function setup(t, extra = {}) {
       if (url.pathname.endsWith('/GetCurrentUser')) return send(res, credential === 'rejected' ? 401 : 200, { Id: credential === 'other-user' ? 99 : 42, Name: 'AuthenticatedFixture' });
       if (url.pathname.endsWith('/HasPermission')) {
         if (url.searchParams.get('permissions') === 'Save' && state.onSave) { const callback = state.onSave; state.onSave = null; await callback(); }
-        return send(res, 200, url.searchParams.get('permissions') === 'Save' ? state.allowSave : state.allowRead);
+        return send(res, 200, url.searchParams.get('permissions') === 'Save' ? state.allowSave : state.allowRead && (state.allowRootRead || url.pathname.includes('content(10)')));
       }
       if (url.pathname.endsWith('/GetSchema')) {
         const type = url.searchParams.get('contentTypeName');
         const names = ['Id','ParentId','Name','Path','Type','CreationDate','CreatedById','ModificationDate','ModifiedById','Version','VersionId', ...(FIELDS[type] || []), 'CoverImageBin'];
         return send(res, 200, [{ ContentTypeName: type, FieldSettings: [...new Set(names)].map(Name => ({ Name, ReadOnly: false })) }]);
       }
-      if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0' });
+      if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0' });
       if (url.pathname === '/OData.svc/content(10)') {
         if (!state.allowRead) return send(res, 403, null);
         if (req.method === 'GET' && state.patches && state.interruptNextReadback) {
@@ -217,6 +217,17 @@ test('successful apply persists replayable receipts and automatic job retry neve
   const denied = await app.handleRequest(request(`jobs/${jobId}`));
   assert.equal(denied.status, 403); assert.equal((await denied.json()).error.code, 'permission_denied');
   assert.equal(state.patches, 1);
+});
+
+test('exact-node Open/Save returns and replays a successful update when its library root is denied',async t=>{
+  const {app,request,preview,state,enqueue,runNext}=await setup(t);state.allowRootRead=false;
+  const plan=await preview(),key='exact-node-without-library-root';
+  const job=await enqueue(`plans/${plan.id}/apply`,{},{headers:{'Idempotency-Key':key}});await runNext();
+  const result=await app.handleRequest(request(`jobs/${job}`));assert.equal(result.status,200,await result.clone().text());
+  assert.equal((await result.json()).completed[0].result.id,10);assert.equal(state.patches,1);
+  const replay=await app.handleRequest(request(`plans/${plan.id}/apply`,{method:'POST',body:{},headers:{'Idempotency-Key':key}}));
+  assert.equal(replay.status,200);assert.equal((await replay.json()).ok,true);assert.equal(state.patches,1);
+  assert.equal(state.requests.some(row=>row.path.endsWith("('MediaLibrary')")||row.path.startsWith('/OData.svc/content(2)')),false);
 });
 
 test('current Save ACL denial blocks a queued approved plan before backend mutation', async t => {
