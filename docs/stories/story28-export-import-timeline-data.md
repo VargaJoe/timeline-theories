@@ -1,5 +1,8 @@
 # Story 28 - Export/Import Timeline Data in Custom Format
 
+> **Status audit — 2026-10-14:** Megvalósított; korlátozott roundtrip tesztelt. Aktív timelineExportService + timelineImportService: 19 oszlop/borítók, meglévő local media ID. Nem lossless cross-repo backup. A régi checklist Story28 Auto Media Creation neve másik, meglévő select/create alfunkciót jelölt.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 **As a user, I want to export and import timeline data in a simple, Notepad++-friendly format (CSV/TSV), so I can efficiently manage large amounts of data outside the web UI and bulk update or create timelines.**
 
 ## Problem Statement

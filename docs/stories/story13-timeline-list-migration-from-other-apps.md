@@ -1,5 +1,8 @@
 # Story 13 - Timeline/List Migration from Other Apps
 
+> **Status audit — 2026-10-14:** Részleges; Trakt használatban. Story17 legalább egy importforrást teljesít; általános IMDb/scraping/multi-provider migráció nincs.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 **As a user, I want to import timelines or lists from other apps (like Trakt, IMDb), so I can migrate my data easily.**
 
 ## Technical Breakdown & Tasks

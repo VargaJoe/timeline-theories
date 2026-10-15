@@ -1,189 +1,40 @@
-# Export/Import Timeline Data - Detailed Usage Guide
+# Timeline ZIP/TSV export and import
 
-## Overview
+M1 adds native `exchange/{timelineId}/export` and `/preview` routes plus saved-plan apply. The active UI importer sends one complete approved native batch, including deduplicated cover bytes. Format/local-ID limits below are unchanged. See [M1 API](m1-native-api.md) and [operation parity](m1-verification.md).
 
-The export/import functionality allows bulk management of timelines and their entries using external tools (e.g., Notepad++, Excel). The system saves and loads data in ZIP format, which includes the timeline_data.tsv file and the covers/ folder with images.
+Current behavior audited 2026-10-14 against develop f53774acbc586f382d999e339bdb1b00d7f1d951. Active UI: client/services/timelineExportService.ts and timelineImportService.ts. See [feature status](feature-status-audit-2026-10-14.md) and [API inventory](api-documentation.md).
 
-## Export Functionality
+## Supported workflow
 
-### How to export a timeline?
+Open /timelines/{Name} while authenticated and permitted to read/export the timeline. Use Export Timeline to download a ZIP containing timeline_data.tsv and available covers/. Export controls are hidden for Visitors.
 
-1. **Navigation**: Go to the desired timeline page (e.g., `/timeline/my-timeline`)
-2. **Export button**: Click the "Export Timeline" button among the timeline action buttons
-3. **Wait**: The system downloads images and creates the ZIP file
-4. **Download**: The browser automatically downloads the `timeline-[name]-[date].zip` file
+To apply an archive, first open/create the destination timeline, then use its ZIP import control and select the file. The importer parses the TSV, resolves every media_id in the current repository, checks project membership and the complete target permission set, then applies entry changes and included covers. Authentication alone does not grant creation/update/upload rights.
 
-### What does the exported ZIP file contain?
+This is a limited entry-editing/copy workflow within a repository that already contains the referenced media. It is not a complete backup or lossless cross-repository migration.
 
-```
-timeline-my-timeline-2025-12-21.zip
-├── timeline_data.tsv    # Timeline data separated by tabs
-└── covers/              # Images folder
-    ├── cover_0.jpg
-    ├── cover_1.jpg
-    └── ...
-```
+## TSV contract
 
-### TSV Format Description
+The active exporter writes 19 columns:
 
-| Column Name | Required | Description | Example |
-|-------------|----------|-------------|---------|
-| timeline_name | No | Timeline name for reference | "Star Wars Chronology" |
-| entry_name | No | Entry name unique within timeline | "episode-4" |
-| Title | Yes | Entry title | "Star Wars: Episode IV - A New Hope" |
-| Description | No | Media item description | "The original Star Wars film..." |
-| MediaType | Yes | Media type | "movie", "tvepisode", "book" |
-| media_id | No | Media item identifier (for updates) | "12345" |
-| cover_image | No | Image filename in ZIP | "cover_0.jpg" |
-| ChronologicalDate | No | Chronological date | "1977-05-25" |
-| Position | No | Position in timeline | "1" |
-| Notes | No | Timeline-specific notes | "First appearance of Luke Skywalker" |
-| EntryLabel | No | Entry type | "mainstory", "flashback" |
-| Importance | No | Importance | "essential", "important" |
-| ChronologicalDescription | No | Flexible chronology description | "During the Clone Wars" |
-| Author | No | Author (for books) | "George Lucas" |
-| Publisher | No | Publisher (for books) | "Del Rey" |
-| ISBN | No | ISBN number | "978-0345325815" |
-| PublicationYear | No | Publication year | "1977" |
-| Genre | No | Genres (comma-separated) | "SciFi, Action" |
-| Tags | No | Tags (comma-separated) | "star wars, space opera" |
+timeline_name, entry_name, Title, Description, MediaType, media_id, cover_image, ChronologicalDate, Position, Notes, EntryLabel, Importance, ChronologicalDescription, Author, Publisher, ISBN, PublicationYear, Genre, Tags.
 
-## Import Functionality
+Fields escape tabs/newlines/carriage returns as literal backslash sequences. Keep the header and entry_name/media_id identities intact when editing. Entry Name must be nonempty, unique in the archive and contain no slash. media_id must be a valid existing positive ID inside the configured MediaLibrary subtree. Position and Choice values must satisfy the destination schema.
 
-### How to import timeline data?
+The archive does not include every domain field or complete media identity. Exported media description/book/tag columns do not mean that the current import will update those media fields.
 
-1. **Navigation**: Go to an empty timeline page, or create a new one
-2. **Import button**: Click the "Import Timeline" button
-3. **File selection**: Select the ZIP file from the file browser
-4. **Processing**: The system automatically:
-   - Extracts the ZIP file
-   - Reads the timeline_data.tsv
-   - Uploads the images
-   - Creates/updates the entries
+## What import changes
 
-### Import Behavior
+- A matching entry_name updates that occurrence. A new entry_name creates a separate occurrence referencing the existing media_id.
+- A matching entry whose existing MediaItem conflicts with media_id is rejected. Reusing a media_id across different entry names preserves distinct occurrences.
+- Entry title/Position/ChronologicalDate/ChronologicalDescription/Notes/EntryLabel/Importance are applied. Current import does not create missing media or bulk-edit its description/book/tag metadata.
+- A named cover must exist in covers/ and requires Save/upload permission on that media. Missing cover files fail preparation; there is no arbitrary cover-URL download fallback in this active import.
+- Existing media Open, all entry AddNew/Save and all involved cover Save rights are checked before the first write. Mutating the public operation-preview array cannot bypass the private execution plan.
+- A runtime failure after execution begins may leave already-applied entry/cover changes. There is no general transactional rollback or automatic cleanup guarantee. Review actual content before retrying.
 
-#### Timeline Entries handling:
-- **If doesn't exist**: Creates new timeline entry
-- **If exists**: Updates existing entry data
-- **Identification**: Matching based on `entry_name` field
+## Practical limits
 
-#### Media Items handling:
-- **If doesn't exist**: Creates new media item in Media Library
-- **If exists**: Updates existing media item data
-- **Identification**: Based on `media_id` field (SenseNet ID)
+Use this ZIP for occurrence edits or copying entries into a new timeline in the same repository, with preserved local media references. Use MediaLibrary editing or the existing metadata-update dialog for media-field changes. Use M0 snapshot/restore tooling for complete local data-preservation verification, rather than treating this archive as a portable backup.
 
-#### Images handling:
-- **From ZIP**: Automatically uploads from `covers/` folder
-- **URLs**: Downloads and uploads from specified URLs
-- **Errors**: Shows warning for missing images but continues import
+Current processing is sequential. There is no source-backed universal unlimited row guarantee, fixed 2GB archive promise or general per-image 10MB contract here. Large imports need representative validation against actual browser/repository limits.
 
-## Common Use Cases
-
-### 1. Timeline Backup and Restore
-```
-Task: Complete backup and restore of a timeline
-Steps:
-1. Export the source timeline
-2. Create a new empty timeline
-3. Import the exported ZIP into the new timeline
-```
-
-### 2. Timeline Editing in External Tools
-```
-Task: Bulk edits in Notepad++
-Steps:
-1. Export the timeline
-2. Open timeline_data.tsv in Notepad++
-3. Edit the fields (watch for tabs!)
-4. Save the TSV
-5. Repackage into ZIP with covers/ folder
-6. Import back into the same timeline
-```
-
-### 3. Bulk Addition of Timeline Entries
-```
-Task: Add many new entries at once
-Steps:
-1. Create a new empty timeline
-2. Create timeline_data.tsv file with entries
-3. Optionally add images to covers/ folder
-4. Package into ZIP
-5. Import into the new timeline
-```
-
-### 4. Bulk Update of Media Library Items
-```
-Task: Update many media item details
-Steps:
-1. Export the timeline (includes media item data)
-2. Edit Description, Author, Publisher etc. fields
-3. Import back - this updates media items too
-```
-
-### 5. Timeline Duplication with New Name
-```
-Task: Copy timeline with different name
-Steps:
-1. Export the original timeline
-2. Open TSV and change timeline_name field
-3. Create new empty timeline
-4. Import the modified ZIP
-```
-
-## Error Handling and Troubleshooting
-
-### Common Errors
-
-#### "timeline_data.tsv not found in ZIP file"
-- **Cause**: ZIP file doesn't contain the required TSV file
-- **Solution**: Ensure ZIP contains `timeline_data.tsv` file
-
-#### "Insufficient columns (X/19)"
-- **Cause**: Missing columns in TSV file
-- **Solution**: Check that all required columns are present
-
-#### "Failed to upload cover: ..."
-- **Cause**: Image upload error (non-critical)
-- **Solution**: Import continues, works without images
-
-#### "Entry already exists"
-- **Cause**: Duplicate import or same entry_name
-- **Solution**: Use unique entry_name values
-
-### Validation Rules
-
-- **Required fields**: Title, MediaType
-- **Unique identifiers**: entry_name within a timeline
-- **Data formats**:
-  - Dates: YYYY-MM-DD or free text
-  - Positions: integers
-  - Lists: comma-separated
-
-## Technical Details
-
-### File Size Limitations
-- ZIP file: Browser dependent (usually 2GB)
-- Individual images: 10MB/file maximum
-- TSV rows: Unlimited number
-
-### Security
-- Admin-only access
-- Files temporarily stored during processing
-- Failed imports automatically cleaned up
-
-### Performance
-- For large timelines, use smaller batches
-- Image uploads happen in parallel
-- Progress feedback at every step
-
-## Example Workflow
-
-### Complete Timeline Backup and Restore
-1. **Export**: Download `timeline-starwars-2025-12-21.zip`
-2. **Edit**: Open TSV in Excel, modify data
-3. **New Timeline**: Create "Star Wars - Updated" timeline
-4. **Import**: Upload ZIP, automatic processing
-5. **Verify**: New timeline appears with updated data
-
-This functionality gives administrators full control over timeline data, enabling efficient offline editing and bulk operations.
+Trakt list import is a separate existing feature. Its pagination/reconciliation improvements and a future lossless portable format are backlog; they are not the next milestone. [M1 native content-management API](m1-agent-api-session-prompt-2026-10-14.md) will expose the existing operations with their actual limitations.

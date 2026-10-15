@@ -1,5 +1,8 @@
 # Story 12 - Timeline Management and Media Library Improvements
 
+> **Status audit — 2026-10-14:** Megvalósított alap; tesztelt. Timeline/entry edit/delete és reorder. A tényleges könyvtár react-beautiful-dnd; nem dnd-kit.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 **As a user, I want to manage and organize my timelines and media library more efficiently, with features like drag-and-drop, grouping, and improved UI.**
 
 ## Technical Breakdown & Tasks

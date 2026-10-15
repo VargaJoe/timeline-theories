@@ -1,5 +1,8 @@
 # Story 32 - ABC-based Timeline Pagination
 
+> **Status audit — 2026-10-14:** Megvalósított. TimelineList ABC/All/URL filter/incremental skip/top/szerverrendezés van. Betűnézet is lapoz; a régi csak-All-lapoz állítás elavult.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US034 – ABC-based Timeline Pagination**
 > As a user, I want to browse timelines efficiently using alphabetical pagination, so I can quickly find timelines by their starting letter without loading all timelines at once.

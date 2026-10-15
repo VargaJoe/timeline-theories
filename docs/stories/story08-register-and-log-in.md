@@ -1,5 +1,8 @@
 # Story 08 - Register and Log In
 
+> **Status audit — 2026-10-14:** Részleges; helyi OIDC tesztelt. OIDC és SNAuth mód van. Supabase/Clerk onboarding, Google/GitHub login, regisztráció/profil/reset nincs. Admin használat az aktuális cél.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US008 – Register and Log In**
 > As a user, I want to register and log in using email or a third-party service, so my timelines are saved.

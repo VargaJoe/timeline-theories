@@ -1,5 +1,8 @@
 # Story 05 - Link Media Items to External Sources
 
+> **Status audit — 2026-10-14:** Részleges. ExternalLinks form/JSON/persist/display és provider ID parsing létezik; külön validátor/típusfüggő ajánló nincs.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US005 – Link Media Items to External Sources**
 > As a user, I want to add references (IMDb, Trakt, Goodreads, Amazon, YouTube, etc.) to a media item, based on its type.

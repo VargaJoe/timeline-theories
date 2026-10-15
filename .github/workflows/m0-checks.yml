@@ -1,9 +1,9 @@
-name: M0 checks
+name: M0 and M1 checks
 on:
   pull_request:
     branches: [develop]
   push:
-    branches: [feature/m0-local-foundation]
+    branches: [feature/m0-local-foundation, feature/m1-native-agent-api]
 permissions:
   contents: read
 jobs:
@@ -28,7 +28,9 @@ jobs:
           dotnet-version: '8.0.x'
       - run: dotnet build deployment/extensions/m0-timeline-security/Timeline.Theories.M0.Security.csproj --configuration Release --nologo
       - run: npm ci --prefix client
+      - run: npm ci
       - run: npm test
+      - run: npm run test:parity
       - run: npm run lint
       - run: npm run build
       - run: npm run build:readonly --prefix client

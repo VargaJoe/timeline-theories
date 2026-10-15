@@ -138,10 +138,12 @@ import { mediaLibraryPath } from '../projectPaths';
 import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
+import { NativeApiError, NativeCreationIntent } from './nativeApi';
 
 // Timeline service for frontend API calls
 export interface Timeline {
   id: string;
+  revision?: string;
   name: string;
   displayName: string;
   description?: string;
@@ -152,10 +154,13 @@ export interface Timeline {
   timelineType?: string;
 }
 
-export async function createTimeline(data: { name: string; displayName?: string; description?: string; sortOrder?: string; timelineType?: string }): Promise<Timeline> {
+export async function createTimeline(data: { name: string; displayName?: string; description?: string; sortOrder?: string; timelineType?: string }, intent = new NativeCreationIntent()): Promise<Timeline> {
+  data = structuredClone(data);
+  return intent.run({ kind: 'timeline', data }, async () => {
   try {
     // Create a Timeline content under the configured path
     const result = await repository.post({
+      requestInit: intent.requestInit(),
       parentPath: timelinesPath,
       contentType: TIMELINE_CONTENT_TYPE,
       oDataOptions: {
@@ -182,8 +187,10 @@ export async function createTimeline(data: { name: string; displayName?: string;
     };
   } catch (error) {
     console.error('Failed to create timeline:', error);
+    if (error instanceof NativeApiError) throw error;
     throw new Error('Failed to create timeline. Please check your connection and try again.');
   }
+  }, captureOperationContext());
 }
 
 export async function getTimelines(includePrivate = false, characterFilter?: string, skip?: number, top?: number, sortOrder?: 'alphabetical' | 'created_desc'): Promise<Timeline[]> {

@@ -1,5 +1,8 @@
 # Story 26 - Timeline Entry Tagging for Loops, Universes, and Parallel Events
 
+> **Status audit — 2026-10-14:** Hiányzik. Média Tags, ArcGroup és EntryLabel van; külön entry tag rendszer/universe nézet nincs.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US026 – Tag Timeline Entries for Loops, Universes, and Parallel Events**
 > As a user, I want to tag timeline entries to indicate story loops (e.g., time travel), alternate universes, or parallel events, so I can filter and render timelines in different logical groupings.

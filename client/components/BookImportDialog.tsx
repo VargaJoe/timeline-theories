@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { NativeCreationIntent } from '../services/nativeApi';
 import { BookImportService } from '../services/bookImportService';
 import type { BookSearchResult, BookImportData } from '../services/bookImportService';
 import { MediaLibraryService } from '../services/mediaLibraryService';
@@ -26,6 +27,8 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const batch = useRef<{ input: string; items: { data: BookImportData; intent: NativeCreationIntent }[] } | null>(null);
+  useEffect(() => { batch.current = null; }, [isOpen]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -69,13 +72,18 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
       const booksToImport = searchResults
         .filter(book => selectedBooks.has(`${book.source}-${book.externalId}`))
         .map(book => BookImportService.convertToImportData(book));
+      const input = JSON.stringify(booksToImport);
+      if (batch.current && batch.current.input !== input) throw new Error('Retry the original selected books, or close and start a new import after checking its outcome.');
+      batch.current ??= { input, items: booksToImport.map(data => ({ data, intent: new NativeCreationIntent() })) };
+      const attempt = batch.current;
 
       const importedBooks: BookImportData[] = [];
       // Preserve every selected occurrence; reconciliation is an explicit later task.
       await assertOperations(booksToImport.map(() => ({ target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE })));
-      for (const bookData of booksToImport) {
+      for (const { data: bookData, intent } of attempt.items) {
         checkContext();
-        await MediaLibraryService.createMediaItem(bookData);
+        if (batch.current !== attempt) throw new Error('The import dialog changed before the next item.');
+        await MediaLibraryService.createMediaItem(bookData, intent);
         importedBooks.push(bookData);
       }
 
@@ -84,12 +92,14 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
       }
 
       // Reset state
+      batch.current = null;
       setSearchResults([]);
       setSelectedBooks(new Set());
       setSearchQuery('');
       onClose();
 
     } catch (err) {
+      if (batch.current?.items.every(item => !item.intent.hasStartedApply)) batch.current = null;
       setError(err instanceof Error ? err.message : 'Import failed');
     } finally {
       setImporting(false);
@@ -133,6 +143,7 @@ export const BookImportDialog: React.FC<BookImportDialogProps> = ({
           <h2 style={{ margin: 0, color: '#2a4d8f' }}>Import Books</h2>
           <button
             onClick={onClose}
+            disabled={importing}
             style={{
               background: 'none',
               border: 'none',

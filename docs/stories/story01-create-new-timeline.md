@@ -1,5 +1,8 @@
 # Story 01 - Create New Timeline
 
+> **Status audit — 2026-10-14:** Megvalósított; M0 UI/backend tesztelt. TimelineCreateForm + timelineService.createTimeline; default-private új timeline.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US001 – Create New Timeline**
 > As a user, I want to create a new timeline with a title, description, and sorting method (chronological or release order), so I can organize media items accordingly.

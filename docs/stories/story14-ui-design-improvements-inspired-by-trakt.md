@@ -1,5 +1,8 @@
 # Story 14 - UI/Design improvements inspired by Trakt
 
+> **Status audit — 2026-10-14:** Megvalósított; teljes UX audit nélkül. TopNavigationBar, PageHeader, card/action layout létezik; minden mobil/accessibility kritérium nem frissen igazolt.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 **As a user, I want the app to have a modern, clean UI inspired by Trakt, making it easier and more enjoyable to use.**
 
 ## Technical Breakdown & Tasks

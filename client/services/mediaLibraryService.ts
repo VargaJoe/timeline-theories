@@ -33,7 +33,8 @@ export async function resizeImageToDefault(url: string): Promise<Blob> {
 export async function uploadCoverImageBinary(
   mediaItemRef: number | string,
   imageBlob: Blob,
-  fileName: string = 'cover.jpg'
+  fileName: string = 'cover.jpg',
+  expectedRevision?: string
 ): Promise<void> {
   await assertOperations([{ target: mediaItemRef, action: 'upload' }]);
   
@@ -68,7 +69,7 @@ export async function uploadCoverImageBinary(
     const uploadUrl = `${repositoryUrl}/odata.svc/content(${parentId})/upload`;
     console.log('[uploadCoverImageBinary] uploading to:', uploadUrl);
     
-    const uploadResult = await uploadBinary(mediaItemRef, uploadUrl, formData);
+    const uploadResult = await uploadBinary(mediaItemRef, uploadUrl, formData, expectedRevision);
 
     if (!uploadResult.ok) {
       const errorText = await uploadResult.text();
@@ -80,19 +81,21 @@ export async function uploadCoverImageBinary(
     console.log('[uploadCoverImageBinary] upload successful:', result);
   } catch (err) {
     console.error('[uploadCoverImageBinary] exception:', err);
-    throw new Error('Failed to upload cover image binary');
+    throw err instanceof Error ? err : new Error('Failed to upload cover image binary');
   }
 }
 
 // src/client/services/mediaLibraryService.ts
-import { repository, assertOperations, uploadBinary } from './sensenet';
+import { repository, assertOperations, captureOperationContext, uploadBinary, patchContentWithRevision } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { MEDIA_ITEM_CONTENT_TYPE, BOOK_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
 import { singleChoice } from './contentValues';
+import { NativeApiError, NativeCreationIntent } from './nativeApi';
 
 export interface MediaItem {
   Id: number;
+  revision?: string;
   ParentId?: number; 
   Name: string;
   DisplayName: string;
@@ -131,6 +134,7 @@ export interface MediaItem {
 
 interface SenseNetContent {
   Id: number;
+  revision?: string;
   Name: string;
   DisplayName: string;
   Title?: string;
@@ -202,7 +206,9 @@ export class MediaLibraryService {
   /**
    * Creates a new media item in the global library
    */
-  static async createMediaItem(data: CreateMediaItemRequest): Promise<MediaItem> {
+  static async createMediaItem(data: CreateMediaItemRequest, intent = new NativeCreationIntent()): Promise<MediaItem> {
+    data = structuredClone(data);
+    return intent.run({ kind: 'media', data }, async name => {
     try {
       console.log('Creating media item with data:', data);
 
@@ -268,7 +274,7 @@ export class MediaLibraryService {
 
       // Build content object, excluding undefined fields
       const content: Partial<CreateMediaItemRequest> = {
-        Name: data.Name || crypto.randomUUID(),
+        Name: data.Name || name,
         DisplayName: data.DisplayName,
         Title: data.Title,
         Subtitle: data.Subtitle,
@@ -293,6 +299,7 @@ export class MediaLibraryService {
       };
 
       const response = await repository.post({
+        requestInit: intent.requestInit(),
         parentPath: this.MEDIA_LIBRARY_PATH,
         contentType: contentType,
         oDataOptions: {
@@ -306,8 +313,10 @@ export class MediaLibraryService {
       return this.mapMemoToMediaItem(response.d);
     } catch (error) {
       console.error('Error creating media item:', error);
+      if (error instanceof NativeApiError) throw error;
       throw new Error('Failed to create media item. Please check your connection and try again.');
     }
+    }, captureOperationContext());
   }
 
   /**
@@ -363,7 +372,7 @@ export class MediaLibraryService {
   /**
    * Updates an existing media item
    */
-  static async updateMediaItem(id: number, data: Partial<CreateMediaItemRequest>): Promise<MediaItem> {
+  static async updateMediaItem(id: number, data: Partial<CreateMediaItemRequest>, expectedRevision?: string): Promise<MediaItem> {
     try {
       console.log('🔄 Starting update for media item:', id);
       console.log('📝 Input data:', data);
@@ -455,13 +464,9 @@ export class MediaLibraryService {
       console.log('📝 Update content:', updateContent);
 
       console.log('🌐 Making PATCH request to SenseNet...');
-      const response = await repository.patch({
-        idOrPath: id,
-        oDataOptions: {
+      const response = await patchContentWithRevision<SenseNetContent>(id, updateContent, expectedRevision, {
           select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
           expand: ['CreatedBy']
-        },
-        content: updateContent
       });
 
       console.log('Media item updated successfully:', response);
@@ -473,7 +478,7 @@ export class MediaLibraryService {
         stack: error instanceof Error ? error.stack : undefined,
         error
       });
-      throw new Error('Failed to update media item. Please check your connection and try again.');
+      throw error instanceof Error ? error : new Error('Failed to update media item. Please check your connection and try again.');
     }
   }
 
@@ -525,7 +530,7 @@ export class MediaLibraryService {
         query: query,
         select: ['Id', 'ParentId', 'DisplayName', 'Title', 'Subtitle', 'Description', 'MediaType', 'ReleaseDate', 'Year', 'ChronologicalDate', 'CoverImageUrl', 'CoverImageBin', 'Duration', 'Genre', 'Rating', 'ExternalLinks', 'Tags', 'CreationDate', 'CreatedBy/DisplayName', 'Author', 'Publisher', 'ISBN', 'PublicationYear', 'BookSeriesNumber', 'SeriesName'],
         expand: ['CreatedBy'],
-        orderby: ['DisplayName']
+        orderby: ['DisplayName', 'Id']
       };
 
       // Add pagination
@@ -555,6 +560,7 @@ export class MediaLibraryService {
   private static mapMemoToMediaItem(memo: SenseNetContent): MediaItem {
     return {
       Id: memo.Id,
+      revision: memo.revision,
       Name: memo.Name,
       DisplayName: memo.DisplayName,
       Title: memo.Title,
@@ -589,16 +595,16 @@ export class MediaLibraryService {
    * @param mediaItemId - The ID of the media item
    * @param file - The image file to upload
    */
-  static async uploadMediaItemCoverImage(mediaItemId: number, file: File): Promise<void> {
+  static async uploadMediaItemCoverImage(mediaItemId: number, file: File, expectedRevision?: string): Promise<void> {
     try {
       // Convert File to Blob
       const imageBlob = new Blob([file], { type: file.type });
       
       // Use the existing uploadCoverImageBinary function
-      await uploadCoverImageBinary(mediaItemId, imageBlob, file.name);
+      await uploadCoverImageBinary(mediaItemId, imageBlob, file.name, expectedRevision);
     } catch (error) {
       console.error('Failed to upload media item cover image:', error);
-      throw new Error('Failed to upload cover image');
+      throw error instanceof Error ? error : new Error('Failed to upload cover image');
     }
   }
 
