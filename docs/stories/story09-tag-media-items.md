@@ -1,5 +1,8 @@
 # Story 09 - Tag Media Items
 
+> **Status audit — 2026-10-14:** Részleges. Tags create/edit/persist/display van; autocomplete/tagcloud/teljes tagszűrő nincs.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US009 – Tag Media Items**
 > As a user, I want to add tags (e.g., character names, arcs, themes) to media items to improve filtering and search.

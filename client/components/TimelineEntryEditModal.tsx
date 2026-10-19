@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import type { TimelineEntry } from '../services/timelineEntryService';
 import { MediaLibraryService, type CreateMediaItemRequest } from '../services/mediaLibraryService';
@@ -9,7 +9,7 @@ interface TimelineEntryEditModalProps {
   entry: TimelineEntry | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
 }
 
 type EditMode = 'entry' | 'media';
@@ -21,6 +21,8 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
   const [editMode, setEditMode] = useState<EditMode>('entry');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const entryRevision = useRef<string>();
+  const mediaRevision = useRef<string>();
 
   // Entry form state
   const [position, setPosition] = useState(1);
@@ -48,6 +50,8 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
 
   useEffect(() => {
     if (entry && isOpen) {
+      entryRevision.current = entry.revision;
+      mediaRevision.current = entry.mediaItem?.revision;
       // Initialize entry form
       setPosition(entry.position);
       setChronologicalDate(entry.chronologicalDate || '');
@@ -80,9 +84,11 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
     setError('');
 
     try {
+      if (!entryRevision.current) throw new Error('Reload this entry before editing; its content revision is unavailable.');
       await assertOperations([{ target: entry.id, action: 'update' }]);
       checkContext();
       await TimelineEntryService.updateTimelineEntry(entry.id, {
+        revision: entryRevision.current,
         position,
         chronologicalDate: chronologicalDate || undefined,
         chronologicalDescription: chronologicalDescription || undefined,
@@ -91,10 +97,10 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
         importance,
       });
 
-      onSave();
+      await onSave();
       onClose();
-    } catch {
-      setError('Failed to update timeline entry');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to update timeline entry');
     } finally {
       setLoading(false);
     }
@@ -123,23 +129,26 @@ export function TimelineEntryEditModal({ entry, isOpen, onClose, onSave }: Timel
       }
       const hasChanges = Object.keys(mediaItemData).length > 0;
       const hasUpload = coverImageMode === 'binary' && coverImageFile !== null;
+      if ((hasChanges || hasUpload) && !mediaRevision.current) throw new Error('Reload this media item before editing; its content revision is unavailable.');
       const operations: Operation[] = [];
       if (hasChanges) operations.push({ target: entry.mediaItem.Id, action: 'update' });
       if (hasUpload) operations.push({ target: entry.mediaItem.Id, action: 'upload' });
       await assertOperations(operations);
       if (hasChanges) {
         checkContext();
-        await MediaLibraryService.updateMediaItem(entry.mediaItem.Id, mediaItemData);
+        const updated = await MediaLibraryService.updateMediaItem(entry.mediaItem.Id, mediaItemData, mediaRevision.current);
+        mediaRevision.current = updated.revision;
       }
       if (hasUpload && coverImageFile) {
         checkContext();
-        await MediaLibraryService.uploadMediaItemCoverImage(entry.mediaItem.Id, coverImageFile);
+        if (!mediaRevision.current) throw new Error('Reload this media item before uploading; its content revision is unavailable.');
+        await MediaLibraryService.uploadMediaItemCoverImage(entry.mediaItem.Id, coverImageFile, mediaRevision.current);
       }
 
-      onSave();
+      await onSave();
       onClose();
-    } catch {
-      setError('Failed to update media item');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to update media item');
     } finally {
       setLoading(false);
     }

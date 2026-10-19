@@ -1,5 +1,7 @@
 # Content Types Specification
 
+> **Current schema audit — 2026-10-14:** The custom types `Timeline`, `MediaItem`, `BookMediaItem` (inherits `MediaItem`) and `TimelineEntry` exist. `deployment/contenttypes/` and the configured repository schema are authoritative. The Memo/current-versus-future descriptions and SQL-style examples below are historical design material, not today's deployed schema. See the [current feature audit](feature-status-audit-2026-10-14.md) and [API/content inventory](api-documentation.md).
+
 This document defines the content type architecture for the TimelineVerse application.
 
 ## Overview

@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { MediaUpdateService, DataSource } from '../services/mediaUpdateService';
 import type { UpdateOptions, MediaUpdateResult, BulkUpdateProgress } from '../services/mediaUpdateService';
 import type { MediaItem } from '../services/mediaLibraryService';
-import { assertOperations, captureOperationContext, type Operation } from '../services/sensenet';
+import type { Operation } from '../services/sensenet';
 import { usePermissions } from '../hooks/usePermissions';
 
 interface BulkUpdateDialogProps {
@@ -44,7 +44,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
   const approvedItems = previewResults.filter(result => result.approved && result.hasChanges);
   const saveOperations: Operation[] = approvedItems.flatMap(result => [
     { target: result.mediaItem.Id, action: 'update' },
-    ...(options.updateCoverImages && options.coverImageMode === 'binary' ? [{ target: result.mediaItem.Id, action: 'upload' as const }] : []),
+    ...(result.binaryCoverUrl ? [{ target: result.mediaItem.Id, action: 'upload' as const }] : []),
   ]);
   const canSave = usePermissions(saveOperations);
 
@@ -118,7 +118,7 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
       setPreviewResults(validatedResults);
     } catch (error) {
       console.error('Error during preview:', error);
-      alert('Error generating preview. Please try again.');
+      alert(error instanceof Error ? error.message : 'Error generating preview. Please try again.');
       setStep('options');
     } finally {
       setProcessing(false);
@@ -126,56 +126,28 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
   }, [mediaItems, options, validateResults]);
 
   const handleConfirmUpdate = useCallback(async () => {
-    const checkContext = captureOperationContext();
     setStep('processing');
     setProcessing(true);
     
     try {
       // Only process approved items
       const approvedItems = previewResults.filter(r => r.approved && r.hasChanges);
-      const operations: Operation[] = approvedItems.flatMap(result => [
-        { target: result.mediaItem.Id, action: 'update' },
-        ...(options.updateCoverImages && options.coverImageMode === 'binary' ? [{ target: result.mediaItem.Id, action: 'upload' as const }] : []),
-      ]);
-      await assertOperations(operations);
-      
-      let success = 0;
-      let failed = 0;
-      const errors: string[] = [];
-      
-      // Apply updates for approved items only
-      for (const result of approvedItems) {
-        checkContext();
-        try {
-          if (result.updateData) {
-            // Use MediaUpdateService to handle binary uploads properly
-            const results = await MediaUpdateService.processBulkUpdate(
-              [result.mediaItem],
-              options,
-              undefined, // no progress callback for individual items
-              false // isPreview = false (final processing)
-            );
-            if (results.some(item => item.error)) throw new Error(results.find(item => item.error)?.error);
-            success++;
-          }
-        } catch (error) {
-          failed++;
-          errors.push(`${result.mediaItem.DisplayName}: ${error instanceof Error ? error.message : 'Update failed'}`);
-          break;
-        }
-      }
+      const results = await MediaUpdateService.applyApprovedUpdates(approvedItems, setProgress);
+      const success = results.filter(result => result.hasChanges && !result.error).length;
+      const failed = results.filter(result => result.error).length;
+      const errors = results.filter(result => result.error).map(result => `${result.mediaItem.DisplayName} (#${result.mediaItem.Id}): ${result.error}`);
       
       setFinalResults({ success, failed, errors });
       setStep('results');
       onUpdateComplete(success);
     } catch (error) {
       console.error('Error during update:', error);
-      alert('Error applying updates. Please try again.');
+      alert(error instanceof Error ? error.message : 'Error applying updates. Please try again.');
       setStep('preview');
     } finally {
       setProcessing(false);
     }
-  }, [previewResults, onUpdateComplete, options]);
+  }, [previewResults, onUpdateComplete]);
 
   const handleClose = useCallback(() => {
     setStep('options');
@@ -537,7 +509,16 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                                 <strong>Cover Image:</strong>
                                 <div style={{ marginLeft: 16, color: '#666' }}>
                                   {result.mediaItem.CoverImageUrl ? 'Update existing image' : 'Add new image'}
+                                  {result.binaryCover && (
+                                    <div><img src={`data:${result.binaryCover.mimeType};base64,${result.binaryCover.bytesBase64}`} alt={`Proposed cover for ${result.mediaItem.DisplayName}`} style={{ width: 90, height: 120, objectFit: 'contain', marginTop: 8 }} /></div>
+                                  )}
                                 </div>
+                              </div>
+                            )}
+                            {result.updateData?.year !== undefined && (
+                              <div style={{ marginBottom: 8 }}>
+                                <strong>Year:</strong>
+                                <div style={{ marginLeft: 16, color: '#666' }}>From: {result.mediaItem.Year ?? 'Missing'}; To: {result.updateData.year}</div>
                               </div>
                             )}
                             {result.updateData?.source && (
@@ -545,6 +526,12 @@ export const BulkUpdateDialog: React.FC<BulkUpdateDialogProps> = ({
                                 Source: {result.updateData.source}
                               </div>
                             )}
+                            {result.updateData?.sources?.map((source, sourceIndex) => (
+                              <div key={`${source.url}-${sourceIndex}`} style={{ fontSize: 12, color: '#6c757d', marginTop: 8 }}>
+                                <a href={source.url} target="_blank" rel="noopener noreferrer">Metadata source</a>
+                                <div>Match confidence: {Math.round(source.confidence * 100)}%. {source.note}</div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       ))}

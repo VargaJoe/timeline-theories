@@ -1,5 +1,8 @@
 # Story 03 - Add Existing Media Entry to Timeline
 
+> **Status audit — 2026-10-14:** Megvalósított; tesztelt. TimelineEntryCreatePage + createTimelineEntry; ellenőrzött, projekten belüli médiareferencia.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US003 – Add Existing Media Entry to Timeline**
 > As a user, I want to include an existing media item in my timeline at any point I choose, so I don't need to duplicate data.

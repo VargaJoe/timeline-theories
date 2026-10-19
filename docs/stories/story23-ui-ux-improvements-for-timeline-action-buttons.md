@@ -1,5 +1,8 @@
 # Story 23 - UI/UX Improvements for Timeline Action Buttons
 
+> **Status audit — 2026-10-14:** Megvalósított. Icon/tooltips/gombcsoportok. M0 Visitor Export/Trakt rejtést és célműveleti kapukat igazol.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US23 – UI/UX Improvements for Timeline Action Buttons**
 > As a user, I want intuitive and consistent action buttons on timeline pages, so I can easily perform admin tasks with a clean, modern interface.

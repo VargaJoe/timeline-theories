@@ -1,5 +1,8 @@
 # Story 25 - Timeline Entry Cross-References (Multi-Timeline Linking)
 
+> **Status audit — 2026-10-14:** Hiányzik. Nincs többentry-referencia és kétirányú UI. Média reuse nem ez a funkció.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US025 – Timeline Entry Cross-References**
 > As a user, I want to link a timeline entry to its counterpart(s) in other timelines, so I can easily navigate between related events across different timelines or universes.

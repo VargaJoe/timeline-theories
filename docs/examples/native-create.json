@@ -1,0 +1,15 @@
+{
+  "commands": [
+    {
+      "action": "create",
+      "type": "Timeline",
+      "fields": {
+        "DisplayName": "Native client example",
+        "Description": "Explicitly approved content-management operation",
+        "TimelineType": "chronological",
+        "SortOrder": "chronological",
+        "IsVisible": false
+      }
+    }
+  ]
+}

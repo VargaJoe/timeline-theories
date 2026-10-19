@@ -1,0 +1,7 @@
+{
+  "baseUrl": "https://localhost:8080/api/v1",
+  "repository": "https://localhost:41016",
+  "authority": "https://localhost:41017",
+  "project": "/Root/Content/timelines",
+  "caFile": "deployment/.local/certificates/localhost.pem"
+}

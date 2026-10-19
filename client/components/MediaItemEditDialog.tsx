@@ -58,6 +58,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
     SeriesName: ''
   });
   const originalFormData = useRef<Partial<CreateMediaItemRequest>>({});
+  const originalRevision = useRef<string>();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,7 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
   // Load media item data when dialog opens
   useEffect(() => {
     if (isOpen && mediaItem) {
+      originalRevision.current = mediaItem.revision;
       const initialData = {
         DisplayName: mediaItem.DisplayName || '',
         Title: mediaItem.Title || '',
@@ -165,9 +167,10 @@ export const MediaItemEditDialog: React.FC<MediaItemEditDialogProps> = ({
     try {
       const changedFields = Object.fromEntries(Object.entries(formData).filter(([key, value]) => value !== originalFormData.current[key as keyof CreateMediaItemRequest])) as Partial<CreateMediaItemRequest>;
       if (Object.keys(changedFields).length === 0) { onClose(); return; }
+      if (!originalRevision.current) throw new Error('Reload this media item before editing; its content revision is unavailable.');
       await assertOperations([{ target: mediaItem.Id, action: 'update' }]);
       checkContext();
-      const updatedItem = await MediaLibraryService.updateMediaItem(mediaItem.Id, changedFields);
+      const updatedItem = await MediaLibraryService.updateMediaItem(mediaItem.Id, changedFields, originalRevision.current);
 
       setSuccess(true);
       setTimeout(() => {

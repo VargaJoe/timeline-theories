@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { NativeCreationIntent } from '../services/nativeApi';
 import type { TraktListItem } from '../services/traktService';
 import { fetchTraktList } from '../services/traktService';
 import MediaLibraryService from '../services/mediaLibraryService';
@@ -28,6 +29,7 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState('');
   const [summary, setSummary] = useState<string|null>(null);
+  const batch = useRef<{ key: string; rows: { item: TraktListItem; media: NativeCreationIntent; entry: NativeCreationIntent }[] } | null>(null);
 
   const timelinePath = timelineName ? `${timelinesPath}/${timelineName}` : '';
   const importOperations: Operation[] = timelinePath ? [{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }, { target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }] : [];
@@ -80,8 +82,10 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
     }
     setImporting(true);
     try {
+      const key = JSON.stringify({ timelinePath, ...parsed });
+      if (batch.current && batch.current.key !== key) throw new Error('Retry the original list and timeline, or start a new import after checking its outcome.');
       // Always use fetchTraktList for consistent mapping
-      const items: TraktListItem[] = await fetchTraktList(parsed.username, parsed.list);
+      const items: TraktListItem[] = batch.current ? batch.current.rows.map(row => row.item) : await fetchTraktList(parsed.username, parsed.list);
       
       // If fetchOnly mode, just return the items for review
       if (fetchOnly) {
@@ -91,11 +95,15 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
       }
       
       if (!timelineName) throw new Error('Create the timeline first, then import from its page.');
+      batch.current ??= { key, rows: items.map(item => ({ item, media: new NativeCreationIntent(), entry: new NativeCreationIntent('entry-') })) };
+      const attempt = batch.current;
       // Each provider occurrence remains a separate timeline occurrence.
       await assertOperations(importOperations);
       let created = 0;
-      for (const [index, item] of items.entries()) {
+      for (const [index, row] of attempt.rows.entries()) {
         checkContext();
+        if (batch.current !== attempt) throw new Error('The import dialog changed before the next item.');
+        const { item } = row;
         const { title, subtitle, displayName } = extractTitleAndSubtitle(item);
         const mediaItem: MediaItem = await MediaLibraryService.createMediaItem({
           DisplayName: displayName,
@@ -105,8 +113,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           MediaType: item.type,
           ReleaseDate: item.year ? `${item.year}-01-01` : undefined,
           Year: item.year,
-          ExternalLinks: JSON.stringify(item.ids),
-        });
+          ExternalLinks: JSON.stringify(Object.fromEntries(Object.entries(item.ids).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))),
+        }, row.media);
         created++;
         checkContext();
         await TimelineEntryService.createTimelineEntry({
@@ -114,12 +122,14 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           mediaItem: { Name: mediaItem.Name, Id: mediaItem.Id, DisplayName: mediaItem.DisplayName, CoverImageUrl: mediaItem.CoverImageUrl },
           timelineId: 0,
           position: index + 1,
-        }, timelinePath);
+        }, timelinePath, row.entry);
       }
       const sum = `Imported ${items.length} items: ${created} created.`;
       setSummary(sum);
       if (onImportComplete) onImportComplete(sum);
+      batch.current = null;
     } catch (err) {
+      if (batch.current?.rows.every(row => !row.media.hasStartedApply && !row.entry.hasStartedApply)) batch.current = null;
       setError(err instanceof Error ? err.message : 'Failed to import');
     } finally {
       setImporting(false);
@@ -129,8 +139,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
   return (
     <div style={{ display: 'inline-block' }}>
       <button 
-        onClick={() => setShow(s => !s)} 
-        disabled={disabled || (!fetchOnly && !canImport)}
+        onClick={() => { batch.current = null; setShow(s => !s); }}
+        disabled={importing || disabled || (!fetchOnly && !canImport)}
         style={{ 
           background: '#6f42c1', 
           color: '#fff', 
@@ -185,7 +195,8 @@ export const TraktImportDialog: React.FC<TraktImportDialogProps> = ({
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button 
-              onClick={() => setShow(false)} 
+              onClick={() => { batch.current = null; setShow(false); }}
+              disabled={importing}
               style={{ 
                 background: '#6c757d', 
                 color: '#fff', 

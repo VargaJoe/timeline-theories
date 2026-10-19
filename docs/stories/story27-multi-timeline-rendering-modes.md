@@ -1,5 +1,8 @@
 # Story 27 - Multi-Timeline Rendering and Viewing Modes
 
+> **Status audit — 2026-10-14:** Hiányzik. Nincs combined/alternating/tag-aware rendering.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US027 – Multi-Timeline Rendering and Viewing Modes**
 > As a user, I want to choose how timelines are rendered when there are crossovers, loops, or parallel events, so I can view the story in universe order, binge order, or by tag/group.

@@ -1,167 +1,128 @@
 import JSZip from 'jszip';
 import { TimelineEntryService, type TimelineEntry } from './timelineEntryService';
-import { uploadCoverImageBinary } from './mediaLibraryService';
+import { acknowledgeNativeCommands, applyNativeCommands, nativeCoverPayload, NativeApiError } from './nativeApi';
+import type { NativeCommand, NativeApplyResult } from './nativeApi';
 import { repository, assertOperations, captureOperationContext } from './sensenet';
 import type { Operation } from './sensenet';
-import { mediaLibraryPath } from '../projectPaths';
+import { mediaLibraryPath, timelinesPath } from '../projectPaths';
+import { decodeTimelineArchive, entryFieldsFromRow, coverMimeType } from '../domain/exchange.mjs';
 
-/**
- * Parsed timeline entry from TSV
- */
-interface ParsedTimelineEntry {
-  entryName: string;
-  Title: string;
-  Description: string;
-  MediaType: string;
-  mediaId: string;
-  coverImageFilename: string;
-  ChronologicalDate: string;
-  Position: number;
-  Notes: string;
-  EntryLabel: string;
-  Importance: string;
-  ChronologicalDescription: string;
-  Author: string;
-  Publisher: string;
-  ISBN: string;
-  PublicationYear: number;
-  Genre: string[];
-  Tags: string[];
+interface ImportResult { entriesCreated: number; entriesUpdated: number; entriesSkipped: number; errors: string[]; }
+const referenceId = (value: unknown): number | undefined => {
+  if (Array.isArray(value)) return referenceId(value[0]);
+  if (typeof value === 'number') return value;
+  if (value && typeof value === 'object') return Number((value as { Id?: number }).Id) || undefined;
+  return undefined;
+};
+function revisionOf(content: Record<string, unknown>): string {
+  const fields = ['Id', 'Name', 'Path', 'ParentId', 'Type', 'revision', 'ModificationDate', 'Version', 'DisplayName', 'Position', 'ChronologicalDate', 'ChronologicalDescription', 'Notes', 'EntryLabel', 'Importance', 'CoverImageBin'];
+  return JSON.stringify({ ...Object.fromEntries(fields.map(field => [field, content[field] ?? null])), MediaItem: referenceId(content.MediaItem), etag: (content.__metadata as { etag?: string } | undefined)?.etag });
 }
-
-/**
- * Import result with statistics
- */
-interface ImportResult {
-  entriesCreated: number;
-  entriesUpdated: number;
-  entriesSkipped: number;
-  errors: string[];
-}
-
-/**
- * Unescapes TSV field values
- */
-function unescapeTSVField(value: string): string {
-  return value
-    .replace(/\\t/g, '\t')
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\r');
-}
-
-/**
- * Parses comma-separated string to array
- */
-function stringToArray(value: string): string[] {
-  if (!value || value.trim() === '') return [];
-  return value.split(',').map(item => item.trim()).filter(item => item !== '');
-}
-
-/**
- * Parses TSV content and returns timeline entries
- */
-function parseTSV(content: string): { timelineName: string; entries: ParsedTimelineEntry[] } {
-  const lines = content.split('\n').filter(line => line.trim() !== '');
-  
-  if (lines.length < 2) {
-    throw new Error('TSV file must contain at least a header and one data row');
-  }
-
-  // Skip header row
-  const dataLines = lines.slice(1);
-  const entries: ParsedTimelineEntry[] = [];
-  let timelineName = '';
-
-  for (let i = 0; i < dataLines.length; i++) {
-    const line = dataLines[i];
-    const fields = line.split('\t');
-
-    if (fields.length < 19) {
-      throw new Error(`Invalid TSV row ${i + 2}: expected 19 columns`);
-    }
-
-    // Extract timeline name from first entry
-    if (i === 0) {
-      timelineName = unescapeTSVField(fields[0]);
-    }
-
-    entries.push({
-      entryName: unescapeTSVField(fields[1]),
-      Title: unescapeTSVField(fields[2]),
-      Description: unescapeTSVField(fields[3]),
-      MediaType: unescapeTSVField(fields[4]),
-      mediaId: fields[5],
-      coverImageFilename: unescapeTSVField(fields[6]),
-      ChronologicalDate: unescapeTSVField(fields[7]),
-      Position: parseInt(fields[8]) || 0,
-      Notes: unescapeTSVField(fields[9]),
-      EntryLabel: unescapeTSVField(fields[10]),
-      Importance: unescapeTSVField(fields[11]),
-      ChronologicalDescription: unescapeTSVField(fields[12]),
-      Author: unescapeTSVField(fields[13]),
-      Publisher: unescapeTSVField(fields[14]),
-      ISBN: unescapeTSVField(fields[15]),
-      PublicationYear: parseInt(fields[16]) || 0,
-      Genre: stringToArray(unescapeTSVField(fields[17])),
-      Tags: stringToArray(unescapeTSVField(fields[18])),
-    });
-  }
-
-  return { timelineName, entries };
+function approvedRevision(content: Record<string, unknown>): string {
+  if (typeof content.revision !== 'string' || !content.revision) throw new Error('Import requires a revision from the configured application gateway');
+  return content.revision;
 }
 
 export async function prepareTimelineImport(zipFile: File, timelineId: number, parentPath: string) {
   const checkContext = captureOperationContext();
-  const zip = await JSZip.loadAsync(zipFile);
-  const tsv = zip.file('timeline_data.tsv');
-  if (!tsv) throw new Error('timeline_data.tsv not found in ZIP');
-  const { entries } = parseTSV(await tsv.async('string'));
+  const { entries, covers } = await decodeTimelineArchive(JSZip, zipFile);
+  const parent = await repository.load({ idOrPath: parentPath });
+  if (parent.d.Id !== timelineId || parent.d.Type !== 'Timeline' || parent.d.Path !== parentPath || !parentPath.startsWith(timelinesPath + '/')) throw new Error('Import target must be the selected local timeline');
   const existing = await TimelineEntryService.listTimelineEntries(timelineId, parentPath);
-  const byName = new Map<string | undefined, TimelineEntry>(existing.map((entry: TimelineEntry) => [entry.name,entry]));
-  const names = new Set<string>();
-  const operations: Operation[] = [];
-  const plan: {entry: ParsedTimelineEntry; previous: TimelineEntry | undefined; media: {Id:number;Name:string;DisplayName:string}; cover:Blob | undefined}[] = [];
-  for (const entry of entries) {
-    if (!entry.entryName || entry.entryName.includes('/') || names.has(entry.entryName)) throw new Error('Ambiguous or invalid entry name in archive');
-    names.add(entry.entryName);
-    const mediaId = Number(entry.mediaId);
-    if (!Number.isSafeInteger(mediaId) || mediaId < 1) throw new Error('Archive needs a valid existing local media reference');
-    const media = await repository.load({ idOrPath: mediaId, oDataOptions: { select: ['Id','Name','Path','Title','DisplayName'] } });
-    if (!media.d.Path?.startsWith(mediaLibraryPath + '/')) throw new Error('Archive media reference is outside this library');
-    const previous = byName.get(entry.entryName);
-    if (previous?.mediaItem && previous.mediaItem.Id !== mediaId) throw new Error('Archive reference conflicts with the existing occurrence');
-    const entryTarget = previous?.id || parentPath;
-    operations.push(previous ? { target: entryTarget, action: 'update' } : { target: parentPath, action: 'create', contentType: 'TimelineEntry' });
-    let cover: Blob | undefined;
-    if (entry.coverImageFilename) {
-      const file = zip.file('covers/' + entry.coverImageFilename);
-      if (!file) throw new Error('Cover file is missing from the archive');
-      cover = await file.async('blob');
-      operations.push({ target: mediaId, action: 'upload' });
-    }
-    plan.push({entry, previous, media:media.d, cover});
+  const byName = new Map<string | undefined, TimelineEntry>();
+  for (const entry of existing) {
+    if (byName.has(entry.name)) throw new Error('Timeline contains ambiguous occurrence Names');
+    byName.set(entry.name, entry);
   }
-  // Expose a review snapshot; execute retains its private complete target plan.
-  // A caller changing the preview must not remove a later denied target.
+  const revisions = new Map<string | number, string>([[parentPath, revisionOf(parent.d)]]);
+  const nativeRevisions = new Map<number, string>();
+  const mediaCache = new Map<number, { Id: number; Name: string; DisplayName: string }>();
+  const coverByMedia = new Map<number, { bytes: Uint8Array; filename: string }>();
+  const operations: Operation[] = [];
+  const plan: { fields: Record<string, unknown>; previous: TimelineEntry | undefined }[] = [];
+  for (const entry of entries) {
+    checkContext();
+    const mediaId = Number(entry.mediaId);
+    let media = mediaCache.get(mediaId);
+    if (!media) {
+      const loaded = await repository.load({ idOrPath: mediaId });
+      if (!loaded.d.Path?.startsWith(mediaLibraryPath + '/') || !['MediaItem', 'BookMediaItem'].includes(loaded.d.Type)) throw new Error('Archive media reference is outside this library');
+      media = { Id: loaded.d.Id, Name: loaded.d.Name, DisplayName: loaded.d.DisplayName };
+      revisions.set(mediaId, revisionOf(loaded.d)); nativeRevisions.set(mediaId, approvedRevision(loaded.d)); mediaCache.set(mediaId, media);
+    }
+    const previous = byName.get(entry.entryName);
+    if (previous) {
+      const loaded = await repository.load({ idOrPath: previous.id });
+      if (loaded.d.Type !== 'TimelineEntry' || loaded.d.Path !== parentPath + '/' + entry.entryName || referenceId(loaded.d.MediaItem) !== mediaId) throw new Error('Archive reference conflicts with the existing occurrence');
+      revisions.set(previous.id, revisionOf(loaded.d));
+      nativeRevisions.set(Number(previous.id), approvedRevision(loaded.d));
+    }
+    const fields = entryFieldsFromRow(entry, { displayName: media.DisplayName });
+    operations.push(previous ? { target: previous.id, action: 'update' } : { target: parentPath, action: 'create', contentType: 'TimelineEntry' });
+    if (entry.coverImageFilename) {
+      const bytes = covers.get(entry.coverImageFilename)!;
+      const previousCover = coverByMedia.get(mediaId);
+      if (previousCover && (previousCover.bytes.length !== bytes.length || bytes.some((byte, index) => byte !== previousCover.bytes[index]))) throw new Error('Archive assigns conflicting covers to the same media item');
+      if (!previousCover) {
+        coverByMedia.set(mediaId, { bytes, filename: entry.coverImageFilename });
+        operations.push({ target: mediaId, action: 'upload' });
+      }
+    }
+    plan.push({ previous, fields });
+  }
+  const commands: NativeCommand[] = [];
+  for (const [mediaId, cover] of coverByMedia) {
+    const payload = await nativeCoverPayload(new Blob([Uint8Array.from(cover.bytes).buffer], { type: coverMimeType(cover.bytes) }), cover.filename);
+    checkContext();
+    commands.push({ action: 'cover', targetId: mediaId, expectedRevision: nativeRevisions.get(mediaId), ...payload });
+  }
+  for (const { fields, previous } of plan) {
+    commands.push(previous ? { action: 'update', targetId: Number(previous.id), expectedRevision: nativeRevisions.get(Number(previous.id)), fields } :
+      { action: 'create', type: 'TimelineEntry', parentId: timelineId, fields: { ...fields, IsOptional: false } });
+  }
+  const entryCounts = (receipt: NativeApplyResult): ImportResult => {
+    const result: ImportResult = { entriesCreated: 0, entriesUpdated: 0, entriesSkipped: 0, errors: [] };
+    for (const completed of receipt.completed) {
+      const command = completed.index === undefined ? undefined : commands[completed.index];
+      if (command?.action === 'create') result.entriesCreated++;
+      if (command?.action === 'update') result.entriesUpdated++;
+    }
+    result.entriesSkipped = plan.length - result.entriesCreated - result.entriesUpdated;
+    return result;
+  };
+  checkContext();
+  await assertOperations(operations);
+  let executed = false;
+  // The exposed preview cannot mutate the private operations, prepared bytes or target plan.
   return { operations: operations.map(operation => ({ ...operation })), execute: async (): Promise<ImportResult> => {
     checkContext();
+    if (executed) throw new Error('Import plan has already been executed');
     await assertOperations(operations);
-    const result: ImportResult = { entriesCreated:0, entriesUpdated:0, entriesSkipped:0, errors:[] };
-    for (const {entry, previous, media, cover} of plan) {
-      checkContext();
-      const data: Omit<TimelineEntry,'id'> = { name:entry.entryName, displayName:entry.Title, timelineId,
-        mediaItem:{ Id:media.Id, Name:media.Name, DisplayName:media.DisplayName }, position:entry.Position,
-        chronologicalDate:entry.ChronologicalDate || undefined, chronologicalDescription:entry.ChronologicalDescription,
-        notes:entry.Notes, entryLabel:entry.EntryLabel || undefined, importance:entry.Importance || undefined };
-      if (cover) await uploadCoverImageBinary(media.Id, cover, entry.coverImageFilename);
-      checkContext();
-      if (previous) { await TimelineEntryService.updateTimelineEntry(previous.id, data); result.entriesUpdated++; }
-      else { await TimelineEntryService.createTimelineEntry(data,parentPath); result.entriesCreated++; }
+    for (const [target, expected] of revisions) {
+      const current = await repository.load({ idOrPath: target });
+      if (revisionOf(current.d) !== expected) throw new Error('Import target changed after preparation; prepare the archive again');
     }
-    return result;
+    // A newly-created occurrence must also invalidate a prepared create command.
+    const currentEntries = await TimelineEntryService.listTimelineEntries(timelineId, parentPath);
+    const currentNames = new Map(currentEntries.map(entry => [entry.name, entry.id]));
+    for (const item of plan) if (currentNames.get(String(item.fields.Name)) !== item.previous?.id) throw new Error('Timeline occurrences changed after preparation; prepare the archive again');
+    await assertOperations(operations); checkContext(); executed = true;
+    if (!commands.length) return { entriesCreated: 0, entriesUpdated: 0, entriesSkipped: 0, errors: [] };
+    let receipt: NativeApplyResult;
+    try { receipt = await applyNativeCommands(commands, checkContext); }
+    catch (error) {
+      if (error instanceof NativeApiError && error.applyResult) {
+        const counts = entryCounts(error.applyResult);
+        const uncertain = 'retrySamePlan' in error.applyResult && error.applyResult.retrySamePlan === true;
+        error.message = `Import stopped: ${counts.entriesCreated} entries created, ${counts.entriesUpdated} updated, ${counts.entriesSkipped} ${uncertain ? 'without a confirmed result' : 'not applied'}. ${error.message} ${uncertain ? 'Resolve the pending application operation before starting another import.' : 'Reload the timeline before retrying.'}`;
+      }
+      throw error;
+    }
+    acknowledgeNativeCommands(commands);
+    return entryCounts(receipt);
   } };
 }
 export async function importTimelineFromZip(zipFile: File, timelineId: number, parentPath: string, suppliedRepository: typeof repository): Promise<ImportResult> {
   if (suppliedRepository !== repository) throw new Error('Repository mismatch');
-  return (await prepareTimelineImport(zipFile,timelineId,parentPath)).execute();
+  return (await prepareTimelineImport(zipFile, timelineId, parentPath)).execute();
 }

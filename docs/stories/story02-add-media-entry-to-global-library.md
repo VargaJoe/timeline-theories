@@ -1,5 +1,8 @@
 # Story 02 - Add Media Entry to Global Library
 
+> **Status audit — 2026-10-14:** Megvalósított; CRUD/borító tesztelt. MediaItemCreateForm, MediaLibraryPage, mediaLibraryService; élő provider siker külön ellenőrizendő.
+> See [the current source-backed status register](../feature-status-audit-2026-10-14.md). The criteria and historical checkboxes below describe the original scope; they are not fresh verification of every item.
+
 ## User Story
 **US002 – Add Media Entry to Global Library**
 > As a user, I want to add a media item with metadata (title, type, cover image, external links, description) to a global media library, so it can be reused across multiple timelines.
