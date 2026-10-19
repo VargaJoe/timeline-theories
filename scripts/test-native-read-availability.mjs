@@ -8,11 +8,11 @@ const compile = source => 'data:text/javascript;base64,' + Buffer.from(ts.transp
   { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText).toString('base64');
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 let fixtureCount = 0;
-async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, token = 'fixture-backend-jwt' } = {}) {
+async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt' } = {}) {
   const environment = { mode, repositoryUrl: 'https://repo.test', authority: 'https://auth.test', projectRoot: '/Root/Content/timelines', writable: true };
   globalThis.window = { location: { origin: 'https://ui.test' } };
   globalThis.__availabilityEnvironment = environment;
-  const rawCalls = [], aclCalls = [], nativeCalls = [];
+  const rawCalls = [], rawWrites = [], aclCalls = [], childTypeCalls = [], nativeCalls = [];
   const snapshot = id => ({ Id: id, ParentId: 5, Name: 'media' + id, Path: environment.projectRoot + '/MediaLibrary/media' + id,
     Type: 'MediaItem', revision: 'gw:fixture-hash:4', Title: 'Native title', DisplayName: 'Native title', Description: '' });
   const capabilities = () => ({ repository: environment.repositoryUrl, authority: environment.authority, project: environment.projectRoot,
@@ -43,15 +43,16 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
   };
   class MockRepository {
     constructor() {
-      this.configuration = { repositoryUrl: environment.repositoryUrl, token };
+      this.configuration = { repositoryUrl: environment.repositoryUrl, token: token || undefined };
       this.security = { hasPermission: async (target, permissions) => {
-        aclCalls.push({ target, permissions, token: this.configuration.token }); return permissions.includes('Open') ? readAllowed : true;
+        aclCalls.push({ target, permissions, token: this.configuration.token }); return permissions.includes('Open') ? readAllowed : writeAllowed;
       } };
-      this.allowedChildTypes = { get: async () => ({ d: { results: [{ Name: 'MediaItem' }] } }) };
+      this.allowedChildTypes = { get: async target => { childTypeCalls.push(target); return { d: { results: [{ Name: 'MediaItem' }] } }; } };
     }
     async awaitReadyState() {}
     async fetch(url, init = {}) {
       rawCalls.push({ url, method: init.method || 'GET', token: this.configuration.token });
+      if (!readAllowed) return response({ error: 'Forbidden' }, 403);
       const value = { ...snapshot(1), revision: undefined, Title: 'Raw permitted title', DisplayName: 'Raw permitted title' };
       return response({ d: new URL(url).searchParams.has('query') ? { results: [value] } : value });
     }
@@ -62,8 +63,11 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
       return (await this.fetch(environment.repositoryUrl + '/odata.svc' + options.path + '?query=TypeIs%3AMediaItem&$top=100', { method: 'GET' })).json();
     }
     async patch(options) {
+      rawWrites.push({ action: 'update', options });
       return (await this.fetch(environment.repositoryUrl + '/odata.svc/content(' + options.idOrPath + ')', { method: 'PATCH', body: JSON.stringify(options.content) })).json();
     }
+    async post(options) { rawWrites.push({ action: 'create', options }); throw new Error('Unexpected raw write'); }
+    async delete(options) { rawWrites.push({ action: 'delete', options }); throw new Error('Unexpected raw write'); }
   }
   globalThis.__availabilityRepository = MockRepository;
   const nonce = '\n// availability fixture ' + ++fixtureCount;
@@ -80,11 +84,72 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
     .replace("from './nativeApi'", 'from ' + JSON.stringify(nativeUrl));
   const sense = await import(compile(senseSource + nonce));
   const load = () => sense.repository.load({ idOrPath: 1, oDataOptions: { select: ['Id', 'Title', 'DisplayName'] } });
-  return { native, sense, load, rawCalls, aclCalls, nativeCalls, environment };
+  return { native, sense, load, rawCalls, rawWrites, aclCalls, childTypeCalls, nativeCalls, environment };
 }
 let checks = 0;
 async function test(name, run) { await run(); checks++; process.stdout.write('PASS ' + name + '\n'); }
 async function main() {
+  const writeOperations = ['update', 'create', 'upload', 'delete'].map(action => ({ target: 1, action, ...(action === 'create' ? { contentType: 'MediaItem' } : {}) }));
+  for (const operation of writeOperations) await test('anonymous ' + operation.action + ' checks stop before all readiness, ACL and write requests', async () => {
+    const f = await fixture({ discovery: 'ready', token: '' });
+    assert.equal(await f.sense.canOperations([operation]), false);
+    await assert.rejects(f.sense.assertOperations([operation]), /Permission denied/);
+    const dispatch = {
+      update: () => f.sense.repository.patch({ idOrPath: 1, content: { Title: 'No write' } }),
+      create: () => f.sense.repository.post({ parentPath: 1, contentType: 'MediaItem', content: { Title: 'No write' } }),
+      upload: () => f.sense.uploadBinary(1, f.environment.repositoryUrl + '/odata.svc/content(5)/upload', new FormData()),
+      delete: () => f.sense.repository.delete({ idOrPath: 1 }),
+    };
+    await assert.rejects(dispatch[operation.action](), /Permission denied/);
+    assert.equal(f.nativeCalls.length, 0);
+    assert.equal(f.aclCalls.length, 0);
+    assert.equal(f.childTypeCalls.length, 0);
+    assert.equal(f.rawCalls.length, 0);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  await test('anonymous Open proves the exact backend GET and retains native snapshot reads', async () => {
+    const f = await fixture({ discovery: 'ready', token: '' });
+    assert.equal((await f.load()).d.Title, 'Native title');
+    assert.equal(f.rawCalls.length, 2);
+    assert.equal(new URL(f.rawCalls[0].url).pathname, '/odata.svc/content(1)');
+    assert.equal(new URL(f.rawCalls[0].url).searchParams.get('$select'), 'Id');
+    assert.ok(f.rawCalls.every(call => call.method === 'GET' && call.token === undefined));
+    assert.ok(f.nativeCalls.some(call => call.path.endsWith('/lookup')));
+    assert.equal(f.aclCalls.length, 0);
+    assert.equal(f.childTypeCalls.length, 0);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  await test('anonymous permitted collection reads retain native batch snapshots', async () => {
+    const f = await fixture({ discovery: 'ready', token: '' });
+    const result = await f.sense.repository.loadCollection({ path: '/Root/Content/timelines/MediaLibrary' });
+    assert.equal(result.d.results[0].Title, 'Native title');
+    assert.ok(f.nativeCalls.some(call => call.path.endsWith('/snapshots')));
+    assert.ok(f.rawCalls.every(call => call.method === 'GET' && call.token === undefined));
+    assert.equal(f.aclCalls.length, 0);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  await test('anonymous Open fails closed when the exact backend GET is denied', async () => {
+    const f = await fixture({ discovery: 'ready', token: '', readAllowed: false });
+    assert.equal(await f.sense.canOperations([{ target: 1, action: 'read' }]), false);
+    await assert.rejects(f.load(), /Permission denied/);
+    assert.ok(f.rawCalls.every(call => call.method === 'GET' && new URL(call.url).searchParams.get('$select') === 'Id'));
+    assert.equal(f.aclCalls.length, 0);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  for (const writeAllowed of [true, false]) await test('authenticated write checks preserve backend ACL ' + (writeAllowed ? 'approval' : 'denial'), async () => {
+    const f = await fixture({ discovery: 'ready', writeAllowed });
+    for (const operation of writeOperations) {
+      assert.equal(await f.sense.canOperations([operation]), writeAllowed);
+      if (writeAllowed) await f.sense.assertOperations([operation]);
+      else await assert.rejects(f.sense.assertOperations([operation]), /Permission denied/);
+    }
+    assert.deepEqual(f.aclCalls.map(call => call.permissions), [['Save'], ['Save'], ['AddNew'], ['AddNew'], ['Save'], ['Save'], ['Delete'], ['Delete']]);
+    assert.ok(f.aclCalls.every(call => call.token === 'fixture-backend-jwt'));
+    assert.ok(f.nativeCalls.some(call => call.path.endsWith('/lookup')));
+    assert.equal(f.childTypeCalls.length, writeAllowed ? 2 : 0);
+    assert.equal(f.rawCalls.length, 0);
+    assert.equal(f.rawWrites.length, 0);
+  });
   for (const discovery of ['html', '404', 'unavailable']) await test('ordinary reads remain available for confirmed ' + discovery + ' gateway absence', async () => {
     const f = await fixture({ discovery }); assert.equal((await f.load()).d.Title, 'Raw permitted title');
     assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), false);

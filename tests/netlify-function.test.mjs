@@ -30,7 +30,7 @@ after(async () => { await fixture?.close(); });
 
 async function setup(t, extra = {}) {
   const projectRoot = '/Root/Content/FunctionFixture-' + randomUUID();
-  const state = { requests: [], patches: 0, allowSave: true, allowRead: true, allowRootRead: true, onSave: null, interruptNextReadback: false };
+  const state = { requests: [], patches: 0, allowSave: true, allowRead: true, allowRootRead: true, schemaAvailable: true, onSave: null, interruptNextReadback: false };
   const content = { Id: 10, ParentId: 2, Name: 'media', DisplayName: 'Fixture media', Path: projectRoot + '/MediaLibrary/media', Type: 'MediaItem', Title: 'Before', CreationDate: '2026-10-01T00:00:00Z', CreatedById: 42, ModificationDate: '2026-10-01T00:00:00Z', ModifiedById: 42, Version: 'V1.0', VersionId: 1 };
   const send = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ d: value })); };
   const server = https.createServer(tls, async (req, res) => {
@@ -43,6 +43,7 @@ async function setup(t, extra = {}) {
         return send(res, 200, url.searchParams.get('permissions') === 'Save' ? state.allowSave : state.allowRead && (state.allowRootRead || url.pathname.includes('content(10)')));
       }
       if (url.pathname.endsWith('/GetSchema')) {
+        if (!state.schemaAvailable) return send(res, 200, []);
         const type = url.searchParams.get('contentTypeName');
         const names = ['Id','ParentId','Name','Path','Type','CreationDate','CreatedById','ModificationDate','ModifiedById','Version','VersionId', ...(FIELDS[type] || []), 'CoverImageBin'];
         return send(res, 200, [{ ContentTypeName: type, FieldSettings: [...new Set(names)].map(Name => ({ Name, ReadOnly: false })) }]);
@@ -88,6 +89,43 @@ async function setup(t, extra = {}) {
   }
   return { app, config, state, content, request, enqueue, background, runNext, invocations, preview };
 }
+
+test('anonymous content and snapshot reads work when production GetSchema is permission-filtered to an empty list', async t => {
+  const {app,request,state,content}=await setup(t);state.schemaAvailable=false;content.ExtraRepositoryField='not-an-application-field';
+  for(const req of [request('content/10',{token:null}),request('snapshots',{method:'POST',token:null,body:{ids:[10]}})]) {
+    const response=await app.handleRequest(req);assert.equal(response.status,200,await response.clone().text());
+    const value=(await response.json()).data,snapshot=Array.isArray(value)?value[0]:value;
+    assert.equal(snapshot.Id,10);assert.equal(snapshot.Title,'Before');assert.match(snapshot.revision,/^sha256:[0-9a-f]{64}$/);
+    assert.equal(Object.hasOwn(snapshot,'ExtraRepositoryField'),false);
+    assert.equal(Object.hasOwn(snapshot,'Year'),false);assert.equal(Object.hasOwn(snapshot,'SeriesName'),false);
+  }
+  assert.equal(state.requests.some(row=>/GetSchema|HasPermission/.test(row.path)),false);
+  assert.equal(state.requests.some(row=>row.credential),false);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);
+});
+
+test('schema-independent reads preserve supported optional fields and include them in the snapshot revision',async t=>{
+  const {app,request,state,content}=await setup(t);state.schemaAvailable=false;
+  const before=(await(await app.handleRequest(request('content/10'))).json()).data;
+  content.Year=2025;content.SeriesName='Supported local series';
+  const response=await app.handleRequest(request('content/10'));assert.equal(response.status,200);
+  const after=(await response.json()).data;assert.equal(after.Year,2025);assert.equal(after.SeriesName,'Supported local series');assert.notEqual(after.revision,before.revision);
+  assert.equal(state.requests.some(row=>row.path.endsWith('/GetSchema')),false);assert.equal(state.patches,0);
+});
+
+test('an unreadable item stays denied when schema metadata is unavailable',async t=>{
+  const {app,request,state}=await setup(t);state.schemaAvailable=false;state.allowRead=false;
+  const response=await app.handleRequest(request('content/10',{token:null}));assert.equal(response.status,403);assert.equal((await response.json()).error.code,'backend_denied');
+  assert.equal(state.requests.some(row=>row.path.endsWith('/GetSchema')),false);assert.equal(state.patches,0);
+});
+
+test('missing actual schema still denies schema discovery and an approved write before any mutation',async t=>{
+  const {app,request,state,enqueue,runNext}=await setup(t);state.schemaAvailable=false;
+  const current=await app.handleRequest(request('content/10'));assert.equal(current.status,200);const snapshot=(await current.json()).data;
+  const schema=await app.handleRequest(request('schemas/MediaItem'));assert.equal(schema.status,503);assert.equal((await schema.json()).error.code,'backend_schema_unavailable');
+  const job=await enqueue('plans',{commands:[{action:'update',targetId:10,expectedRevision:snapshot.revision,fields:{Title:'Must not save'}}]});await runNext();
+  const preview=await app.handleRequest(request('jobs/'+job));assert.equal(preview.status,503);assert.equal((await preview.json()).error.code,'backend_schema_unavailable');
+  assert.equal(state.requests.some(row=>row.path.endsWith('/GetSchema')),true);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);
+});
 
 test('public capability normalization and CORS reject foreign origins without backend access', async t => {
   const { app, request, state } = await setup(t);

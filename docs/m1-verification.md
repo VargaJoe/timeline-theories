@@ -89,6 +89,14 @@ The fresh internal reviewer accepted all three fixes and independently passed th
 
 Reports, screenshots, local grant files and runtime state remain ignored under `deployment/.local/`. Uncertain writes are checked with their saved plan/key. A stopped writer requires current original backend identity and exact stopped request confirmation; there is no clock-based takeover. Read-only recovery reconciles receipts but does not automatically resume a killed background job. Inspect its returned operations and explicitly review any remaining plan.
 
+## Production visitor regression, 2026-10-19
+
+After PR #53 was merged, the production repository returned HTTP 200 with an empty `GetSchema` array to anonymous callers. Public content GETs were allowed, but the native snapshot reader unnecessarily required schema visibility and returned `503 / backend_schema_unavailable`, breaking the timeline list. The separate `HasPermission?permissions=AddNew` denial was a permission probe, not a creation request.
+
+Reads now check the exact target's application membership and caller Open rights, retrieve that caller-authorized content, and project only the application field allowlist. Supported optional fields and snapshot revisions are preserved. Field-write preflight and explicit schema discovery still require the actual schema; credentials, ACLs and production content are unchanged. Anonymous write-permission checks now stop locally before readiness, ACL or mutation requests.
+
+Verification: 180 unit/contract tests, 55 parity checks, lint and all three builds passed. Four controlled HTTPS regressions cover empty-schema reads, safe projection, optional fields, denied Open and schema-dependent field writes. The modified stock reader also successfully read real public production timelines and an occurrence using only anonymous GETs, with zero GetSchema calls or repository writes. A readonly local app rendering the real production timeline list was checked in Chromium; production publication is a separate operator step.
+
 ## Hungarian manual smoke
 
 1. `npm run dev:m0` indítsa a közös appot. A localhost:8080 UI és `/api/v1` ugyanazt a repository/auth/project kötést mutassa a CLI `discover` eredményével. A korábbi `.env`, account, cert és source snapshot maradjon meg.
