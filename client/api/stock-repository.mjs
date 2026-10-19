@@ -98,12 +98,16 @@ export class StockRepository extends Repository {
     this.scope(header, options);
     await this.assert([{ target: header.Id, action: 'read' }]);
     const domain = TYPES.includes(header.Type);
-    const schema=domain?await this.schemaFor(header.Type):undefined;
-    const select = [...HEADERS, ...STAMPS, ...(domain ? FIELDS[header.Type].filter(name=>schema.FieldSettings.some(field=>field.Name===name)) : []), ...(COVER_TYPES.has(header.Type) ? ['CoverImageBin'] : [])];
-    const query = { '$select': [...new Set(select.filter(field => field !== 'MediaItem'))].join(','), metadata: 'no' };
-    if (header.Type === 'TimelineEntry') { query['$select'] += ',MediaItem/Id'; query['$expand'] = 'MediaItem'; }
+    // GetSchema is separately permission-filtered: a caller may Open a public
+    // item while receiving an empty schema list. Read the exact authorized item
+    // without selecting optional fields that older schemas may not contain,
+    // then project only our application allowlist. Writes still require the
+    // real schema in writableFields; no privileged schema credential is used.
+    const query = domain ? { metadata: 'no' } : { '$select': [...HEADERS, ...STAMPS].join(','), metadata: 'no' };
+    if (header.Type === 'TimelineEntry') query['$expand'] = 'MediaItem';
     const data = await this.api(header.Id, null, { query }); this.scope(data, options);
     if (data.Type !== header.Type || data.Id !== header.Id) fail('revision_conflict', 'Target changed during the snapshot.');
+    const select = [...HEADERS, ...STAMPS, ...(domain ? FIELDS[header.Type].filter(name => !OPTIONAL_FIELDS.has(name) || Object.hasOwn(data, name)) : []), ...(COVER_TYPES.has(header.Type) ? ['CoverImageBin'] : [])];
     const snapshot = Object.fromEntries([...new Set(select)].map(field => [field, data[field] ?? null]));
     if (header.Type === 'TimelineEntry') snapshot.MediaItem = referenceId(data.MediaItem);
     if (!data.ModificationDate || typeof data.Version !== 'string') fail('backend_revision_unavailable', 'Repository snapshot version metadata is unavailable.', 503);

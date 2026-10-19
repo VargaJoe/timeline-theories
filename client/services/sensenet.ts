@@ -175,7 +175,11 @@ rawRepository.fetch = checkedRepositoryFetch;
 const checkedUploads = new WeakMap<FormData, { target: string | number; expectedRevision?: string }>();
 const permissionGuard = createOperationGuard({
   probe: async (target, permissions) => {
-    if (permissions.some(permission => permission !== 'Open')) await requireNativeWriteReadiness(target, permissions.includes('AddNew'));
+    if (permissions.some(permission => permission !== 'Open')) {
+      // Application writes require a backend credential before readiness or ACL probes.
+      if (!rawRepository.configuration.token) return false;
+      await requireNativeWriteReadiness(target, permissions.includes('AddNew'));
+    }
     // SenseNet's HasPermission action excludes Visitor, even for public content.
     // Anonymous read availability is proved by the actual backend GET on this
     // exact content; denied/missing/transport failures still fail closed.
