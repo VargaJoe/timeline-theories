@@ -97,6 +97,14 @@ Reads now check the exact target's application membership and caller Open rights
 
 Verification: 180 unit/contract tests, 55 parity checks, lint and all three builds passed. Four controlled HTTPS regressions cover empty-schema reads, safe projection, optional fields, denied Open and schema-dependent field writes. The modified stock reader also successfully read real public production timelines and an occurrence using only anonymous GETs, with zero GetSchema calls or repository writes. A readonly local app rendering the real production timeline list was checked in Chromium; production publication is a separate operator step.
 
+## Timeline list cover regression, 2026-10-25
+
+The native snapshot overlay expands `TimelineEntry.MediaItem` as an array, while the card montage reader expected one object. The reader now resolves the first reference using the same normalization as the entry detail reader. Legacy OData objects, binary covers and URL fallbacks retain their existing behavior; missing references remain empty.
+
+`node --test tests/timeline-covers.test.mjs` exercises the real timeline cover consumer and media URL resolver with only repository I/O replaced. Before the fix, both array-reference cases failed while the legacy-object case passed. After the fix all three pass. Full local validation: 183 unit/contract tests, 55 parity checks, lint and the production build passed.
+
+Visitor smoke on the PR Deploy Preview: open `/timelines?filter=c` without signing in, confirm the Charles Bronson's Death Wish and Conan the Barbarian cards show cover montages, then open Conan and confirm all three entry covers still load. The header must show `Login with SNAuth`. Snapshot batching, caching and performance optimization remain a separate backlog item.
+
 ## Hungarian manual smoke
 
 1. `npm run dev:m0` indítsa a közös appot. A localhost:8080 UI és `/api/v1` ugyanazt a repository/auth/project kötést mutassa a CLI `discover` eredményével. A korábbi `.env`, account, cert és source snapshot maradjon meg.
