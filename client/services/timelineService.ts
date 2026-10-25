@@ -301,7 +301,8 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
     // Collect all available cover URLs
     const allCoverUrls: string[] = [];
     for (const item of result.d.results) {
-      const mediaItem = item.MediaItem;
+      // Native snapshots expand references as arrays; legacy OData uses an object.
+      const mediaItem = Array.isArray(item.MediaItem) ? item.MediaItem[0] : item.MediaItem;
       if (mediaItem) {
         // Use the helper function to get cover URL (either from URL or binary field)
         const coverUrl = MediaLibraryService.getCoverImageUrl(mediaItem);
