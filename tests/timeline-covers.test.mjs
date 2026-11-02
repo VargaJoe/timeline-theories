@@ -4,7 +4,7 @@ import test from 'node:test';
 import ts from '../client/node_modules/typescript/lib/typescript.js';
 
 // Exercise the real cover consumer and URL resolver. Only repository I/O is
-// replaced; the native snapshot overlay returns expanded references as arrays.
+// replaced; both native arrays and the display projection's OData objects work.
 const compile = (file, prefix) => {
   const source = fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8')
     .replace(/^import .* from .*;\r?$/gm, '');
@@ -13,16 +13,14 @@ const compile = (file, prefix) => {
 };
 const repositoryUrl = 'https://repo.test';
 let rows;
-globalThis.__timelineCoverRepository = {
-  async loadCollection({ path }) {
-    assert.equal(path, '/Root/Content/timelines/Timelines/example');
-    return { d: { results: structuredClone(rows) } };
-  },
+globalThis.__timelineCoverRead = async path => {
+  assert.equal(path, '/Root/Content/timelines/Timelines/example');
+  return structuredClone(rows);
 };
 const mediaModule = compile('client/services/mediaLibraryService.ts',
   `const repositoryUrl=${JSON.stringify(repositoryUrl)}; const mediaLibraryPath='/Root/Content/timelines/MediaLibrary';`);
 const timelineModule = compile('client/services/timelineService.ts',
-  `import {MediaLibraryService} from ${JSON.stringify(mediaModule)}; const repository=globalThis.__timelineCoverRepository;`);
+  `import {MediaLibraryService} from ${JSON.stringify(mediaModule)}; const readTimelineCoverReferences=globalThis.__timelineCoverRead;`);
 const { getTimelineMediaCovers } = await import(timelineModule);
 const cover = { Id: 21, CoverImageBin: { __mediaresource: {
   media_src: '/binaryhandler.ashx?nodeid=21&propertyname=CoverImageBin&checksum=123', content_type: 'image/jpeg',

@@ -1,7 +1,7 @@
 import { Repository } from '@sensenet/client-core';
 import { repositoryUrl, environment } from '../configuration';
 import { createOperationGuard, guardRepository, snapshotRequestInit } from './operationGuard.mjs';
-import { TYPES, validateFields } from '../domain/content.mjs';
+import { assertMembership, projectPaths, TYPES, validateFields } from '../domain/content.mjs';
 import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, canUseLegacyRead, configureNativeAuth, invalidateNativeSnapshots, markNativeGatewayUnavailable, nativeCommandFailure, nativeCreationApplyStart, NativeApiError, nativeCoverPayload, nativeReadSidecarAvailable, nativeSnapshot, nativeSnapshots, requireNativeWriteReadiness } from './nativeApi';
 import type { NativeCommand, NativeSnapshot } from './nativeApi';
 export type { Operation } from './operationGuard.mjs';
@@ -202,6 +202,44 @@ export const canOperations = permissionGuard.can;
 export const invalidatePermissions = permissionGuard.invalidate;
 export const subscribePermissions = permissionGuard.subscribe;
 export const captureOperationContext = permissionGuard.context;
+
+/** Display-only projection: covers need current caller-readable metadata, not editor revisions. */
+export async function readTimelineCoverReferences(timelinePath: string, signal?: AbortSignal): Promise<Record<string, unknown>[]> {
+  const parent = environment.projectRoot + '/Timelines/';
+  const name = timelinePath.startsWith(parent) ? timelinePath.slice(parent.length) : '';
+  if (!name || /[/\\?#]/.test(name) || name === '.' || name === '..') throw new Error('Invalid timeline cover target');
+  signal?.throwIfAborted();
+  const checkContext = captureOperationContext();
+  await permissionGuard.assert([{ target: timelinePath, action: 'read' }]);
+  checkContext();
+  signal?.throwIfAborted();
+  const url = new URL(repositoryUrl);
+  // Encode each repository path segment; a content Name cannot change the OData target.
+  url.pathname = '/odata.svc' + timelinePath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+  url.search = new URLSearchParams({ query: '+TypeIs:TimelineEntry +Hidden:0',
+    '$select': 'Id,Path,Name,Type,MediaItem/Id,MediaItem/Path,MediaItem/Type,MediaItem/CoverImageUrl,MediaItem/CoverImageBin',
+    '$expand': 'MediaItem', '$orderby': 'Position', '$top': '50', metadata: 'no' }).toString();
+  // Use the SDK's same-caller transport. Open is still checked above, and both the
+  // expanded references and subsequent binary GETs remain subject to repository ACLs.
+  const response = await originalFetch(url.href, { method: 'GET', signal }, false);
+  checkContext();
+  if (!response.ok) throw new Error('Timeline cover references are unavailable');
+  const value = await response.json() as { d?: { results?: Record<string, unknown>[] } };
+  checkContext();
+  signal?.throwIfAborted();
+  if (!Array.isArray(value.d?.results)) throw new Error('Invalid timeline cover response');
+  const paths = projectPaths(environment.projectRoot);
+  for (const row of value.d.results) {
+    assertMembership(row, paths);
+    if (row.Type !== 'TimelineEntry' || typeof row.Path !== 'string' || !row.Path.startsWith(timelinePath + '/')) throw new Error('Invalid timeline cover entry');
+    const references = Array.isArray(row.MediaItem) ? row.MediaItem : row.MediaItem ? [row.MediaItem] : [];
+    for (const reference of references) {
+      if (!reference || typeof reference !== 'object' || !['MediaItem', 'BookMediaItem'].includes(reference.Type)) throw new Error('Invalid timeline cover media');
+      assertMembership(reference, paths);
+    }
+  }
+  return value.d.results;
+}
 
 /** Editor revisions are passed separately from fields and remain pinned across unrelated reads. */
 export async function patchContentWithRevision<T = Record<string, unknown>>(target: string | number, fields: Record<string, unknown>, expectedRevision?: string, options: { select?: string[]; expand?: string[] } = {}): Promise<{ d: T }> {
