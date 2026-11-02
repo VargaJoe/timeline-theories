@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +10,7 @@ using SenseNet.ContentRepository.Storage;
 using SenseNet.ContentRepository.Storage.Events;
 using SenseNet.ContentRepository.Storage.Security;
 using SenseNet.Security;
+using SenseNet.Search.Indexing;
 using AsyncTask = System.Threading.Tasks.Task;
 using StorageDataType = SenseNet.ContentRepository.Storage.Schema.DataType;
 using PermissionType = SenseNet.ContentRepository.Storage.Security.PermissionType;
@@ -50,22 +52,32 @@ public class TimelineSecurityHandler : Folder
         get => _deletionPath.ReadPath(this, base.Path);
     }
 
-    public override async AsyncTask DeleteAsync(bool bypassTrash, CancellationToken cancellationToken)
-    {
-        using var scope = _deletionPath.Begin(this, () => base.Path);
-        await base.DeleteAsync(bypassTrash, cancellationToken).ConfigureAwait(false);
-    }
+    public override AsyncTask DeleteAsync(bool bypassTrash, CancellationToken cancellationToken) =>
+        ImageAssetPolicy.MutateAsync(async () =>
+        {
+            ImageAssetPolicy.AssertOwnerDelete(this);
+            using var scope = _deletionPath.Begin(this, () => base.Path);
+            await base.DeleteAsync(bypassTrash, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
 
-    public override async AsyncTask ForceDeleteAsync(CancellationToken cancellationToken)
-    {
-        using var scope = _deletionPath.Begin(this, () => base.Path);
-        await base.ForceDeleteAsync(cancellationToken).ConfigureAwait(false);
-    }
+    public override AsyncTask ForceDeleteAsync(CancellationToken cancellationToken) =>
+        ImageAssetPolicy.MutateAsync(async () =>
+        {
+            ImageAssetPolicy.AssertOwnerDelete(this);
+            using var scope = _deletionPath.Begin(this, () => base.Path);
+            await base.ForceDeleteAsync(cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
 
     protected override void OnLoaded(object sender, NodeEventArgs e)
     {
         DomainReadPolicy.AssertOpen(this);
         base.OnLoaded(sender, e);
+    }
+
+    protected override void OnDeletingPhysically(object sender, CancellableNodeEventArgs e)
+    {
+        ImageAssetPolicy.AssertOwnerDelete(this);
+        base.OnDeletingPhysically(sender, e);
     }
 
     public override object GetProperty(string name)
@@ -74,9 +86,16 @@ public class TimelineSecurityHandler : Folder
         return base.GetProperty(name);
     }
 
+    public override IEnumerable<IIndexableField> GetIndexableFields() =>
+        CoverImageSetIndexField.PreserveReference(this, base.GetIndexableFields());
+
     // This is the extension point recommended by GenericContent. OnModified
     // is skipped for some locked saves; this override also covers those saves.
-    public override async AsyncTask SaveAsync(NodeSaveSettings settings,
+    public override AsyncTask SaveAsync(NodeSaveSettings settings,
+        CancellationToken cancellationToken) => ImageAssetPolicy.MutateAsync(
+            () => SaveCoreAsync(settings, cancellationToken), cancellationToken);
+
+    private async AsyncTask SaveCoreAsync(NodeSaveSettings settings,
         CancellationToken cancellationToken)
     {
         await SaveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -118,6 +137,7 @@ public class TimelineSecurityHandler : Folder
             }
 
             ReadPublicFlag(); // Validate the two Boolean field definitions.
+            ImageAssetPolicy.AssertCoverReference(this);
 
             // A failed private save leaves the existing node closed. A failed
             // public save never removes its existing private ACL.

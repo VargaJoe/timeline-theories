@@ -129,7 +129,12 @@ test('snapshot batches bound complete caller reads to four and preserve input or
   };
   const response=await app.handleRequest(request('snapshots',{method:'POST',token:null,body:{ids}}));
   assert.equal(response.status,200,await response.clone().text());const {data}=await response.json();
-  assert.equal(peak,4);assert.equal(active,0);assert.deepEqual(started,ids);assert.notEqual(finished[0],ids[0]);
+  assert.equal(peak,4);assert.equal(active,0);
+  // Independent HTTP requests may reach the repository in a different order.
+  // The first wave and duplicates must be complete; response order is checked below.
+  const numeric=(a,b)=>a-b;
+  assert.deepEqual(started.slice(0,4).sort(numeric),ids.slice(0,4).sort(numeric));
+  assert.deepEqual([...started].sort(numeric),[...ids].sort(numeric));assert.notEqual(finished[0],ids[0]);
   assert.deepEqual(data.map(row=>row.Id),ids);assert.deepEqual(data.map(row=>row.Title),ids.map(id=>'Media '+id));
   for(const row of data)assert.match(row.revision,/^sha256:[0-9a-f]{64}$/);
   assert.equal(state.requests.some(row=>row.credential),false);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);

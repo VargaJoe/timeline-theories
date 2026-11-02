@@ -104,6 +104,14 @@
         <IsText>false</IsText>
       </Configuration>
     </Field>
+    <Field name="CoverImageSet" type="Reference">
+      <DisplayName>Cover Image Set</DisplayName>
+      <Description>Optional active, sealed SenseNet image generation. Inherited by BookMediaItem.</Description>
+      <Configuration>
+        <AllowMultiple>false</AllowMultiple>
+        <AllowedTypes><Type>ImageVariantSet</Type></AllowedTypes>
+      </Configuration>
+    </Field>
     <Field name="Duration" type="Integer">
       <DisplayName>Duration</DisplayName>
       <Description>Duration in minutes (optional)</Description>

@@ -45,6 +45,10 @@ services:
     image: sensenetcsp/sn-api-sql@sha256:45cbdf96a3663c3f9c84dfa1b113c00ca45225b7f1b075a6d2e5622b1ece97b3
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      # Local M0 image scope observer and HttpContextAccessor registration.
+      ASPNETCORE_HOSTINGSTARTUPASSEMBLIES: Timeline.Theories.M0.Security
+      # Preload the explicitly mounted assembly before ASP.NET startup discovery.
+      DOTNET_STARTUP_HOOKS: /app/Timeline.Theories.M0.Security.dll
       ASPNETCORE_URLS: https://+:443;http://+:80
       ASPNETCORE_Kestrel__Certificates__Default__Path: /https/localhost.pfx
       ASPNETCORE_Kestrel__Certificates__Default__Password: ${M0_CERT_PASSWORD:?Run m0-runtime.ps1 first}
