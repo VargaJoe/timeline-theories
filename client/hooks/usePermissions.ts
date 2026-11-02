@@ -4,29 +4,30 @@ import { repositoryUrl } from '../configuration';
 import { canOperations, subscribePermissions, type Operation } from '../services/sensenet';
 
 /** Permission results are bound to the current identity and never authorize a write. */
-export function usePermissions(operations: Operation[]): boolean {
+export function usePermissionState(operations: Operation[]): 'checking' | 'allowed' | 'denied' {
   const auth = useSharedAuth();
   const [permissionRevision, setPermissionRevision] = useState(0);
   useEffect(() => subscribePermissions(() => setPermissionRevision(value => value + 1)), []);
   const operationKey = JSON.stringify(operations);
   const stableOperations = useMemo<Operation[]>(() => JSON.parse(operationKey), [operationKey]);
   const key = JSON.stringify([repositoryUrl, auth.isAuthenticated, auth.isLoading, auth.accessToken, auth.user, permissionRevision, operationKey]);
-  const [result, setResult] = useState({ key: '', allowed: false });
+  const [result, setResult] = useState({ key: '', allowed: false, resolved: false });
 
   useEffect(() => {
     let cancelled = false;
     let request = 0;
     const refresh = async () => {
       const currentRequest = ++request;
-      setResult(previous => previous.key === key ? previous : { key, allowed: false });
-      if (auth.isLoading || stableOperations.length === 0) return;
+      setResult(previous => previous.key === key ? previous : { key, allowed: false, resolved: false });
+      if (auth.isLoading) return;
+      if (stableOperations.length === 0) { setResult({ key, allowed: false, resolved: true }); return; }
       let allowed = false;
       try {
         allowed = await canOperations(stableOperations);
       } catch {
         // Unknown or unavailable permission metadata fails closed.
       }
-      if (!cancelled && currentRequest === request) setResult({ key, allowed });
+      if (!cancelled && currentRequest === request) setResult({ key, allowed, resolved: true });
     };
     const onVisible = () => {
       if (document.visibilityState === 'visible') void refresh();
@@ -43,5 +44,10 @@ export function usePermissions(operations: Operation[]): boolean {
     };
   }, [key, stableOperations, auth.isLoading]);
 
-  return !auth.isLoading && result.key === key && result.allowed;
+  if (auth.isLoading || result.key !== key || !result.resolved) return 'checking';
+  return result.allowed ? 'allowed' : 'denied';
+}
+
+export function usePermissions(operations: Operation[]): boolean {
+  return usePermissionState(operations) === 'allowed';
 }

@@ -63,9 +63,9 @@ function App() {
           <main>
             <IdentityBoundary><Routes>
               <Route path="/authentication/callback" element={<AuthCallbackPage />} />
-              <Route path="/timelines" element={<PermissionContent operations={[{ target: timelinesPath, action: 'read' }]}><TimelineListPage /></PermissionContent>} />
+              <Route path="/timelines" element={<TimelineListPage />} />
               <Route path="/timelines/:id" element={<TimelineViewPage />} />
-              <Route path="/media-library" element={<PermissionContent operations={[{ target: mediaLibraryPath, action: 'read' }]}><MediaLibraryPage /></PermissionContent>} />
+              <Route path="/media-library" element={<MediaLibraryPage />} />
               <Route path="/media-library/:id" element={<MediaReadRoute />} />
               <Route
                 path="/media-library/create"

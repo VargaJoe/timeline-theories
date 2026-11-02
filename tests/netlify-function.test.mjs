@@ -30,8 +30,9 @@ after(async () => { await fixture?.close(); });
 
 async function setup(t, extra = {}) {
   const projectRoot = '/Root/Content/FunctionFixture-' + randomUUID();
-  const state = { requests: [], patches: 0, allowSave: true, allowRead: true, allowRootRead: true, schemaAvailable: true, onSave: null, interruptNextReadback: false };
+  const state = { requests: [], patches: 0, allowSave: true, allowRead: true, allowRootRead: true, schemaAvailable: true, onSave: null, onRead: null, deniedIds: new Set(), interruptNextReadback: false };
   const content = { Id: 10, ParentId: 2, Name: 'media', DisplayName: 'Fixture media', Path: projectRoot + '/MediaLibrary/media', Type: 'MediaItem', Title: 'Before', CreationDate: '2026-10-01T00:00:00Z', CreatedById: 42, ModificationDate: '2026-10-01T00:00:00Z', ModifiedById: 42, Version: 'V1.0', VersionId: 1 };
+  const contents = new Map([[content.Id, content]]);
   const send = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ d: value })); };
   const server = https.createServer(tls, async (req, res) => {
     try {
@@ -49,8 +50,12 @@ async function setup(t, extra = {}) {
         return send(res, 200, [{ ContentTypeName: type, FieldSettings: [...new Set(names)].map(Name => ({ Name, ReadOnly: false })) }]);
       }
       if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0' });
-      if (url.pathname === '/OData.svc/content(10)') {
-        if (!state.allowRead) return send(res, 403, null);
+      const target = url.pathname.match(/^\/OData.svc\/content\((\d+)\)$/);
+      if (target) {
+        const id = Number(target[1]), row = contents.get(id);
+        if (req.method === 'GET' && state.onRead) await state.onRead({ id, url });
+        if (!state.allowRead || state.deniedIds.has(id)) return send(res, 403, null);
+        if (!row) return send(res, 404, null);
         if (req.method === 'GET' && state.patches && state.interruptNextReadback) {
           // The controlled server already applied the actual HTTPS PATCH, but
           // its first readback connection is lost. Recovery must read durable
@@ -60,9 +65,9 @@ async function setup(t, extra = {}) {
         if (req.method === 'PATCH') {
           if (!state.allowSave) return send(res, 403, null);
           const chunks = []; for await (const part of req) chunks.push(part);
-          Object.assign(content, JSON.parse(Buffer.concat(chunks).toString()), { Version: `V${++state.patches + 1}.0`, VersionId: state.patches + 1, ModificationDate: new Date().toISOString() });
+          Object.assign(row, JSON.parse(Buffer.concat(chunks).toString()), { Version: `V${++state.patches + 1}.0`, VersionId: state.patches + 1, ModificationDate: new Date().toISOString() });
         }
-        return send(res, 200, content);
+        return send(res, 200, row);
       }
       return send(res, 404, null);
     } catch { send(res, 500, null); }
@@ -87,7 +92,7 @@ async function setup(t, extra = {}) {
     const result = await app.handleRequest(request(`jobs/${id}`)); assert.equal(result.status, 200, await result.clone().text());
     return result.json();
   }
-  return { app, config, state, content, request, enqueue, background, runNext, invocations, preview };
+  return { app, config, state, content, contents, request, enqueue, background, runNext, invocations, preview };
 }
 
 test('anonymous content and snapshot reads work when production GetSchema is permission-filtered to an empty list', async t => {
@@ -101,6 +106,75 @@ test('anonymous content and snapshot reads work when production GetSchema is per
   }
   assert.equal(state.requests.some(row=>/GetSchema|HasPermission/.test(row.path)),false);
   assert.equal(state.requests.some(row=>row.credential),false);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);
+});
+
+test('snapshot batches bound complete caller reads to four and preserve input order and duplicates', async t => {
+  const {app,request,state,content,contents}=await setup(t),ids=[14,10,13,12,11,15,16,10];
+  for(const id of new Set(ids))contents.set(id,{...content,Id:id,Name:'media-'+id,Path:content.Path+'-'+id,Title:'Media '+id});
+  let active=0,peak=0,releaseWave,releaseFirst;
+  const wave=new Promise(resolve=>{releaseWave=resolve;}),first=new Promise(resolve=>{releaseFirst=resolve;}),started=[],finished=[];
+  // The first snapshot waits for the other workers and a later full read.
+  // A fallback releases a broken serial implementation so assertions can fail.
+  const fallback=setTimeout(()=>{releaseWave();releaseFirst();},1000);
+  t.after(()=>{clearTimeout(fallback);releaseWave();releaseFirst();});
+  state.onRead=async({id,url})=>{
+    if(url.searchParams.get('$select')==='Id,ParentId,Name,Path,Type') {
+      started.push(id);active++;peak=Math.max(peak,active);const firstWave=started.length<=4;
+      if(started.length===4)releaseWave();
+      if(firstWave)await wave;
+      if(firstWave&&id===ids[0])await first;
+    } else if(!url.searchParams.has('$select')) {
+      finished.push(id);active--;if(id!==ids[0])releaseFirst();
+    }
+  };
+  const response=await app.handleRequest(request('snapshots',{method:'POST',token:null,body:{ids}}));
+  assert.equal(response.status,200,await response.clone().text());const {data}=await response.json();
+  assert.equal(peak,4);assert.equal(active,0);assert.deepEqual(started,ids);assert.notEqual(finished[0],ids[0]);
+  assert.deepEqual(data.map(row=>row.Id),ids);assert.deepEqual(data.map(row=>row.Title),ids.map(id=>'Media '+id));
+  for(const row of data)assert.match(row.revision,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(state.requests.some(row=>row.credential),false);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);
+});
+
+test('snapshot batches validate every ID before dispatching any content read', async t => {
+  const {app,request,state}=await setup(t);
+  for(const invalid of [0,-1,1.5,'11',null,Number.MAX_SAFE_INTEGER+1]) {
+    const response=await app.handleRequest(request('snapshots',{method:'POST',token:null,body:{ids:[10,11,invalid]}}));
+    assert.equal(response.status,400);assert.equal((await response.json()).error.code,'invalid_target');
+  }
+  assert.equal(state.requests.length,0);assert.equal(state.patches,0);
+});
+
+test('snapshot batch denial drains started reads, stops new IDs and returns no partial data', async t => {
+  const {app,request,state,content,contents}=await setup(t),ids=[10,11,12,13,14,15];
+  for(const id of ids)contents.set(id,{...content,Id:id});
+  state.deniedIds.add(11);
+  let release,denialStarted;
+  const blocked=new Promise(resolve=>{release=resolve;}),denial=new Promise(resolve=>{denialStarted=resolve;}),started=[],finished=[];
+  const fallback=setTimeout(release,1000);t.after(()=>{clearTimeout(fallback);release();});
+  state.onRead=async({id,url})=>{
+    if(url.searchParams.get('$select')==='Id,ParentId,Name,Path,Type') {
+      started.push(id);if(id===11)denialStarted();else await blocked;
+    } else if(!url.searchParams.has('$select'))finished.push(id);
+  };
+  let returned=false;
+  const running=app.handleRequest(request('snapshots',{method:'POST',token:null,body:{ids}})).then(response=>{returned=true;return response;});
+  await denial;await new Promise(resolve=>setTimeout(resolve,30));assert.equal(returned,false);
+  release();const response=await running;assert.equal(response.status,403);
+  const value=await response.json();assert.equal(value.error.code,'backend_denied');assert.equal(Object.hasOwn(value,'data'),false);
+  assert.deepEqual(started,[10,11,12,13]);assert.deepEqual([...finished].sort((a,b)=>a-b),[10,12,13]);
+  assert.equal(state.requests.some(row=>row.credential),false);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);
+});
+
+test('snapshot batch failures preserve the earliest input error and full-content scope revalidation', async t => {
+  const {app,request,state,content,contents}=await setup(t);contents.set(12,{...content,Id:12});state.deniedIds.add(12);
+  state.onRead=async({id})=>{if(id===11)await new Promise(resolve=>setTimeout(resolve,30));};
+  const missing=await app.handleRequest(request('snapshots',{method:'POST',token:null,body:{ids:[11,12]}}));
+  assert.equal(missing.status,404);assert.equal((await missing.json()).error.code,'target_unavailable');
+  state.deniedIds.clear();contents.set(11,{...content,Id:11});
+  state.onRead=async({id,url})=>{if(id===11&&!url.searchParams.has('$select'))contents.get(id).Path='/Root/Content/Outside/media';};
+  const moved=await app.handleRequest(request('snapshots',{method:'POST',token:null,body:{ids:[10,11]}}));
+  assert.equal(moved.status,403);const value=await moved.json();assert.equal(value.error.code,'project_boundary');assert.equal(Object.hasOwn(value,'data'),false);
+  assert.equal(state.patches,0);
 });
 
 test('schema-independent reads preserve supported optional fields and include them in the snapshot revision',async t=>{

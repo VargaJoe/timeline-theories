@@ -37,6 +37,21 @@ async function bodyJson(request, limit = TRANSFER_JSON_BYTES) {
   let input; try { input = JSON.parse((await bytes(request, limit)).toString()); } catch (error) { if (error instanceof DomainError) throw error; throw new DomainError('invalid_json','Invalid JSON body.'); }
   assertObject(input); return input;
 }
+async function readSnapshots(repo, ids) {
+  const data = new Array(ids.length); let next = 0, failed;
+  async function worker() {
+    while (!failed && next < ids.length) {
+      const index = next++;
+      try { data[index] = await repo.read(ids[index]); }
+      catch (error) { if (!failed || index < failed.index) failed = { index, error }; }
+    }
+  }
+  // Bound complete caller-ACL reads, preserve input order, and drain started
+  // reads before returning the earliest input failure without a partial batch.
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+  if (failed) throw failed.error;
+  return data;
+}
 function normalized(request, config, background = false) {
   const incoming = new URL(request.url), url = new URL(config.frontendOrigin);
   url.pathname = background ? '/.netlify/functions/native-api-background' : incoming.pathname.replace(/^\/\.netlify\/functions\/native-api\/(?:v1\/)?/, '/api/v1/');
@@ -108,7 +123,7 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
     if (content && method==='GET') { requireScope(context,'content:read'); const data=await context.repo.read(assertId(Number(content[1])));return descriptor(200,{data},[data.Id]); }
     if (cover && method==='GET') { requireScope(context,'content:read');const media=await context.repo.read(assertId(Number(cover[1]))),binary=await readCover(context,media);if(!binary)throw new DomainError('cover_unavailable','Binary cover is unavailable.',404);return {status:200,headers:{'Content-Type':binary.contentType},body:binary.data,readTargets:[media.Id]}; }
     if (route==='lookup' && method==='POST') { requireScope(context,'content:read');const input=await bodyJson(request);if(Object.keys(input).some(k=>!['target','parent'].includes(k)))throw new DomainError('invalid_input','Lookup accepts target and optional parent.');const data=await context.repo.read(input.target,{parent:input.parent===true});return descriptor(200,{data},[data.Id]); }
-    if (route==='snapshots' && method==='POST') { requireScope(context,'content:read');const input=await bodyJson(request);if(!Array.isArray(input.ids)||input.ids.length>100||Object.keys(input).some(k=>k!=='ids'))throw new DomainError('invalid_input','Snapshot batch accepts at most 100 content IDs.');const data=[];for(const id of input.ids)data.push(await context.repo.read(assertId(id)));return descriptor(200,{data},data.map(row=>row.Id)); }
+    if (route==='snapshots' && method==='POST') { requireScope(context,'content:read');const input=await bodyJson(request);if(!Array.isArray(input.ids)||input.ids.length>100||Object.keys(input).some(k=>k!=='ids'))throw new DomainError('invalid_input','Snapshot batch accepts at most 100 content IDs.');const ids=input.ids.map(id=>assertId(id)),data=await readSnapshots(context.repo,ids);return descriptor(200,{data},data.map(row=>row.Id)); }
     const type={timelines:'Timeline',media:'MediaItem',books:'BookMediaItem',entries:'TimelineEntry'}[route];
     if (type && method==='GET') { requireScope(context,'content:read');for(const key of url.searchParams.keys())if(!['skip','top','search','timelineId','includeHidden'].includes(key))throw new DomainError('invalid_query','Unknown list parameter.');const data=await context.repo.list(type,{skip:Number(url.searchParams.get('skip')||0),top:Number(url.searchParams.get('top')||50),search:url.searchParams.get('search')||'',parentId:url.searchParams.has('timelineId')?Number(url.searchParams.get('timelineId')):undefined,includeHidden:url.searchParams.get('includeHidden')==='true'});return descriptor(200,data,data.items.map(row=>row.Id)); }
     if (route.startsWith('providers/') && method==='POST') {

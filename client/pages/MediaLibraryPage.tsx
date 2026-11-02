@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 import { PageHeader } from '../components/PageHeader';
+import { CollectionPlaceholder } from '../components/CollectionPlaceholder';
 import { LazyImage } from '../components/LazyImage';
 import { BookImportDialog } from '../components/BookImportDialog';
 import { MediaItemEditDialog } from '../components/MediaItemEditDialog';
 import { siteConfig } from '../configuration';
-import { loadBackgroundImage, assertOperations, captureOperationContext } from '../services/sensenet';
+import { loadBackgroundImage, assertOperations, captureOperationContext, subscribePermissions } from '../services/sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { MEDIA_ITEM_CONTENT_TYPE } from '../contentTypes';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, usePermissionState } from '../hooks/usePermissions';
 import { PermissionContent } from '../components/PermissionContent';
 
 // Media types from MediaItem content type definition (see deployment/contenttypes/MediaItem.xml)
@@ -28,6 +29,7 @@ const MEDIA_TYPES = [
 
 export default function MediaLibraryPage() {
   // Use unified auth context
+  const readPermission = usePermissionState([{ target: mediaLibraryPath, action: 'read' }]);
   const canCreate = usePermissions([{ target: mediaLibraryPath, action: 'create', contentType: MEDIA_ITEM_CONTENT_TYPE }]);
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,10 @@ export default function MediaLibraryPage() {
   const [loadedMediaItems, setLoadedMediaItems] = useState<MediaItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const requests = useRef({ generation: 0 }).current;
+  const [permissionRevision, setPermissionRevision] = useState(0);
+  useEffect(() => subscribePermissions(() => setPermissionRevision(value => value + 1)), []);
+  const visibleMediaItems = readPermission === 'allowed' ? loadedMediaItems : [];
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,6 +54,12 @@ export default function MediaLibraryPage() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
   const [showBookImportDialog, setShowBookImportDialog] = useState(false);
+  useEffect(() => {
+    if (readPermission !== 'allowed') {
+      setLoadedMediaItems([]);
+      setShowEditDialog(false); setEditingItem(null); setShowBookImportDialog(false);
+    }
+  }, [readPermission, permissionRevision]);
 
   // Load background image (same as timeline/media item pages)
   useEffect(() => {
@@ -71,9 +83,17 @@ export default function MediaLibraryPage() {
   }, []);
 
   const loadMediaItems = useCallback(async (reset: boolean = false, customSkip?: number) => {
+    if (readPermission !== 'allowed') return;
+    const generation = reset ? ++requests.generation : requests.generation;
+    const checkContext = captureOperationContext();
+    const active = () => {
+      if (generation !== requests.generation) return false;
+      try { checkContext(); return true; } catch { return false; }
+    };
     try {
       if (reset) {
         setLoading(true);
+        setLoadingMore(false);
       }
       setError('');
       
@@ -84,6 +104,7 @@ export default function MediaLibraryPage() {
         skip, 
         siteConfig.timelineList.allViewPageSize
       );
+      if (!active()) return;
       
       if (reset) {
         setLoadedMediaItems(items);
@@ -92,47 +113,50 @@ export default function MediaLibraryPage() {
       }
       setHasMore(items.length === siteConfig.timelineList.allViewPageSize);
     } catch (err) {
+      if (!active()) return;
       console.error('Error loading media items:', err);
       setError('Failed to load media items. Please check your connection and try again.');
     } finally {
-      if (reset) {
+      if (reset && active()) {
         setLoading(false);
       }
     }
-  }, [characterFilter, appliedSearchQuery]);
+  }, [characterFilter, appliedSearchQuery, readPermission, requests]);
 
   useEffect(() => {
-    loadMediaItems(true);
-  }, [loadMediaItems]);
+    void loadMediaItems(true);
+    return () => { requests.generation++; };
+  }, [loadMediaItems, permissionRevision, requests]);
 
   const loadMoreMediaItems = async () => {
-    if (loadingMore || !hasMore) return;
+    if (error || loading || loadingMore || !hasMore) return;
     
     setLoadingMore(true);
+    const generation = requests.generation;
     try {
       await loadMediaItems(false, loadedMediaItems.length);
     } catch (error) {
       console.error('Failed to load more media items:', error);
       setError('Failed to load more media items');
     } finally {
-      setLoadingMore(false);
+      if (generation === requests.generation) setLoadingMore(false);
     }
   };
 
   const handleCharacterFilterChange = (character: string) => {
+    if (character === characterFilter && appliedSearchQuery === '') return;
+    setLoading(true);
     setCharacterFilter(character);
     setAppliedSearchQuery(''); // Clear search when changing character filter
     setSearchQuery('');
-    setLoadedMediaItems([]);
-    setHasMore(false);
     setLoadingMore(false);
   };
 
   const handleSearch = () => {
+    if (appliedSearchQuery === searchQuery && characterFilter === '') return;
+    setLoading(true);
     setAppliedSearchQuery(searchQuery);
     setCharacterFilter(''); // Clear character filter when searching
-    setLoadedMediaItems([]);
-    setHasMore(false);
     setLoadingMore(false);
   };
 
@@ -201,21 +225,6 @@ export default function MediaLibraryPage() {
   }
 
 
-  if (loading && loadedMediaItems.length === 0) {
-    return (
-      <>
-        <PageHeader
-          title="Media Library"
-          subtitle="Browse and manage your global media collection."
-          backgroundImage={backgroundImageUrl || undefined}
-          overlayOpacity={siteConfig.headerOverlayOpacity}
-        />
-        <div style={{ textAlign: 'center', padding: 40 }}>
-          <div style={{ marginBottom: 16, fontSize: 16, color: '#666' }}>Loading media library...</div>
-        </div>
-      </>
-    );
-  }
 
 
   return (
@@ -346,12 +355,8 @@ export default function MediaLibraryPage() {
             {(appliedSearchQuery || characterFilter) && (
               <button
                 onClick={() => {
+                  handleCharacterFilterChange('a');
                   setSearchQuery('');
-                  setAppliedSearchQuery('');
-                  setCharacterFilter('a');
-                  setLoadedMediaItems([]);
-                  setHasMore(false);
-                  setLoadingMore(false);
                 }}
                 disabled={loading}
                 style={{
@@ -386,8 +391,14 @@ export default function MediaLibraryPage() {
         </div>
       )}
 
-      {/* Media Items Grid */}
-      {loadedMediaItems.length === 0 && !loading ? (
+      <div aria-label="Media items" aria-busy={readPermission === 'checking' || (readPermission === 'allowed' && loading)}>
+      <div role="status" style={{ minHeight: 24, marginBottom: 8, color: '#52627a', fontSize: 14 }}>
+        {readPermission === 'checking' ? 'Checking access…' : readPermission === 'allowed' && loading ? (visibleMediaItems.length ? 'Updating media library…' : 'Loading media library…') : ''}
+      </div>
+      {readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
+      : visibleMediaItems.length === 0 && (loading || readPermission === 'checking') ? <CollectionPlaceholder kind="media" />
+      : visibleMediaItems.length === 0 && error ? null
+      : visibleMediaItems.length === 0 ? (
         <div style={{
           background: '#f8f9fa',
           border: '1px solid #e9ecef',
@@ -420,8 +431,8 @@ export default function MediaLibraryPage() {
         </div>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
-            {loadedMediaItems.map((item) => {
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20, opacity: loading ? 0.65 : 1, transition: 'opacity 120ms ease' }}>
+            {visibleMediaItems.map((item) => {
               const externalLinks = getExternalLinks(item.ExternalLinks);
               return (
                 // MagicUI card effect placeholder (replace with real import/use)
@@ -569,7 +580,7 @@ export default function MediaLibraryPage() {
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>
               <button
                 onClick={loadMoreMediaItems}
-                disabled={loadingMore}
+                disabled={!!error || loading || loadingMore}
                 style={{
                   background: loadingMore ? '#f1f5f9' : '#2a4d8f',
                   color: loadingMore ? '#94a3b8' : '#fff',
@@ -597,6 +608,7 @@ export default function MediaLibraryPage() {
           )}
         </>
       )}
+      </div>
       </div>
 
       <BookImportDialog

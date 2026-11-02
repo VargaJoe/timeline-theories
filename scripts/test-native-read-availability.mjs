@@ -8,7 +8,7 @@ const compile = source => 'data:text/javascript;base64,' + Buffer.from(ts.transp
   { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText).toString('base64');
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 let fixtureCount = 0;
-async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt' } = {}) {
+async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt', coverRows } = {}) {
   const environment = { mode, repositoryUrl: 'https://repo.test', authority: 'https://auth.test', projectRoot: '/Root/Content/timelines', writable: true };
   globalThis.window = { location: { origin: 'https://ui.test' } };
   globalThis.__availabilityEnvironment = environment;
@@ -54,7 +54,7 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
       rawCalls.push({ url, method: init.method || 'GET', token: this.configuration.token });
       if (!readAllowed) return response({ error: 'Forbidden' }, 403);
       const value = { ...snapshot(1), revision: undefined, Title: 'Raw permitted title', DisplayName: 'Raw permitted title' };
-      return response({ d: new URL(url).searchParams.has('query') ? { results: [value] } : value });
+      return response({ d: new URL(url).searchParams.has('query') ? { results: coverRows ?? [value] } : value });
     }
     async load(options) {
       return (await this.fetch(environment.repositoryUrl + '/odata.svc/content(' + options.idOrPath + ')?$select=' + (options.oDataOptions?.select || []).join(',') + '&$top=1000', { method: 'GET' })).json();
@@ -89,6 +89,51 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
 let checks = 0;
 async function test(name, run) { await run(); checks++; process.stdout.write('PASS ' + name + '\n'); }
 async function main() {
+  await test('display-only covers keep exact Open checks without requesting editor snapshots', async () => {
+    const root = '/Root/Content/timelines';
+    const f = await fixture({ discovery: 'ready', token: '', coverRows: [{ Id: 3, Type: 'TimelineEntry', Path: root + '/Timelines/Conan the Barbarian/entry',
+      MediaItem: { Id: 4, Type: 'MediaItem', Path: root + '/MediaLibrary/media', CoverImageUrl: 'https://covers.test/cover.jpg' } }] });
+    const rows = await f.sense.readTimelineCoverReferences(f.environment.projectRoot + '/Timelines/Conan the Barbarian');
+    assert.equal(rows.length, 1);
+    assert.equal(f.rawCalls.length, 2, 'Exact Open GET plus fixed cover projection');
+    const url = new URL(f.rawCalls[1].url);
+    assert.equal(decodeURIComponent(url.pathname), '/odata.svc' + f.environment.projectRoot + '/Timelines/Conan the Barbarian');
+    assert.equal(url.searchParams.get('$top'), '50');
+    assert.equal(url.searchParams.get('$expand'), 'MediaItem');
+    assert.equal(url.searchParams.get('$select'), 'Id,Path,Name,Type,MediaItem/Id,MediaItem/Path,MediaItem/Type,MediaItem/CoverImageUrl,MediaItem/CoverImageBin');
+    assert.equal(f.nativeCalls.length, 0);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  await test('cover projection rejects cross-project and wrong-type entries or expanded media', async () => {
+    const root = '/Root/Content/timelines';
+    const row = { Id: 3, Type: 'TimelineEntry', Path: root + '/Timelines/example/entry',
+      MediaItem: { Id: 4, Type: 'MediaItem', Path: root + '/MediaLibrary/media' } };
+    for (const entry of [
+      { ...row, Path: root + '/Timelines/other/entry' },
+      { ...row, Type: 'Folder' },
+      { ...row, MediaItem: { ...row.MediaItem, Path: '/Root/Content/other/MediaLibrary/media' } },
+      { ...row, MediaItem: { ...row.MediaItem, Type: 'Folder' } },
+      { ...row, MediaItem: 4 },
+    ]) {
+      const f = await fixture({ discovery: 'ready', token: '', coverRows: [entry] });
+      await assert.rejects(f.sense.readTimelineCoverReferences(root + '/Timelines/example'));
+    }
+  });
+  await test('cover projection fails closed on denied Open, invalid path and aborted view', async () => {
+    const f = await fixture({ discovery: 'ready', token: '', readAllowed: false });
+    const target = f.environment.projectRoot + '/Timelines/example';
+    await assert.rejects(f.sense.readTimelineCoverReferences(target));
+    assert.equal(f.rawCalls.length, 1, 'Denied Open must not dispatch a cover query');
+    const count = f.rawCalls.length;
+    for (const path of [f.environment.projectRoot + '/MediaLibrary/example', target + '/child', target + '?query=x', target + '#fragment']) {
+      await assert.rejects(f.sense.readTimelineCoverReferences(path), /Invalid timeline cover target/);
+    }
+    assert.equal(f.rawCalls.length, count);
+    const allowed = await fixture({ discovery: 'ready', token: '' });
+    const controller = new AbortController(); controller.abort();
+    await assert.rejects(allowed.sense.readTimelineCoverReferences(target, controller.signal), error => error.name === 'AbortError');
+    assert.equal(allowed.rawCalls.length, 0);
+  });
   const writeOperations = ['update', 'create', 'upload', 'delete'].map(action => ({ target: 1, action, ...(action === 'create' ? { contentType: 'MediaItem' } : {}) }));
   for (const operation of writeOperations) await test('anonymous ' + operation.action + ' checks stop before all readiness, ACL and write requests', async () => {
     const f = await fixture({ discovery: 'ready', token: '' });

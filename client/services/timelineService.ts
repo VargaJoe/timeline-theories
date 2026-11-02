@@ -133,7 +133,7 @@ export async function deleteTimeline(idOrPath: string | number, permanent = fals
     throw new Error('Failed to delete timeline. Please check your connection and try again.');
   }
 }
-import { repository, assertOperations, captureOperationContext } from './sensenet';
+import { repository, assertOperations, captureOperationContext, readTimelineCoverReferences } from './sensenet';
 import { mediaLibraryPath } from '../projectPaths';
 import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
@@ -284,28 +284,18 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
  * @param timelinePath Timeline path for fetching entries
  * @param limit Maximum number of covers to return (default: 4)
  */
-export async function getTimelineMediaCovers(timelinePath: string, limit = 4): Promise<string[]> {
+export async function getTimelineMediaCovers(timelinePath: string, limit = 4, signal?: AbortSignal): Promise<string[]> {
   try {
-    // Fetch timeline entries with expanded MediaItem references
-    const result = await repository.loadCollection({
-      path: timelinePath,
-      oDataOptions: {
-        query: `+TypeIs:TimelineEntry +Hidden:0`,
-        select: ['MediaItem/CoverImageUrl', 'MediaItem/CoverImageBin'], //'MediaItem', 
-        expand: ['MediaItem'],
-        orderby: ['Position'],
-        top: 50, // Get more entries to have a good pool for random selection
-      },
-    });
+    const rows = await readTimelineCoverReferences(timelinePath, signal);
 
     // Collect all available cover URLs
     const allCoverUrls: string[] = [];
-    for (const item of result.d.results) {
+    for (const item of rows) {
       // Native snapshots expand references as arrays; legacy OData uses an object.
       const mediaItem = Array.isArray(item.MediaItem) ? item.MediaItem[0] : item.MediaItem;
       if (mediaItem) {
         // Use the helper function to get cover URL (either from URL or binary field)
-        const coverUrl = MediaLibraryService.getCoverImageUrl(mediaItem);
+        const coverUrl = MediaLibraryService.getCoverImageUrl(mediaItem as Parameters<typeof MediaLibraryService.getCoverImageUrl>[0]);
         if (coverUrl) {
           allCoverUrls.push(coverUrl);
         }
@@ -329,6 +319,7 @@ export async function getTimelineMediaCovers(timelinePath: string, limit = 4): P
 
     return selectedCovers;
   } catch (error) {
+    if (signal?.aborted) return [];
     console.error('Failed to load timeline media covers:', error);
     return [];
   }

@@ -54,7 +54,8 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
         margin: '0 auto',
         padding: '0 20px',
         textAlign: 'left',
-        width: '100%'
+        width: '100%',
+        boxSizing: 'border-box'
       }}>
         {showSiteTitle && (
           <div style={{
