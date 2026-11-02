@@ -6,16 +6,18 @@ import type { Timeline } from '../services/timelineService';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { MediaCoverMontage } from '../components/MediaCoverMontage';
+import { CollectionPlaceholder } from '../components/CollectionPlaceholder';
 import { captureOperationContext, loadBackgroundImage, subscribePermissions } from '../services/sensenet';
 import { createTimelineCoverLoader } from '../services/timelineCoverLoader';
 import { siteConfig } from '../configuration';
 import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, usePermissionState } from '../hooks/usePermissions';
 
 export const TimelineListPage: React.FC = () => {
   // Handle authentication state - unified auth context
   const { user, accessToken, isLoading: authLoading } = useSharedAuth();
+  const readPermission = usePermissionState([{ target: timelinesPath, action: 'read' }]);
   const canCreate = usePermissions([{ target: timelinesPath, action: 'create', contentType: TIMELINE_CONTENT_TYPE }]);
   const [searchParams, setSearchParams] = useSearchParams();
   
@@ -36,8 +38,13 @@ export const TimelineListPage: React.FC = () => {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [permissionRevision, setPermissionRevision] = useState(0);
+  const [reloadRevision, setReloadRevision] = useState(0);
   const currentView = useRef<{ loader: ReturnType<typeof createTimelineCoverLoader>; active: () => boolean } | null>(null);
   useEffect(() => subscribePermissions(() => setPermissionRevision(value => value + 1)), []);
+  useEffect(() => {
+    if (readPermission !== 'allowed') { setLoadedTimelines([]); setMediaCovers({}); }
+  }, [readPermission, permissionRevision]);
+  const visibleTimelines = readPermission === 'allowed' ? loadedTimelines : [];
 
   const handleSortOrderChange = (newSortOrder: 'alphabetical' | 'created_desc') => {
     setSortOrder(newSortOrder);
@@ -50,7 +57,6 @@ export const TimelineListPage: React.FC = () => {
       setCharacterFilter(character);
       setLoading(true); // Show loading while fetching new data
       // Reset pagination state when changing filters
-      setLoadedTimelines([]);
       setHasMore(false);
       setLoadingMore(false);
     }
@@ -67,7 +73,7 @@ export const TimelineListPage: React.FC = () => {
 
   const loadMoreTimelines = async () => {
     const view = currentView.current;
-    if (loadingMore || !hasMore || !view?.active()) return;
+    if (error || loading || loadingMore || !hasMore || !view?.active()) return;
     setLoadingMore(true);
     try {
       const timelines = await getTimelines(!!user, characterFilter, loadedTimelines.length,
@@ -87,7 +93,7 @@ export const TimelineListPage: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!isInitialized || authLoading) return;
+    if (!isInitialized || authLoading || readPermission !== 'allowed') return;
     let disposed = false;
     const checkContext = captureOperationContext();
     const active = () => {
@@ -104,12 +110,10 @@ export const TimelineListPage: React.FC = () => {
     setLoading(true);
     setLoadingMore(false);
     setError('');
-    setLoadedTimelines([]);
-    setMediaCovers({});
-    setHasMore(false);
     void getTimelines(!!user, characterFilter, 0, siteConfig.timelineList.allViewPageSize, sortOrder)
       .then(timelines => {
         if (!active()) return;
+        setMediaCovers({});
         setLoadedTimelines(timelines);
         setHasMore(timelines.length === siteConfig.timelineList.allViewPageSize);
         loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl));
@@ -126,7 +130,7 @@ export const TimelineListPage: React.FC = () => {
       loader.dispose();
       currentView.current = null;
     };
-  }, [characterFilter, sortOrder, isInitialized, user, accessToken, authLoading, permissionRevision]);
+  }, [characterFilter, sortOrder, isInitialized, user, accessToken, authLoading, permissionRevision, readPermission, reloadRevision]);
 
   // Sync characterFilter with URL parameters
   useEffect(() => {
@@ -149,7 +153,6 @@ export const TimelineListPage: React.FC = () => {
     if (characterFilter !== expectedFilter) {
       setCharacterFilter(expectedFilter);
       setLoading(true);
-      setLoadedTimelines([]);
       setHasMore(false);
       setLoadingMore(false);
     }
@@ -188,35 +191,6 @@ export const TimelineListPage: React.FC = () => {
     
     loadBackground();
   }, []);
-
-  if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ fontSize: 18, color: '#666' }}>Loading timelines...</div>
-      </div>
-    );
-  }
-  
-  if (error) {
-    return (
-      <div style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ color: '#dc3545', fontSize: 16, marginBottom: 16 }}>{error}</div>
-        <button 
-          onClick={() => window.location.reload()} 
-          style={{
-            background: '#2a4d8f',
-            color: 'white',
-            border: 'none',
-            borderRadius: 6,
-            padding: '8px 16px',
-            cursor: 'pointer'
-          }}
-        >
-          Try Again
-        </button>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -352,8 +326,18 @@ export const TimelineListPage: React.FC = () => {
         </div>
       </PageHeader>
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 20px 40px 20px' }}>
-        {(loadedTimelines.length === 0) ? (
+      <div aria-label="Timelines" aria-busy={readPermission === 'checking' || (readPermission === 'allowed' && loading)} style={{ maxWidth: 1200, margin: '0 auto', padding: '0 20px 40px 20px' }}>
+        <div role="status" style={{ minHeight: 24, marginBottom: 8, color: '#52627a', fontSize: 14 }}>
+          {readPermission === 'checking' ? 'Checking access…' : readPermission === 'allowed' && loading ? (visibleTimelines.length ? 'Updating timelines…' : 'Loading timelines…') : ''}
+        </div>
+        {error && <div role="alert" style={{ padding: 16, marginBottom: 16, background: '#fef2f2', color: '#b91c1c', borderRadius: 8 }}>
+          {error}{visibleTimelines.length > 0 && ' Previously loaded timelines remain below.'}
+          <button type="button" onClick={() => setReloadRevision(value => value + 1)} style={{ marginLeft: 16 }}>Try Again</button>
+        </div>}
+        {readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
+        : visibleTimelines.length === 0 && (loading || readPermission === 'checking') ? <CollectionPlaceholder kind="timeline" />
+        : visibleTimelines.length === 0 && error ? null
+        : visibleTimelines.length === 0 ? (
           <div style={{
             background: '#fff',
             border: '1px solid #e9ecef',
@@ -398,10 +382,12 @@ export const TimelineListPage: React.FC = () => {
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
                 gap: 24,
-                maxWidth: '100%'
+                maxWidth: '100%',
+                opacity: loading ? 0.65 : 1,
+                transition: 'opacity 120ms ease'
               }}
             >
-              {loadedTimelines
+              {visibleTimelines
                 .slice()
                 // Filter out private timelines unless user is logged in (admin) - server-side filtering now handles character filter
                 .filter(timeline => timeline.isVisible !== false || user)
@@ -568,7 +554,7 @@ export const TimelineListPage: React.FC = () => {
               <div style={{ textAlign: 'center', marginTop: 40, marginBottom: 20 }}>
                 <button
                   onClick={loadMoreTimelines}
-                  disabled={loadingMore}
+                  disabled={!!error || loading || loadingMore}
                   style={{
                     background: loadingMore ? '#6c757d' : '#2a4d8f',
                     color: '#fff',
