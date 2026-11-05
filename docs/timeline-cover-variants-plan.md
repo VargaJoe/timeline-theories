@@ -1,10 +1,10 @@
 # Generált timeline-borítók és képváltozatok — megvalósítási javaslat
 
-Dátum: 2026-11-02. Státusz: **terv, részletes megvalósítás előtt review-zandó**.
+Dátum: 2026-11-02. Státusz: **eredeti terv; a statikus alkalmazási megvalósítás követése alább**.
 Ág: `feature/timeline-cover-variants-plan`; alap: `develop` / `8813d6fa`.
 Az alap tartalmazza a merged PR #60-at (`7be70695`) és az utána mergelt dependency frissítéseket.
 
-Megvalósítási követés, 2026-11-03: az első helyi backend-rész a `feature/sensenet-image-variants` ágban készül; pontos scope és ellenőrzés: [SenseNet képváltozatok M0](image-variants-m0-verification.md). A részletes terv alábbi későbbi app/UI fázisai ettől még nem készültek el.
+Megvalósítási követés, 2026-11-06: a `feature/sensenet-image-variants` ág már tartalmazza a statikus borítógenerátort, a szerkesztői publikálást, a médiaképméreteket és a listák/részletoldalak méretválasztását. Az aktuális használat, ellenőrzés és külön élesítési kapu: [alkalmazási útmutató](image-variants-usage-and-rollout.md). Az [M0 tárolási proof](image-variants-m0-verification.md) a november 3-i első backend-részt dokumentálja. Az alábbi terv történeti kiindulás, nem a mai elkészültségi lista; az interaktív kártyanézet továbbra is későbbi feladat.
 
 **Joe tárolási döntése:** az eredetik, a generált timeline-borítók és valamennyi képméret a SenseNetben, a többi tartalom mellett maradjon. Netlify Blobs képtár nem készül. Ez felülírja a terv első változatának Blobs-ajánlását; az app meglévő journal/koordinációs állapotának tárolását nem változtatja meg.
 
@@ -21,7 +21,7 @@ Fokozatos megvalósítást javaslok:
 
 Az első statikus kompozíció a javaslatom Joe „haladjunk fokozatosan?” kérdésére; a pontos vizuális sablon még előnézettel jóváhagyandó. Az elforgatott, egymást fedő kártyák és az egérrel pörgethető interaktív nézet későbbi feladat. A mostani adatmodell ne tegye ezeket szükségtelenné az eredeti képek összelapításával.
 
-Az eredeti tervezési ágban dokumentáció készült. A követő M0 megvalósítás csak az izolált helyi környezetet módosítja; éles séma, tartalom, ACL, kulcs és hosting-konfiguráció módosítása nem része ennek a körnek.
+Az eredeti tervezési ágban dokumentáció készült. A követő megvalósítás és annak írásos próbái csak az izolált helyi környezetet módosítják; éles séma, tartalom, ACL, kulcs és hosting-konfiguráció módosítása nem része ennek a körnek.
 
 ## 2. Ellenőrzött kiindulás
 

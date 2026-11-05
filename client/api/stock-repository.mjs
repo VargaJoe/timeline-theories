@@ -2,6 +2,8 @@ import https from 'node:https';
 import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from './repository.mjs';
 import { DomainError, TYPES, FIELDS, assertId, assertMembership, safeName, validateFields } from '../domain/content.mjs';
+import { ImageAssets, isImageMutation, classifyNativeImageFailure } from './image-assets.mjs';
+import { storedCoverMime } from './covers.mjs';
 
 const HEADERS = ['Id', 'ParentId', 'Name', 'Path', 'Type'];
 const STAMPS = ['CreationDate', 'CreatedById', 'ModificationDate', 'ModifiedById', 'Version', 'VersionId'];
@@ -22,9 +24,10 @@ export class StockRepository extends Repository {
     this.inventoryCredential = inventoryCredential ?? config.inventoryCredential;
     this.schemas = new Map();
     this.inventoryVerification = null;
+    this.images = new ImageAssets(this);
   }
 
-  async request(url, { method = 'GET', body, headers: extraHeaders = {}, maxBytes = 20 * 1024 * 1024 } = {}) {
+  async request(url, { method = 'GET', body, headers: extraHeaders = {}, maxBytes = 20 * 1024 * 1024, onDispatch } = {}) {
     if (this.config.signal?.aborted) fail('function_deadline', 'The app invocation deadline expired before dispatch.', 409);
     const target = new URL(url);
     if (target.origin !== this.config.repositoryUrl || target.username || target.password) fail('repository_mismatch', 'Repository origin mismatch.', 403);
@@ -43,13 +46,16 @@ export class StockRepository extends Repository {
           const bytes = Buffer.concat(parts); let json; try { json = JSON.parse(bytes.toString('utf8')); } catch { json = null; }
           if (res.statusCode < 200 || res.statusCode >= 300) {
             const exceptionType = String(json?.error?.exceptiontype ?? json?.error?.exceptionType ?? '');
-            const backend = String(json?.error?.code ?? '') + ' ' + exceptionType + ' ' + String(json?.error?.message?.value ?? json?.error?.message ?? '');
+            const backendMessage = String(json?.error?.message?.value ?? json?.error?.message ?? '');
+            const backend = String(json?.error?.code ?? '') + ' ' + exceptionType + ' ' + backendMessage;
             let status = res.statusCode === 412 ? 409 : [401, 403, 404, 409].includes(res.statusCode) ? res.statusCode : 502;
             // Request parsing can wrap an M0 Open denial as RequestError400
             // with an explicit SenseNetSecurityException exceptiontype.
             if ([400, 500].includes(res.statusCode) && (/^(?:SenseNetSecurityException|AccessDeniedException)$/.test(exceptionType) || /AccessDenied|PermissionDenied|permission.*denied/i.test(backend))) status = 403;
             if (res.statusCode === 400 && /NodeIsOutOfDate|ContentNameAlreadyExists|NameAlreadyExists|already exists/i.test(backend)) status = 409;
-            const code = status === 401 ? 'backend_credential_rejected' : status === 403 ? 'backend_denied' : status === 404 ? 'target_unavailable' : status === 409 ? 'revision_conflict' : 'backend_failure';
+            const imageFailure = [400, 500].includes(res.statusCode) ? classifyNativeImageFailure(exceptionType, backendMessage) : null;
+            if (imageFailure) status = imageFailure.status;
+            const code = imageFailure?.code ?? (status === 401 ? 'backend_credential_rejected' : status === 403 ? 'backend_denied' : status === 404 ? 'target_unavailable' : status === 409 ? 'revision_conflict' : 'backend_failure');
             reject(new DomainError(code, 'The repository rejected the request.', status)); return;
           }
           resolve({ value: json?.d ?? json, bytes, contentType: res.headers['content-type'], headers: res.headers, status: res.statusCode });
@@ -57,6 +63,7 @@ export class StockRepository extends Repository {
       });
       req.setTimeout(30000, () => req.destroy(new DomainError('repository_timeout', 'Repository request timed out.', 502)));
       req.on('error', error => reject(error instanceof DomainError ? error : new DomainError('repository_transport', 'Repository transport failed.', 502)));
+      if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method.toUpperCase())) onDispatch?.();
       req.end(body);
     });
   }
@@ -107,14 +114,14 @@ export class StockRepository extends Repository {
     if (header.Type === 'TimelineEntry') query['$expand'] = 'MediaItem';
     const data = await this.api(header.Id, null, { query }); this.scope(data, options);
     if (data.Type !== header.Type || data.Id !== header.Id) fail('revision_conflict', 'Target changed during the snapshot.');
-    const select = [...HEADERS, ...STAMPS, ...(domain ? FIELDS[header.Type].filter(name => !OPTIONAL_FIELDS.has(name) || Object.hasOwn(data, name)) : []), ...(COVER_TYPES.has(header.Type) ? ['CoverImageBin'] : [])];
+    const select = [...HEADERS, ...STAMPS, ...(domain ? FIELDS[header.Type].filter(name => !OPTIONAL_FIELDS.has(name) || Object.hasOwn(data, name)) : []), ...(COVER_TYPES.has(header.Type) ? ['CoverImageBin', ...(Object.hasOwn(data, 'CoverImageSet') ? ['CoverImageSet'] : [])] : [])];
     const snapshot = Object.fromEntries([...new Set(select)].map(field => [field, data[field] ?? null]));
     if (header.Type === 'TimelineEntry') snapshot.MediaItem = referenceId(data.MediaItem);
     if (!data.ModificationDate || typeof data.Version !== 'string') fail('backend_revision_unavailable', 'Repository snapshot version metadata is unavailable.', 503);
     // The binary URL contains SenseNet's binary timestamp from this same content snapshot.
     const binaryToken = data.CoverImageBin?.__mediaresource ?? null;
     if (COVER_TYPES.has(header.Type)) snapshot.CoverImageBin = binaryToken ? { __mediaresource: { ...binaryToken }, ContentType: binaryToken.content_type ?? null, ETag: binaryToken.media_etag ?? null, SnapshotToken: binaryToken.media_src ?? null } : null;
-    snapshot.revision = snapshotRevision(snapshot);
+    const revisionBase = structuredClone(snapshot);
     if (binaryToken?.content_type) {
       const response = await this.request(this.binaryUrl(snapshot.Id), { method: 'HEAD', maxBytes: 0 });
       const size = response.headers['content-length'] === undefined ? null : Number(response.headers['content-length']);
@@ -122,15 +129,36 @@ export class StockRepository extends Repository {
       // not an empty binary; the caller can use ContentType and a bounded GET.
       snapshot.CoverImageBin.Size = Number.isSafeInteger(size) && size >= 0 ? size : null;
     } else if (snapshot.CoverImageBin) snapshot.CoverImageBin.Size = 0;
+    if (COVER_TYPES.has(header.Type)) {
+      const { ownerGuard, ...image } = await this.images.presentation(snapshot, { guardOnly: options.image === false });
+      if (ownerGuard) {
+        // The canonical DB token is part of the application revision. Bracket
+        // it with stock metadata reads so a concurrent save cannot combine
+        // one snapshot's fields with another snapshot's native write guard.
+        const after = await this.api(snapshot.Id, null, { query: { '$select': ['Id', ...STAMPS].join(','), metadata: 'no' } });
+        if (after.Id !== snapshot.Id || after.Version !== data.Version || after.VersionId !== data.VersionId || after.ModificationDate !== data.ModificationDate || ownerGuard.versionId !== undefined && ownerGuard.versionId !== data.VersionId || Date.parse(data.ModificationDate) !== Date.parse(ownerGuard.modificationDate)) fail('revision_conflict', 'Owner changed while its native image revision guard was read.');
+        snapshot.ImageOwnerGuard = ownerGuard; revisionBase.ImageOwnerGuard = ownerGuard;
+      }
+      if (options.image !== false) snapshot.image = image;
+    }
+    snapshot.revision = snapshotRevision(revisionBase);
     return snapshot;
   }
   binaryUrl(id) { return this.config.repositoryUrl + '/binaryhandler.ashx?' + new URLSearchParams({ nodeid: assertId(id), propertyname: 'CoverImageBin' }); }
+  async imageSourceSnapshot(id) {
+    const data = await this.api(assertId(id), null, { query: { '$select': 'Id,Type,Path,CoverImageBin', metadata: 'no' } });
+    this.scope(data, { expectedType: 'MediaItem' });
+    await this.assert([{ target: data.Id, action: 'read' }]);
+    const binary = data.CoverImageBin?.__mediaresource;
+    return { Id: data.Id, Type: data.Type, Path: data.Path, CoverImageBin: binary ? { ContentType: binary.content_type ?? null } : null };
+  }
   async coverBytes(id) {
     const target = await this.read(assertId(id));
     if (!COVER_TYPES.has(target.Type)) fail('invalid_cover_target', 'This content does not support covers.', 400);
     await this.assert([{ target: target.Id, action: 'read' }]);
     const response = await this.request(this.binaryUrl(target.Id), { maxBytes: 10 * 1024 * 1024 });
-    return coverBytes({ bytesBase64: response.bytes.toString('base64'), mimeType: response.contentType?.split(';')[0] });
+    const mimeType = storedCoverMime(response.bytes, response.contentType);
+    return coverBytes({ bytesBase64: response.bytes.toString('base64'), mimeType });
   }
 
   async assert(operations) {
@@ -231,7 +259,28 @@ export class StockRepository extends Repository {
         readableReferences.push({ id: row.Id, parentId: row.ParentId });
       } catch (error) { if (![403, 404].includes(error.status)) throw error; }
     }
-    return { hasReferences: rows.length > 0, readableReferences, completeness: 'configured-read-all-project' };
+    const imageRows = (await this.images.capabilities()).supported ? await this.inventoryRows('+TypeIs:ImageVariantSet +SourceContents:' + media.Id) : [];
+    for (const row of imageRows) {
+      try {
+        // Inventory supplies only existence. The caller's own set read decides
+        // which details can appear in a conflict response.
+        const set = await this.api(row.Id, null, { query: { '$select': 'Id,Type', metadata: 'no' } });
+        if (set.Id === row.Id && set.Type === 'ImageVariantSet') readableReferences.push({ id: row.Id, kind: 'image-source' });
+      } catch (error) { if (![403, 404].includes(error.status)) throw error; }
+    }
+    return { hasReferences: rows.length > 0 || imageRows.length > 0, readableReferences, completeness: 'configured-read-all-project' };
+  }
+  async ownerImageReferences(id) {
+    const target = await this.read(assertId(id), { image: false });
+    if (!COVER_TYPES.has(target.Type) || !(await this.images.capabilities()).supported) return { hasReferences: false, readableReferences: [] };
+    const rows = await this.inventoryRows('+TypeIs:ImageVariantSet +OwnerContent:' + target.Id), readableReferences = [];
+    for (const row of rows) {
+      try {
+        const set = await this.api(row.Id, null, { query: { '$select': 'Id,Type', metadata: 'no' } });
+        if (set.Id === row.Id && set.Type === 'ImageVariantSet') readableReferences.push({ id: row.Id, kind: 'image-owner' });
+      } catch (error) { if (![403, 404].includes(error.status)) throw error; }
+    }
+    return { hasReferences: rows.length > 0, readableReferences };
   }
   async assertLeaf(id) {
     const target = await this.read(assertId(id));
@@ -260,16 +309,29 @@ export class StockRepository extends Repository {
   }
   revisionMatches(content, expected) { if (content.revision !== expected) fail('revision_conflict', 'The target changed since preview.'); }
   async mutation(payload) { return this.write(payload); }
-  async write(payload) {
-    if (!payload || !['create', 'update', 'delete', 'cover', 'order'].includes(payload.action) || !TYPES.includes(payload.type)) fail('invalid_operation', 'Invalid application mutation.', 400);
+  async write(payload, transient) {
+    if (isImageMutation(payload)) return this.images.write(payload, transient);
+    if (!payload || !['create', 'update', 'delete', 'cover', 'order', 'cover-presentation'].includes(payload.action) || !TYPES.includes(payload.type)) fail('invalid_operation', 'Invalid application mutation.', 400);
     if (payload.action === 'order') return this.writeOrder(payload);
     if (payload.action === 'create') return this.writeCreate(payload);
     const target = await this.read(assertId(payload.targetId), { expectedType: payload.type });
     await this.assertWritableTarget(target);
     if (target.Type !== payload.type) fail('invalid_type', 'Target has a different exact content type.');
     this.revisionMatches(target, payload.expectedRevision);
-    await this.assert([{ target: target.Id, action: payload.action }]);
+    await this.assert([{ target: target.Id, action: payload.action === 'cover-presentation' ? 'cover' : payload.action }]);
+    if (payload.action === 'cover-presentation') {
+      const guard = await this.images.preflight(target, payload.setId);
+      if (snapshotRevision(guard) !== snapshotRevision(payload.presentation)) fail('image_draft_changed', 'The approved image set changed since preview.');
+      return this.executeSingle(async () => {
+        await this.api(target.Id, 'ActivateImageAsset', { method: 'POST', body: { setId: payload.setId, ...this.images.guard(target) } });
+        const after = await this.read(target.Id), current = after.image;
+        if ((current?.setId ?? null) !== payload.setId || payload.setId !== null && current?.state !== 'active') fail('image_activation_conflict', 'The image presentation did not match its approved activation.');
+        return { id: after.Id, revision: after.revision, setId: payload.setId, image: current };
+      }, target.Id);
+    }
     if (payload.action === 'delete') {
+      const imageReferences = await this.ownerImageReferences(target.Id);
+      if (imageReferences.hasReferences) fail('image_reference_conflict', 'Delete inactive image sets before deleting their owner.');
       if (target.Type === 'Timeline') {
         const children = await this.children(target.Id, 'delete'), entries = payload.entries ?? [];
         if (!sameIds(children.map(row => row.Id), entries.map(row => row.id))) fail('membership_conflict', 'Timeline membership changed since preview.');
@@ -381,7 +443,7 @@ function referenceId(value) {
 function coverBytes(payload) {
   if (typeof payload.bytesBase64 !== 'string' || payload.bytesBase64.length > 14 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload.bytesBase64) || !['image/png', 'image/jpeg', 'image/webp'].includes(payload.mimeType)) fail('invalid_cover', 'Expected a bounded PNG, JPEG or WebP cover.', 400);
   const bytes = Buffer.from(payload.bytesBase64, 'base64');
-  const matches = payload.mimeType === 'image/png' ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) : payload.mimeType === 'image/jpeg' ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+  const matches = storedCoverMime(bytes, payload.mimeType) === payload.mimeType;
   if (!bytes.length || bytes.length > 10 * 1024 * 1024 || !matches || payload.fileName !== undefined && (typeof payload.fileName !== 'string' || !payload.fileName.trim() || payload.fileName.length > 100 || /[\\/"\r\n\x00]/.test(payload.fileName))) fail('invalid_cover', 'Cover signature or file name is invalid.', 400);
   return bytes;
 }

@@ -62,6 +62,7 @@ const common = {
   '../configuration': config, '../projectPaths': paths, '../contentTypes': types,
   '../components/PageHeader': widget('PageHeader'),
   '../components/CollectionPlaceholder': widget('CollectionPlaceholder'),
+  '../components/LazyImage': widget('LazyImage'),
 };
 const { default: MediaLibraryPage } = await import(compile('pages/MediaLibraryPage.tsx', {
   ...common, '../services/mediaLibraryService': media,

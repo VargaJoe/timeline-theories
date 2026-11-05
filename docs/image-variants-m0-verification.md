@@ -2,7 +2,9 @@
 
 Dátum: 2026-11-03. Ág: `feature/sensenet-image-variants`, alap: `develop` / `8813d6fa`.
 
-Ez a [borítóterv](timeline-cover-variants-plan.md) első technikai részének megvalósítása: az eredetit megőrző, külön SenseNet-képtartalmak és egy aktiváló referencia működő helyi próbája. Az alkalmazás listái és szerkesztője még a meglévő borítófolyamatot használják. Production tartalom, séma, ACL, hosting vagy extension nem változott; képek nem kerülnek Netlify Blobsba.
+**Történeti mérföldkő:** ez a leírás a november 3-i, PNG-re korlátozott backend-alapot őrzi. A november 6-i alkalmazási integráció, WebP-generálás, szerkesztő, képméretválasztás és az élesítés feltételei az [aktuális útmutatóban](image-variants-usage-and-rollout.md) találhatók.
+
+Ez a [borítóterv](timeline-cover-variants-plan.md) első technikai részének megvalósítása: az eredetit megőrző, külön SenseNet-képtartalmak és egy aktiváló referencia működő helyi próbája. Ezen a mérföldkövön az alkalmazás listái és szerkesztője még a meglévő borítófolyamatot használták. Production tartalom, séma, ACL, hosting vagy extension nem változott; képek nem kerülnek Netlify Blobsba.
 
 ## Tárolási szerződés
 

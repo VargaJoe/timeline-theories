@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -28,10 +30,18 @@ internal static class ImageAssetPolicy
     internal const string AssetsPath = ProjectPath + "/ImageAssets";
     private static readonly SemaphoreSlim MutationGate = new(1, 1);
     private static readonly AsyncLocal<bool> InsideMutation = new();
+    private static readonly AsyncLocal<object?> MutationOwner = new();
+    private static object? HeldMutationOwner;
     private static readonly object NoStoreKey = new();
     private static readonly object ReadDeniedKey = new();
 
-    private static void AssertExtensionReady()
+    // Read-only ownership marker for the memo; the existing gate/reentrancy
+    // behavior is unchanged. Inherited background execution cannot adopt a
+    // different request's later gate ownership.
+    internal static bool HoldsMutationGate => InsideMutation.Value && MutationOwner.Value is { } owner &&
+        ReferenceEquals(owner, Volatile.Read(ref HeldMutationOwner));
+
+    internal static void AssertExtensionReady()
     {
         if (!ImageAssetHostingStartup.ConfigureInvoked) throw Invalid();
         if (!ImageAssetHostingStartup.ServicesConfigured) throw Invalid();
@@ -44,8 +54,16 @@ internal static class ImageAssetPolicy
         // Stock Image.OnCreated can save dimensions recursively in this flow.
         if (InsideMutation.Value) { await action().ConfigureAwait(false); return; }
         await MutationGate.WaitAsync(cancel).ConfigureAwait(false);
-        try { InsideMutation.Value = true; await action().ConfigureAwait(false); }
-        finally { InsideMutation.Value = false; MutationGate.Release(); }
+        try
+        {
+            var owner = new object(); MutationOwner.Value = owner; Volatile.Write(ref HeldMutationOwner, owner);
+            InsideMutation.Value = true; await action().ConfigureAwait(false);
+        }
+        finally
+        {
+            InsideMutation.Value = false; Volatile.Write(ref HeldMutationOwner, null); MutationOwner.Value = null;
+            MutationGate.Release();
+        }
     }
 
     internal static void Permission(int id, PermissionType permission)
@@ -54,12 +72,16 @@ internal static class ImageAssetPolicy
             throw new SenseNetSecurityException("M0 image asset access is not permitted.");
     }
 
-    private static bool Has(int id, PermissionType permission) =>
-        Providers.Instance.SecurityHandler.HasPermission(
+    private static bool Has(int id, PermissionType permission)
+    {
+        using var profile = ImagePolicyDiagnostics.Measure("Permission");
+        return Providers.Instance.SecurityHandler.HasPermission(
             AccessProvider.Current.GetOriginalUser(), id, permission);
+    }
 
     internal static void AssertOpen(Node node)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("AssertOpen", node);
         EnforceNoStore();
         try { AssertOpenCore(node); }
         catch (SenseNetSecurityException)
@@ -84,7 +106,10 @@ internal static class ImageAssetPolicy
         if (node.VersionId != own.Head.LastMinorVersionId || node.NodeTimestamp != own.Head.Timestamp)
             throw new SenseNetSecurityException("M0 image asset version is not current.");
         var set = own.Type == "ImageVariantSet" ? own : ReadContainingSet(own);
-        var owner = ValidateSet(set);
+        var deleting = ImageAssetOperations.IsDeletingSet(set.Head.Id);
+        var owner = deleting ? ValidateSetForDeletion(set) : ValidateSet(set);
+        if (!deleting && (own.Type == "ImageVariant" || !Has(owner.Head.Id, PermissionType.Save)))
+            using (var binding = ParseManifest(set.String("Manifest"))) AssertCurrentSources(binding.RootElement);
         if (!Has(owner.Head.Id, PermissionType.Save))
         {
             if (!set.Boolean("Sealed") ||
@@ -96,7 +121,7 @@ internal static class ImageAssetPolicy
             if (own.Type == "ImageVariantSet" && node.VersionId != own.Head.LastMinorVersionId)
                 throw new SenseNetSecurityException("M0 image set version is not current.");
         }
-        if (own.Type == "ImageVariant" && set.Boolean("Sealed"))
+        if (!deleting && own.Type == "ImageVariant" && set.Boolean("Sealed"))
         {
             using var manifest = ParseManifest(set.String("Manifest"));
             ValidateManifestBinding(set, owner, manifest.RootElement);
@@ -147,6 +172,7 @@ internal static class ImageAssetPolicy
 
     internal static Snapshot ValidateSet(Snapshot set)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("ValidateSet");
         if (set.Type != "ImageVariantSet") throw Invalid();
         var owners = set.Ids("OwnerContent");
         if (owners.Length != 1) throw Invalid();
@@ -171,6 +197,7 @@ internal static class ImageAssetPolicy
 
     internal static Snapshot ReadOwner(int id)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("ReadOwner");
         Permission(id, PermissionType.Open);
         var owner = Snapshot.Read(id);
         owner.AssertVersionOpen();
@@ -183,6 +210,7 @@ internal static class ImageAssetPolicy
 
     internal static void AssertSetWrite(ImageVariantSetSecurityHandler set)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("GuardSetWrite", set);
         AssertExtensionReady();
         if (set.NodeType.Name != "ImageVariantSet" ||
             (set.Id > 0 && set.IsPropertyChanged("AllowedChildTypes")) ||
@@ -217,9 +245,20 @@ internal static class ImageAssetPolicy
                 !persisted.Ids("SourceContents").OrderBy(id => id).SequenceEqual(sources.OrderBy(id => id)) ||
                 persisted.String("GenerationId") != generation || persisted.Head.ParentId != set.ParentId ||
                 persisted.Head.Path != parent.Head.Path + "/" + generation || persisted.Head.Name != generation) throw Invalid();
+            using var oldManifest = ParseManifest(persisted.String("Manifest"));
+            using var nextManifest = ParseManifest(set.RawString("Manifest"));
+            foreach (var property in new[] { "recipe", "sourceStamps" })
+            {
+                var oldExists = oldManifest.RootElement.TryGetProperty(property, out var oldValue);
+                var nextExists = nextManifest.RootElement.TryGetProperty(property, out var nextValue);
+                if (oldExists != nextExists || (oldExists && oldValue.GetRawText() != nextValue.GetRawText())) throw Invalid();
+            }
         }
         using var manifest = ParseManifest(set.RawString("Manifest"));
         ValidateManifestBinding(owner.Head.Id, owner.Type, generation, sources, manifest.RootElement);
+        if (set.Id == 0 && (!manifest.RootElement.TryGetProperty("recipe", out _) ||
+            !manifest.RootElement.TryGetProperty("sourceStamps", out _))) throw Invalid();
+        AssertCurrentSources(manifest.RootElement);
         if (set.RawBoolean("Sealed"))
         {
             if (set.Id == 0 || set.SavingState != ContentSavingState.Finalized) throw Invalid();
@@ -229,6 +268,8 @@ internal static class ImageAssetPolicy
 
     internal static void AssertFileWrite(ImageVariantSecurityHandler file)
     {
+        using var fresh = ImageSnapshotDataMemo.Bypass();
+        using var profile = ImagePolicyDiagnostics.Measure("GuardFileWrite", file);
         AssertExtensionReady();
         if (file.NodeType.Name != "ImageVariant" ||
             (file.Id > 0 && file.IsPropertyChanged("AllowedChildTypes")) ||
@@ -252,11 +293,9 @@ internal static class ImageAssetPolicy
         if (file.SavingState == ContentSavingState.Finalized)
         {
             // Native upload derives generic MIME from the extensionless name.
-            // The complete narrow PNG decoder must succeed before persistence.
-            var binary = file.RawBinary;
-            if (binary.ContentType is "" or "application/octet-stream")
-                binary.ContentType = "image/png";
-            PngVariantValidator.Validate(file.RawBinary, null);
+            // Infer only the extensionless upload's generic MIME; an explicit
+            // conflicting MIME remains a validation failure.
+            RasterVariantValidator.Validate(file.RawBinary, null);
         }
     }
 
@@ -268,6 +307,7 @@ internal static class ImageAssetPolicy
 
     internal static void AssertCoverReference(Node owner)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("GuardCoverReference");
         if (!owner.IsPropertyChanged("CoverImageSet")) return;
         if (owner.Id > 0) Permission(owner.Id, PermissionType.Save);
         var ids = RawIds(owner, "CoverImageSet");
@@ -281,6 +321,7 @@ internal static class ImageAssetPolicy
         if (boundOwner.Head.Id != owner.Id || !set.Boolean("Sealed")) throw Invalid();
         using var manifest = ParseManifest(set.String("Manifest"));
         ValidateManifestBinding(set, boundOwner, manifest.RootElement);
+        AssertCurrentSources(manifest.RootElement);
     }
 
     internal static void AssertOwnerDelete(Node owner)
@@ -289,6 +330,21 @@ internal static class ImageAssetPolicy
         var current = Snapshot.Read(owner.Id);
         if (current.Ids("CoverImageSet").Length != 0)
             throw new SenseNetSecurityException("M0 owner cover reference must be cleared before deletion.");
+        // Fresh database references, independent of index visibility and caller
+        // inventory coverage. Do not disclose any referring set identifiers.
+        Permission(owner.Id, PermissionType.Delete);
+        var setType = Providers.Instance.StorageSchema.NodeTypes.FirstOrDefault(type => type.Name == "ImageVariantSet");
+        if (setType is not null && Providers.Instance.DataProvider.QueryNodesByReferenceAndTypeAsync(
+                "OwnerContent", owner.Id, new[] { setType.Id }, CancellationToken.None)
+                .ConfigureAwait(false).GetAwaiter().GetResult().Any())
+            throw new SenseNetSecurityException("M0 owner still has image generations; remove inactive generations before deletion.");
+        if (setType is not null && current.Type is "MediaItem" or "BookMediaItem")
+        {
+            var references = Providers.Instance.DataProvider.QueryNodesByReferenceAndTypeAsync(
+                "SourceContents", owner.Id, new[] { setType.Id }, CancellationToken.None)
+                .ConfigureAwait(false).GetAwaiter().GetResult();
+            if (references.Any()) throw new SenseNetSecurityException("M0 image source is still referenced by an image generation.");
+        }
     }
 
     internal static int[] RawIds(Node node, string name)
@@ -301,21 +357,38 @@ internal static class ImageAssetPolicy
 
     internal static void AssertSetDelete(ImageVariantSetSecurityHandler node)
     {
-        Permission(node.Id, PermissionType.Open);
-        Permission(node.Id, PermissionType.Delete);
-        var set = Snapshot.Read(node.Id);
-        var owner = ValidateSet(set);
+        var set = Snapshot.ReadAuthorized(node.Id);
+        var owner = ImageAssetOperations.IsDeletingSet(node.Id) ? ValidateSetForDeletion(set) : ValidateSet(set);
+        AssertSetDeletionSnapshot(set, owner.Head.Id);
+    }
+
+    private static Snapshot ValidateSetForDeletion(Snapshot set)
+    {
+        if (set.Type != "ImageVariantSet" || set.Ids("OwnerContent").Length != 1) throw Invalid();
+        var owner = ReadOwner(set.Ids("OwnerContent")[0]);
         Permission(owner.Head.Id, PermissionType.Save);
+        var generation = set.String("GenerationId");
+        if (!Guid.TryParseExact(generation, "D", out _) || set.Head.Name != generation ||
+            set.Head.Path != AssetsPath + "/" + owner.Head.Id + "/" + generation) throw Invalid();
+        return owner;
+    }
+
+    internal static void AssertSetDeletionSnapshot(Snapshot set, int ownerId)
+    {
+        Permission(set.Head.Id, PermissionType.Open);
+        Permission(set.Head.Id, PermissionType.Delete);
+        var owner = ValidateSetForDeletion(set);
+        if (owner.Head.Id != ownerId) throw Invalid();
         if (owner.Ids("CoverImageSet").Contains(set.Head.Id))
             throw new SenseNetSecurityException("M0 active image generations cannot be deleted.");
-        var children = Providers.Instance.DataProvider.GetChildrenIdentifiersAsync(node.Id, CancellationToken.None)
+        var children = Providers.Instance.DataProvider.GetChildrenIdentifiersAsync(set.Head.Id, CancellationToken.None)
             .ConfigureAwait(false).GetAwaiter().GetResult().ToArray();
         if (children.Length > 3) throw Invalid();
         foreach (var id in children)
         {
             Permission(id, PermissionType.Open); Permission(id, PermissionType.Delete);
             var child = Snapshot.Read(id);
-            if (child.Type != "ImageVariant" || child.Head.ParentId != node.Id ||
+            if (child.Type != "ImageVariant" || child.Head.ParentId != set.Head.Id ||
                 child.Head.Path != set.Head.Path + "/" + child.Head.Name) throw Invalid();
         }
     }
@@ -339,7 +412,7 @@ internal static class ImageAssetPolicy
             var file = Node.LoadNode(id, VersionNumber.LastAccessible) as ImageVariantSecurityHandler;
             if (file is null || file.VersionId != snapshot.Head.LastMinorVersionId ||
                 file.SavingState != ContentSavingState.Finalized) throw Invalid();
-            total += PngVariantValidator.Validate(file.RawBinary, variant);
+            total += RasterVariantValidator.Validate(file.RawBinary, variant);
         }
         // Count actual repository children, not a caller-supplied manifest count.
         var childIds = Providers.Instance.DataProvider.GetChildrenIdentifiersAsync(set.Id, CancellationToken.None)
@@ -347,7 +420,7 @@ internal static class ImageAssetPolicy
         if (!ids.SetEquals(childIds) || total > 3 * 1024 * 1024) throw Invalid();
     }
 
-    private static JsonDocument ParseManifest(string value)
+    internal static JsonDocument ParseManifest(string value)
     {
         if (Encoding.UTF8.GetByteCount(value) is < 2 or > 16384) throw Invalid();
         try
@@ -378,9 +451,10 @@ internal static class ImageAssetPolicy
         ValidateManifestBinding(owner.Head.Id, owner.Type, set.String("GenerationId"),
             set.Ids("SourceContents"), manifest);
 
-    private static void ValidateManifestBinding(int ownerId, string ownerType, string generation,
+    internal static void ValidateManifestBinding(int ownerId, string ownerType, string generation,
         int[] sources, JsonElement manifest)
     {
+        ExactProperties(manifest, new[] { "schemaVersion", "projectPath", "ownerId", "generationId", "kind", "sourceIds", "variants" }, new[] { "recipe", "sourceStamps" });
         if (manifest.ValueKind != JsonValueKind.Object || manifest.GetProperty("schemaVersion").GetInt32() != 1 ||
             manifest.GetProperty("projectPath").GetString() != ProjectPath ||
             manifest.GetProperty("ownerId").GetInt32() != ownerId ||
@@ -390,6 +464,58 @@ internal static class ImageAssetPolicy
                 .SequenceEqual(sources.OrderBy(v => v)) ||
             manifest.GetProperty("variants").ValueKind != JsonValueKind.Array ||
             manifest.GetProperty("variants").GetArrayLength() > 3) throw Invalid();
+        var ordered = manifest.GetProperty("sourceIds").EnumerateArray().Select(v => v.GetInt32()).ToArray();
+        if (ownerType != "Timeline" && !ordered.SequenceEqual(new[] { ownerId })) throw Invalid();
+        foreach (var variant in manifest.GetProperty("variants").EnumerateArray())
+            ExactProperties(variant, new[] { "id", "name", "width", "height", "mimeType", "byteLength", "sha256" });
+        if (manifest.TryGetProperty("recipe", out var recipe))
+        {
+            ExactProperties(recipe, new[] { "template", "sourceIds" }, new[] { "seed" });
+            if (recipe.GetProperty("template").GetString() != (ownerType == "Timeline" ? "poster-strip-v1" : "media-sizes-v1") ||
+                !recipe.GetProperty("sourceIds").EnumerateArray().Select(v => v.GetInt32()).SequenceEqual(ordered) ||
+                (recipe.TryGetProperty("seed", out var seed) && (!seed.TryGetInt32(out var value) || value < 0))) throw Invalid();
+        }
+        if (manifest.TryGetProperty("sourceStamps", out var stamps))
+        {
+            if (stamps.ValueKind != JsonValueKind.Array || stamps.GetArrayLength() != ordered.Length) throw Invalid();
+            var index = 0;
+            foreach (var stamp in stamps.EnumerateArray())
+            {
+                ExactProperties(stamp, new[] { "id", "stamp" });
+                var hash = stamp.GetProperty("stamp").GetString() ?? "";
+                if (stamp.GetProperty("id").GetInt32() != ordered[index++] || hash.Length != 64 ||
+                    hash.Any(c => !(c is >= '0' and <= '9' or >= 'a' and <= 'f'))) throw Invalid();
+            }
+        }
+    }
+
+    internal static void ExactProperties(JsonElement value, string[] required, string[]? optional = null)
+    {
+        if (value.ValueKind != JsonValueKind.Object) throw Invalid();
+        var names = value.EnumerateObject().Select(p => p.Name).ToArray();
+        if (required.Any(name => !names.Contains(name)) || names.Any(name => !required.Contains(name) && !(optional?.Contains(name) ?? false))) throw Invalid();
+    }
+
+    internal static bool SourcesCurrent(JsonElement manifest)
+    {
+        using var profile = ImagePolicyDiagnostics.Measure("SourcesCurrent");
+        // Unstamped historical sets are stale and never silently trusted.
+        if (!manifest.TryGetProperty("recipe", out _) || !manifest.TryGetProperty("sourceStamps", out var stamps)) return false;
+        return stamps.EnumerateArray().All(value =>
+            ImageStamp(ReadOwner(value.GetProperty("id").GetInt32())) == value.GetProperty("stamp").GetString());
+    }
+    internal static void AssertCurrentSources(JsonElement manifest)
+    {
+        if (!SourcesCurrent(manifest)) throw new SenseNetSecurityException("M0 image generation source has changed; regenerate the cover.");
+    }
+    internal static string ImageStamp(Snapshot source)
+    {
+        if (source.Type is not ("MediaItem" or "BookMediaItem")) throw Invalid();
+        var binary = source.Binary("CoverImageBin");
+        var value = source.Head.Id.ToString(CultureInfo.InvariantCulture) + "\n" +
+            (binary?.Timestamp ?? 0).ToString(CultureInfo.InvariantCulture) + "\n" +
+            (binary?.Size ?? -1).ToString(CultureInfo.InvariantCulture) + "\n" + source.String("CoverImageUrl");
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     }
 
     internal static InvalidOperationException Invalid([CallerMemberName] string member = "",
@@ -410,16 +536,27 @@ internal static class ImageAssetPolicy
         internal static Snapshot ReadAuthorized(int id) { Permission(id, PermissionType.Open); return Read(id); }
         internal static Snapshot Read(int id)
         {
+            using var profile = ImagePolicyDiagnostics.Measure("SnapshotRead");
             var provider = Providers.Instance.DataProvider;
-            var head = provider.LoadNodeHeadAsync(id, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+            NodeHead? head;
+            using (ImagePolicyDiagnostics.Measure("DbHead"))
+                head = provider.LoadNodeHeadAsync(id, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
             if (head is null || head.LastMinorVersionId <= 0) throw Invalid();
-            var data = provider.LoadNodesAsync(new[] { head.LastMinorVersionId }, CancellationToken.None)
-                .ConfigureAwait(false).GetAwaiter().GetResult().SingleOrDefault()?.GetDynamicDataIdKey();
+            // Capture values now: never retain a mutable NodeHead as a key.
+            var key = ImageSnapshotDataMemo.Key.Capture(head);
+            if (!ImageSnapshotDataMemo.TryGet(key, out var data))
+            {
+                using (ImagePolicyDiagnostics.Measure("DbData"))
+                    data = provider.LoadNodesAsync(new[] { key.VersionId }, CancellationToken.None)
+                        .ConfigureAwait(false).GetAwaiter().GetResult().SingleOrDefault()?.GetDynamicDataIdKey();
+                if (data is not null) ImageSnapshotDataMemo.StoreFresh(key, data);
+            }
             if (data is null) throw Invalid();
             return new Snapshot(head, data);
         }
         internal void AssertVersionOpen()
         {
+            using var profile = ImagePolicyDiagnostics.Measure("DbVersions");
             var version = Providers.Instance.DataProvider.GetVersionNumbersAsync(Head.Id, CancellationToken.None)
                 .ConfigureAwait(false).GetAwaiter().GetResult()
                 .SingleOrDefault(v => v.VersionId == Head.LastMinorVersionId)?.VersionNumber;
@@ -432,9 +569,12 @@ internal static class ImageAssetPolicy
             var property = _type.PropertyTypes.FirstOrDefault(p => p.Name == name);
             if (property is null || property.DataType != type) throw Invalid();
             if (type == StorageDataType.Text)
+            {
+                using var profile = ImagePolicyDiagnostics.Measure("DbText");
                 return Providers.Instance.DataProvider.LoadTextPropertyValuesAsync(Head.LastMinorVersionId,
                     new[] { property.Id }, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult()
                     .GetValueOrDefault(property.Id) ?? "";
+            }
             return _data.TryGetValue(property.Id, out var value) ? value : property.DefaultValue;
         }
         internal int[] Ids(string name)
@@ -445,5 +585,13 @@ internal static class ImageAssetPolicy
         }
         internal string String(string name) => Value(name, name == "Manifest" ? StorageDataType.Text : StorageDataType.String) as string ?? "";
         internal bool Boolean(string name) => Value(name, StorageDataType.Int) is int value && value != 0;
+        internal BinaryDataValue? Binary(string name)
+        {
+            using var profile = ImagePolicyDiagnostics.Measure("DbBinaryMetadata");
+            var property = _type.PropertyTypes.SingleOrDefault(p => p.Name == name && p.DataType == StorageDataType.Binary);
+            if (property is null) throw Invalid();
+            return Providers.Instance.DataProvider.LoadBinaryPropertyValueAsync(Head.LastMinorVersionId, property.Id, CancellationToken.None)
+                .ConfigureAwait(false).GetAwaiter().GetResult();
+        }
     }
 }

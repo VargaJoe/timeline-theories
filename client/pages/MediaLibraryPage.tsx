@@ -442,6 +442,7 @@ export default function MediaLibraryPage() {
                     {/* Cover image top, portrait aspect ratio */}
                     {MediaLibraryService.getCoverImageUrl(item) && (
                       <LazyImage
+                        image={item.image}
                         src={MediaLibraryService.getCoverImageUrl(item)!}
                         alt={item.DisplayName + ' cover'}
                         style={{

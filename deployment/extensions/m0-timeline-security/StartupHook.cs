@@ -1,8 +1,6 @@
 /// <summary>
-/// Explicit local .NET startup-hook entry point. The method deliberately has no
-/// dependency calls: loading this exact assembly by path before Main makes it
-/// resolvable by ASP.NET hosting-startup discovery without editing host deps.
-/// Enabled only by the owned M0 container's DOTNET_STARTUP_HOOKS setting.
+/// Dependency-free explicit preload of this extension only. The image decoder
+/// is loaded later in its own AssemblyLoadContext, never in the host context.
 /// </summary>
 internal static class StartupHook
 {

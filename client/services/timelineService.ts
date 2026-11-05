@@ -139,6 +139,7 @@ import { timelinesPath } from '../projectPaths';
 import { TIMELINE_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
 import { NativeApiError, NativeCreationIntent } from './nativeApi';
+import type { ImageDescriptor } from '../utils/imageVariants';
 
 // Timeline service for frontend API calls
 export interface Timeline {
@@ -150,6 +151,7 @@ export interface Timeline {
   sort_order?: string;
   created_at?: string;
   coverImageUrl?: string;
+  image?: ImageDescriptor;
   isVisible?: boolean;
   timelineType?: string;
 }
@@ -250,6 +252,7 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
       SortOrder?: string | string[];
       CreationDate: string;
       CoverImageUrl?: string;
+      image?: ImageDescriptor;
       IsVisible?: boolean;
       TimelineType?: string;
     }) => {
@@ -269,6 +272,7 @@ export async function getTimelines(includePrivate = false, characterFilter?: str
         sort_order: sortOrder,
         created_at: item.CreationDate,
         coverImageUrl: item.CoverImageUrl,
+        image: item.image,
         isVisible: typeof item.IsVisible === 'boolean' ? item.IsVisible : false,
         timelineType: item.TimelineType || 'chronological',
       };

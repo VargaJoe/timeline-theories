@@ -23,10 +23,12 @@ public class ImageVariantSetSecurityHandler : Folder
     public override string Path => _deletionPath.ReadPath(this, base.Path);
     protected override void OnLoaded(object sender, NodeEventArgs e)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("SetLoaded", this);
         ImageAssetPolicy.AssertOpen(this); base.OnLoaded(sender, e);
     }
     public override object GetProperty(string name)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("SetProperty", this);
         ImageAssetPolicy.AssertOpen(this); return base.GetProperty(name);
     }
     public override AsyncTask SaveAsync(NodeSaveSettings settings, CancellationToken cancel) =>

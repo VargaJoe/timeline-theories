@@ -45,7 +45,7 @@ async function smoke() {
   const selected = (target, account, fields = 'Id,Name,Path,Type') => local.api(target, { account, query: { $select: fields, metadata: 'no' } });
   async function count() {
     const query = {
-      query: '+InTree:' + PROJECT + ' .AUTOFILTERS:OFF .LIFESPAN:OFF', $top: '0', $inlinecount: 'allpages', metadata: 'no',
+      query: '+InTree:' + PROJECT + ' .AUTOFILTERS:OFF .LIFESPAN:OFF', $top: '1', $select: 'Id', $inlinecount: 'allpages', metadata: 'no',
     };
     const result = await local.request(local.REPOSITORY + '/OData.svc/Root/Content?' + new URLSearchParams(query), { account: accounts.admin });
     assert.equal(result.status, 200);
@@ -67,8 +67,11 @@ async function smoke() {
   async function draft(owner, sources, outputs = [{ width: 400, height: 200 }]) {
     const folder = folders.find(item => item.Name === String(owner.Id)) || await assetFolder(owner);
     const generationId = crypto.randomUUID();
+    const sourceStamps = await Promise.all(sources.map(async source => ({ id: source.Id,
+      stamp: (await local.api(source.Id, { account: editor, operation: 'GetImagePresentation' })).imageStamp })));
     const manifest = { schemaVersion: 1, kind: owner.Type === 'Timeline' ? 'timeline-composite' : 'media-sizes', projectPath: PROJECT,
-      ownerId: owner.Id, generationId, sourceIds: sources.map(item => item.Id), variants: [] };
+      ownerId: owner.Id, generationId, sourceIds: sources.map(item => item.Id), variants: [], sourceStamps,
+      recipe: { template: owner.Type === 'Timeline' ? 'poster-strip-v1' : 'media-sizes-v1', sourceIds: sources.map(item => item.Id) } };
     const set = await create(folder.Id, 'ImageVariantSet', generationId, {
       OwnerContent: [owner.Id], SourceContents: sources.map(item => item.Id), GenerationId: generationId,
       Manifest: JSON.stringify(manifest),

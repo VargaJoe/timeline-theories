@@ -19,26 +19,30 @@ public class ImageVariantSecurityHandler : Image
     {
         // Stock Image.GetImageStream uses GetBinary (nonvirtual) for an explicit
         // Binary property, but reads virtual Name before returning the stream.
-        get { ImageAssetPolicy.AssertOpen(this); return base.Name; }
+        get { using var profile = ImagePolicyDiagnostics.Measure("VariantName", this); ImageAssetPolicy.AssertOpen(this); return base.Name; }
         set { base.Name = value; }
     }
-    public override string Path { get { ImageAssetPolicy.AssertOpen(this); return base.Path; } }
+    public override string Path { get { using var profile = ImagePolicyDiagnostics.Measure("VariantPath", this); ImageAssetPolicy.AssertOpen(this); return base.Path; } }
     public override SenseNet.ContentRepository.Storage.BinaryData Binary
     {
-        get { ImageAssetPolicy.AssertOpen(this); return base.Binary; }
+        get { using var profile = ImagePolicyDiagnostics.Measure("VariantBinary", this); ImageAssetPolicy.AssertOpen(this); return base.Binary; }
         set { base.Binary = value; }
     }
     protected override void OnLoaded(object sender, NodeEventArgs e)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("VariantLoaded", this);
         ImageAssetPolicy.AssertOpen(this); base.OnLoaded(sender, e);
     }
     public override object GetProperty(string name)
     {
+        using var profile = ImagePolicyDiagnostics.Measure("VariantProperty", this);
         ImageAssetPolicy.AssertOpen(this); return base.GetProperty(name);
     }
     public override AsyncTask SaveAsync(NodeSaveSettings settings, CancellationToken cancel) =>
         ImageAssetPolicy.MutateAsync(async () =>
         {
+            using var memo = ImageSnapshotDataMemo.BeginUpload(this);
+            using var profile = ImagePolicyDiagnostics.Measure("FileSave", this);
             ImageAssetPolicy.AssertFileWrite(this);
             await base.SaveAsync(settings, cancel).ConfigureAwait(false);
         }, cancel);

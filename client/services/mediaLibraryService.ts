@@ -92,9 +92,11 @@ import { MEDIA_ITEM_CONTENT_TYPE, BOOK_CONTENT_TYPE } from '../contentTypes';
 import { repositoryUrl } from '../configuration';
 import { singleChoice } from './contentValues';
 import { NativeApiError, NativeCreationIntent } from './nativeApi';
+import type { ImageDescriptor } from '../utils/imageVariants';
 
 export interface MediaItem {
   Id: number;
+  image?: ImageDescriptor;
   revision?: string;
   ParentId?: number; 
   Name: string;
@@ -134,6 +136,7 @@ export interface MediaItem {
 
 interface SenseNetContent {
   Id: number;
+  image?: ImageDescriptor;
   revision?: string;
   Name: string;
   DisplayName: string;
@@ -561,6 +564,7 @@ export class MediaLibraryService {
     return {
       Id: memo.Id,
       revision: memo.revision,
+      image: memo.image,
       Name: memo.Name,
       DisplayName: memo.DisplayName,
       Title: memo.Title,

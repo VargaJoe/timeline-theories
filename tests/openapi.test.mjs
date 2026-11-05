@@ -25,6 +25,20 @@ test('cover and metadata commands accept exactly one inline or owned staged byte
   assert.equal(commandValid({ ...metadata, cover: { mimeType: 'image/png', uploadId: randomUUID(), bytesBase64: 'aGVsbG8=' } }), false);
 });
 
+test('image presentation commands reference a sealed set or explicit legacy reset and never carry image bytes', () => {
+  const common = { action: 'cover-presentation', targetId: 10, expectedRevision: revision };
+  assert.equal(commandValid({ ...common, setId: 30 }), true);
+  assert.equal(commandValid({ ...common, setId: null }), true);
+  assert.equal(commandValid(common), false);
+  assert.equal(commandValid({ ...common, setId: 0 }), false);
+  assert.equal(commandValid({ ...common, setId: 30, bytesBase64: 'aGVsbG8=' }), false);
+  assert.equal(spec.paths['/images/drafts/{setId}/variants/{name}'].post.requestBody['x-max-bytes'], 1500000);
+  assert.equal(spec.paths['/images/{ownerId}/{generationId}/{name}'].parameters[0].schema.type, 'integer');
+  assert.ok(spec.paths['/images/drafts'].post.responses[201]);
+  assert.equal(spec.paths['/images/recovery'].post.requestBody['x-max-bytes'], 16384);
+  assert.ok(spec.paths['/images/recovery'].post.parameters.some(parameter => parameter.name === 'Idempotency-Key' && parameter.required));
+});
+
 test('staging schema distinguishes cover requirements/limits from owned ZIP references', () => {
   const common = { targetId: 10, size: 1, sha256: 'a'.repeat(64) };
   assert.equal(uploadValid({ kind: 'cover', ...common, mimeType: 'image/png', expectedRevision: revision }), true);

@@ -1,159 +1,141 @@
-
-import React, { useState, useEffect } from 'react';
-import { siteConfig, repositoryUrl } from '../configuration';
+import React, { useState, useEffect, useRef } from 'react';
 import { captureOperationContext, subscribePermissions } from '../services/sensenet';
 import { useSharedAuth } from '../context/useSharedAuth';
+import { fetchImageBlob, imageRequestQueue, nativeImagePresentationTarget, readNativeImagePresentation } from '../utils/imageLoading';
+import { selectImageUrl, type ImageDescriptor } from '../utils/imageVariants';
 
-// Concurrency control for image loading
-let activeRequests = 0;
-const maxConcurrent = siteConfig.imageCache.concurrencyLimit;
-const requestQueue: Array<() => void> = [];
-
-const processQueue = () => {
-  if (activeRequests < maxConcurrent && requestQueue.length > 0) {
-    activeRequests++;
-    const nextRequest = requestQueue.shift();
-    nextRequest?.();
-  }
-};
-
-const enqueueRequest = (requestFn: () => void) => {
-  requestQueue.push(requestFn);
-  processQueue();
-};
-
-const dequeueRequest = () => {
-  activeRequests--;
-  processQueue();
-};
-
-export interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'loading'> {
-  src: string;
+export interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'loading' | 'srcSet' | 'sizes'> {
+  src?: string;
+  image?: ImageDescriptor;
   placeholder?: string;
 }
 
-export const LazyImage: React.FC<LazyImageProps> = ({
-  src,
-  alt,
-  placeholder,
-  className,
-  style,
-  onLoad,
-  onError,
-  ...restProps
-}) => {
+export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descriptor, alt, placeholder, className, style, onLoad, onError, ...restProps }) => {
   const { accessToken, user, isLoading } = useSharedAuth();
+  const element = useRef<HTMLDivElement>(null);
   const [revision, setRevision] = useState(0);
   useEffect(() => subscribePermissions(() => setRevision(value => value + 1)), []);
-  const requestKey = JSON.stringify([src, accessToken, user?.Id, user?.sub, isLoading, revision]);
-  const [image, setImage] = useState<{ key: string; source?: string; loaded: boolean; error: boolean }>({ key: '', loaded: false, error: false });
-  const currentImage = image.key === requestKey ? image : undefined;
-  const isLoaded = currentImage?.loaded === true;
-  const hasError = currentImage?.error === true;
+  const requestKey = JSON.stringify([src, descriptor, accessToken, user?.Id, user?.sub, isLoading, revision]);
+  const [slot, setSlot] = useState<{ key: string; width: number; dpr: number; visible: boolean }>();
+  const [image, setImage] = useState<{ key: string; source?: string; loaded: boolean; error: boolean }>();
+  const [rejected, setRejected] = useState<{ key: string; state: 'blocked' | 'stale' | 'missing' }>();
+  const rejectedHere = rejected?.key === requestKey;
+  const current = image?.key === requestKey && !rejectedHere ? image : undefined;
+  const blocked = rejectedHere || !!descriptor && !['active', 'legacy'].includes(descriptor.state);
+  const releaseImage = useRef<{ key: string; release: () => void }>();
 
   useEffect(() => {
-    if (!src || isLoading) return;
-    const controller = new AbortController();
-    const checkContext = captureOperationContext();
+    const target = element.current;
+    if (!target || isLoading || blocked) return;
+    let visible = false, disposed = false;
+    const measure = () => {
+      if (disposed) return;
+      if (!visible) { setSlot(previous => previous?.key === requestKey && previous.visible ? { ...previous, visible: false } : previous); return; }
+      const width = target.getBoundingClientRect().width;
+      const dpr = window.devicePixelRatio || 1;
+      if (width > 0) setSlot(previous => previous?.key === requestKey && previous.width === width && previous.dpr === dpr && previous.visible ? previous : { key: requestKey, width, dpr, visible: true });
+    };
+    const resize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : undefined;
+    resize?.observe(target);
+    let observer: IntersectionObserver | undefined;
+    const checkViewport = () => {
+      if (disposed) return;
+      const rect = target.getBoundingClientRect();
+      visible = rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+      measure();
+    };
+    if (typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(entries => {
+        visible = entries.some(entry => entry.isIntersecting);
+        measure();
+      }, { rootMargin: '0px', threshold: 0 });
+      observer.observe(target);
+      window.addEventListener('resize', measure);
+    } else {
+      checkViewport();
+      window.addEventListener('scroll', checkViewport, true);
+      window.addEventListener('resize', checkViewport);
+    }
+    return () => {
+      disposed = true;
+      observer?.disconnect(); resize?.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', checkViewport, true);
+      window.removeEventListener('resize', checkViewport);
+    };
+  }, [requestKey, isLoading, blocked]);
+
+  const selectedUrl = slot?.key === requestKey ? selectImageUrl(descriptor, src, slot.width, slot.dpr) : undefined;
+  const selectedWidth = descriptor?.state === 'active' ? descriptor.variants?.find(variant => variant.url === selectedUrl)?.width ?? 0 : Infinity;
+  // One initial fetch. Growing slots may upgrade an insufficient raster; shrinking never refetches.
+  const [selection, setSelection] = useState<{ key: string; url: string; width: number }>();
+  useEffect(() => {
+    if (selectedUrl) setSelection(previous => previous?.key === requestKey && (previous.url === selectedUrl || previous.width >= selectedWidth)
+      ? previous : { key: requestKey, url: selectedUrl, width: selectedWidth });
+  }, [selectedUrl, selectedWidth, requestKey]);
+
+  const visible = slot?.key === requestKey && slot.visible;
+  const presentation = descriptor?.state === 'active' && selection?.key === requestKey
+    ? nativeImagePresentationTarget(selection.url, descriptor.generationId) : undefined;
+  const presentationPath = presentation?.path, generationId = presentation?.generationId;
+  useEffect(() => {
+    if (!visible || blocked || !presentationPath || !generationId || isLoading) return;
+    const controller = new AbortController(), checkContext = captureOperationContext();
+    let pending = false;
+    const active = () => { if (controller.signal.aborted) return false; try { checkContext(); return true; } catch { return false; } };
+    const reject = (state: 'blocked' | 'stale' | 'missing') => {
+      if (!active()) return;
+      if (releaseImage.current?.key === requestKey) releaseImage.current.release();
+      setRejected({ key: requestKey, state });
+    };
+    const refresh = async () => {
+      if (pending || !active() || document.visibilityState === 'hidden') return;
+      pending = true;
+      try {
+        const result = await readNativeImagePresentation(presentationPath, { signal: controller.signal, assertContext: checkContext });
+        if (!active()) return;
+        if (result.state !== 'active' || result.generationId !== generationId) reject(result.state === 'stale' ? 'stale' : result.state === 'missing' ? 'missing' : 'blocked');
+      } catch { reject('blocked'); }
+      finally { pending = false; }
+    };
+    const onFocus = () => { void refresh(); };
+    const timer = window.setInterval(onFocus, 30_000);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
+  }, [visible, blocked, presentationPath, generationId, requestKey, isLoading]);
+
+  useEffect(() => {
+    if (!selection || selection.key !== requestKey || isLoading || blocked) return;
+    const controller = new AbortController(), checkContext = captureOperationContext();
+    let objectUrl: string | undefined;
+    const release = () => { controller.abort(); if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = undefined; } };
+    releaseImage.current = { key: requestKey, release };
     const active = () => {
       if (controller.signal.aborted) return false;
       try { checkContext(); return true; } catch { return false; }
     };
-    const fail = () => {
+    void imageRequestQueue.run(async () => {
+      const blob = await fetchImageBlob(selection.url, { signal: controller.signal, accessToken, assertContext: checkContext });
+      if (!active()) return;
+      objectUrl = URL.createObjectURL(blob);
+      setImage({ key: requestKey, source: objectUrl, loaded: false, error: false });
+    }, controller.signal).catch(() => {
       if (active()) setImage({ key: requestKey, loaded: false, error: true });
-    };
-    const executeLoad = async () => {
-      try {
-        if (!active()) return;
-        const imageUrl = new URL(src, window.location.origin);
-        const headers: Record<string, string> = {};
-        if (accessToken && imageUrl.protocol === 'https:' && imageUrl.origin === new URL(repositoryUrl).origin) {
-          headers.Authorization = `Bearer ${accessToken}`;
-        }
-        imageUrl.searchParams.set('cb', '1');
-        const response = await fetch(imageUrl.href, { headers, credentials: 'omit', signal: controller.signal });
-        if (!active()) return;
-        if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-        const blob = await response.blob();
-        if (!active()) return;
-        const reader = new FileReader();
-        controller.signal.addEventListener('abort', () => {
-          if (reader.readyState === FileReader.LOADING) reader.abort();
-        }, { once: true });
-        reader.onload = () => {
-          if (!active()) return;
-          if (typeof reader.result === 'string') setImage({ key: requestKey, source: reader.result, loaded: false, error: false });
-          else fail();
-        };
-        reader.onerror = fail;
-        reader.readAsDataURL(blob);
-      } catch (error) {
-        if (active() && (!(error instanceof Error) || error.name !== 'AbortError')) fail();
-      } finally { dequeueRequest(); }
-    };
-    enqueueRequest(executeLoad);
-    return () => controller.abort();
-  }, [src, accessToken, isLoading, requestKey]);
+    });
+    return () => { release(); if (releaseImage.current?.release === release) releaseImage.current = undefined; };
+  }, [selection, requestKey, isLoading, blocked, accessToken]);
 
-  const handleLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    setImage(previous => previous.key === requestKey ? { ...previous, loaded: true } : previous);
-    onLoad?.(event);
-  };
-  const handleError = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    setImage(previous => previous.key === requestKey ? { ...previous, error: true } : previous);
-    onError?.(event);
-  };
-
-  // Default placeholder styles
-  const placeholderStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#999',
-    fontSize: '14px',
-    minHeight: '100px',
-    ...style,
-    // Only set backgroundColor if parent didn't provide background or backgroundColor
-    backgroundColor: style?.background || style?.backgroundColor ? undefined : '#f0f0f0'
-  };
-
-  // Image styles with smooth fade-in animation
-  const imageStyle: React.CSSProperties = {
-    transition: 'opacity 0.3s ease-in-out',
-    opacity: isLoaded ? 1 : 0,
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    ...style
-  };
-
-  if (hasError) {
-    return (
-      <div style={{ ...placeholderStyle, backgroundColor: '#ffebee', color: '#c62828' }}>
-        ❌ Failed to load
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {!isLoaded && (
-        <div style={placeholderStyle}>
-          {placeholder || '📷'}
-        </div>
-      )}
-      {currentImage?.source && <img
-        src={currentImage.source}
-        alt={alt}
-        className={className}
-        style={imageStyle}
-        onLoad={handleLoad}
-        onError={handleError}
-        loading="lazy"
-        {...restProps}
-      />}
-    </>
-  );
+  const isLoaded = current?.loaded === true;
+  const imageStyle: React.CSSProperties = { display: 'block', width: '100%', height: '100%', objectFit: style?.objectFit ?? 'cover', transition: 'opacity 0.3s ease-in-out', opacity: isLoaded ? 1 : 0 };
+  const wrapperStyle: React.CSSProperties = { width: '100%', height: '100%', overflow: 'hidden', ...style, position: style?.position ?? 'relative' };
+  const placeholderStyle: React.CSSProperties = { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 14, background: style?.background ?? style?.backgroundColor ?? '#f0f0f0' };
+  return <div ref={element} style={wrapperStyle} data-image-state={rejectedHere ? rejected.state : blocked ? descriptor?.state : current?.error ? 'error' : isLoaded ? 'loaded' : 'pending'}>
+    {!isLoaded && <div style={placeholderStyle} role="img" aria-label={alt}>{placeholder || '📷'}</div>}
+    {current?.source && <img {...restProps} src={current.source} alt={alt} className={className} style={imageStyle}
+      onLoad={event => { if (current.key === requestKey) setImage(previous => previous?.key === requestKey ? { ...previous, loaded: true } : previous); onLoad?.(event); }}
+      onError={event => { setImage(previous => previous?.key === requestKey ? { ...previous, error: true, loaded: false } : previous); onError?.(event); }} />}
+  </div>;
 };
 
 export default LazyImage;

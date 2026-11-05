@@ -22,7 +22,7 @@
     </Field>
     <Field name="Manifest" type="LongText">
       <DisplayName>Manifest</DisplayName>
-      <Description>Versioned JSON, at most 16 KiB UTF-8. Binary hashes, dimensions and complete child set are checked when sealing.</Description>
+      <Description>Versioned JSON, at most 16 KiB UTF-8. New sets require an immutable saved recipe and current source image stamps. Binary raster, hashes, dimensions and complete child set are checked when sealing.</Description>
       <Configuration><Compulsory>true</Compulsory><TextType>LongText</TextType></Configuration>
     </Field>
     <Field name="Sealed" type="Boolean">

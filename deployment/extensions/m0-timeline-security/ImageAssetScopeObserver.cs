@@ -45,7 +45,8 @@ public sealed class ImageAssetScopeObserver : NodeObserver
                 ownerId <= 0 || segments[0] != ownerId.ToString()) throw ImageAssetPolicy.Invalid();
             ImageAssetPolicy.ReadOwner(ownerId);
             ImageAssetPolicy.Permission(ownerId, PermissionType.Save);
-            ImageAssetPolicy.Permission(node.ParentId, PermissionType.AddNew);
+            if (!ImageAssetOperations.IsPreparingFolder(ownerId))
+                ImageAssetPolicy.Permission(node.ParentId, PermissionType.AddNew);
         }
         else if (segments.Length == 2 && node is ImageVariantSetSecurityHandler set && node.NodeType.Name == "ImageVariantSet")
             ImageAssetPolicy.AssertSetWrite(set);
@@ -66,6 +67,9 @@ public sealed class ImageAssetScopeObserver : NodeObserver
         else if (node is ImageVariantSecurityHandler file) ImageAssetPolicy.AssertFileWrite(file);
         else if (node.NodeType.Name != "Folder" ||
                  path.Substring(ImageAssetPolicy.AssetsPath.Length).Count(c => c == '/') > 1)
+            throw ImageAssetPolicy.Invalid();
+        else if (path != ImageAssetPolicy.AssetsPath &&
+                 !ImageAssetOperations.IsPreparingFolder(int.TryParse(node.Name, out var ownerId) ? ownerId : 0))
             throw ImageAssetPolicy.Invalid();
     }
 

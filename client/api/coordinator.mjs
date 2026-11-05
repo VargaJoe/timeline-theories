@@ -21,13 +21,14 @@ export class Coordinator {
     if (!['held','released'].includes(value.state)) throw new DomainError('coordinator_state_invalid', 'The shared writer state is invalid.', 503);
   }
   async acquire(options) {
-    const { requestId, identity, principal, planId, jobId, waitMs = 0 } = options;
+    const { requestId, identity, principal, planId, jobId, operationId, waitMs = 0 } = options;
     assertUuid(requestId, 'Request ID');
     if (!Number.isSafeInteger(identity) || identity < 1 || typeof principal !== 'string' || !principal || principal.length > 256 || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > 5000) throw new DomainError('invalid_writer_owner', 'Writer requires an authenticated identity, principal and bounded wait.');
     if (planId !== undefined) assertUuid(planId, 'Plan ID');
     if (jobId !== undefined) assertUuid(jobId, 'Job ID');
+    if (operationId !== undefined) assertUuid(operationId, 'Operation ID');
     const deadline = Date.now() + waitMs;
-    const owner = { requestId, identity, principal, nonce: randomUUID(), startedAt: new Date().toISOString(), ...(planId ? { planId } : {}), ...(jobId ? { jobId } : {}) };
+    const owner = { requestId, identity, principal, nonce: randomUUID(), startedAt: new Date().toISOString(), ...(planId ? { planId } : {}), ...(jobId ? { jobId } : {}), ...(operationId ? { operationId } : {}) };
     // Keep exact stopped-request confirmation unambiguous forever, including
     // across restarts. A busy invocation also consumes its UUID; the next
     // Function invocation must receive a fresh server-generated request ID.

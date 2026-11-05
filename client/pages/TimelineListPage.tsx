@@ -6,6 +6,7 @@ import type { Timeline } from '../services/timelineService';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { MediaCoverMontage } from '../components/MediaCoverMontage';
+import { LazyImage } from '../components/LazyImage';
 import { CollectionPlaceholder } from '../components/CollectionPlaceholder';
 import { captureOperationContext, loadBackgroundImage, subscribePermissions } from '../services/sensenet';
 import { createTimelineCoverLoader } from '../services/timelineCoverLoader';
@@ -81,7 +82,7 @@ export const TimelineListPage: React.FC = () => {
       if (!view.active()) return;
       setLoadedTimelines(previous => [...previous, ...timelines]);
       setHasMore(timelines.length === siteConfig.timelineList.allViewPageSize);
-      view.loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl));
+      view.loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl && (!timeline.image || timeline.image.state === 'legacy')));
     } catch (error) {
       if (view.active()) {
         console.error('Failed to load more timelines:', error);
@@ -116,7 +117,7 @@ export const TimelineListPage: React.FC = () => {
         setMediaCovers({});
         setLoadedTimelines(timelines);
         setHasMore(timelines.length === siteConfig.timelineList.allViewPageSize);
-        loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl));
+        loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl && (!timeline.image || timeline.image.state === 'legacy')));
       })
       .catch(error => {
         if (active()) {
@@ -442,10 +443,10 @@ export const TimelineListPage: React.FC = () => {
                       </div>
                     )}
                       {/* Cover Image */}
-                      <div aria-busy={!timeline.coverImageUrl && mediaCovers[timeline.id] === undefined} style={{
+                      <div aria-busy={(!timeline.image || timeline.image.state === 'legacy') && !timeline.coverImageUrl && mediaCovers[timeline.id] === undefined} style={{
                         height: 200,
                         flexShrink: 0, // Prevent shrinking
-                        backgroundImage: timeline.coverImageUrl 
+                        backgroundImage: (!timeline.image || timeline.image.state === 'legacy') && timeline.coverImageUrl
                           ? `url(${timeline.coverImageUrl})` 
                           : 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
                         backgroundSize: 'cover',
@@ -455,7 +456,8 @@ export const TimelineListPage: React.FC = () => {
                         justifyContent: 'center',
                         position: 'relative'
                       }}>
-                        {!timeline.coverImageUrl && (
+                        {timeline.image && timeline.image.state !== 'legacy' && <LazyImage src="" image={timeline.image} alt={`${timeline.displayName} cover`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
+                        {(!timeline.image || timeline.image.state === 'legacy') && !timeline.coverImageUrl && (
                           <MediaCoverMontage 
                             coverUrls={mediaCovers[timeline.id] || []}
                             timelineName={timeline.displayName}
