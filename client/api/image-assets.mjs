@@ -259,7 +259,7 @@ export class ImageAssets {
       }
       if (payload.action === 'image-seal') {
         const manifest = validateImageManifest({ ...set.manifest, variants: payload.variants });
-        await this.repo.api(set.Id, null, { method: 'PATCH', body: { Manifest: JSON.stringify(manifest), Sealed: true }, onDispatch }); acknowledged = true;
+        await this.repo.api(set.Id, null, { method: 'PATCH', query: { '$select': 'Id', metadata: 'no' }, body: { Manifest: JSON.stringify(manifest), Sealed: true }, onDispatch }); acknowledged = true;
         return { ok: true, result: await this.sealResult(payload) };
       }
       fail('invalid_operation', 'Unsupported image mutation.');
