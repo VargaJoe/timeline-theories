@@ -10,7 +10,11 @@ docker compose -f compose.local.yaml up -d --build
 docker compose -f compose.local.yaml ps
 ```
 
-App: https://localhost:8080. A Docker Desktopban a **timeline-local → app** Start/Restart gombja is használható. CLI-parancsok:
+App: https://localhost:8080. A Docker Desktopban a **timeline-local → app** Start/Restart gombja is használható.
+
+A helyi API és az OIDC-belépés engedélyezett app-originje is `https://localhost:8080`. Ha a listát a `https://127.0.0.1:8080` (vagy IPv6 loopback) címen nyitod meg, az app még a belépés és az adatlekérések indítása előtt a megfelelő localhost-címre vált; az útvonal, a szűrők és a hash megmaradnak. A közvetlen API-hívás eltérő originnel továbbra is 403-at kap. A production alkalmazás címét ez az átirányítás nem módosítja.
+
+CLI-parancsok:
 
 ```powershell
 docker compose -f compose.local.yaml restart app

@@ -249,6 +249,20 @@ test('public capability normalization and CORS reject foreign origins without ba
   assert.equal(state.requests.length, 0);
 });
 
+test('local numeric origins remain denied before native API or repository work', async t => {
+  const { app, request, state } = await setup(t, { frontendOrigin: 'https://localhost:8080' });
+  for (const alias of ['https://127.0.0.1:8080', 'https://[::1]:8080']) {
+    const denied = await app.handleRequest(request('snapshots', {
+      method: 'POST', token: null, body: { ids: [10] },
+      headers: { Origin: alias, 'X-Timeline-Client-Origin': alias }
+    }));
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'origin_denied');
+    assert.equal(denied.headers.get('access-control-allow-origin'), null);
+  }
+  assert.equal(state.requests.length, 0);
+});
+
 test('target binding, native raw sessions, browser sessions and visitor routing are explicit', async t => {
   const { app, request, state } = await setup(t);
   const binding = await app.handleRequest(request('snapshots', { method: 'POST', body: { ids: [] }, binding: false }));
