@@ -22,13 +22,13 @@ function oDataTarget(url: URL): string | number | undefined {
   const path = decodeURIComponent(url.pathname.replace(/^\/odata\.svc\/?/i, '/'));
   const numeric = path.match(/^\/content\((\d+)\)$/i);
   if (numeric) return Number(numeric[1]);
-  if (!path.startsWith('/Root/')) return undefined;
+  if (!/^\/root\//i.test(path)) return undefined;
   return path.replace(/\/?\('((?:[^']|'')*)'\)$/, (_whole, name: string) => '/' + name.replace(/''/g, "'"));
 }
 function domainPath(target: string | number | undefined): boolean {
+  const path = typeof target === 'string' ? target.toLowerCase() : '', root = environment.projectRoot.toLowerCase();
   return typeof target === 'number' || typeof target === 'string' && (
-    target.startsWith(environment.projectRoot + '/Timelines/') || target.startsWith(environment.projectRoot + '/MediaLibrary/') ||
-    target.startsWith(environment.projectRoot + '/TimelineEntries/'));
+    path.startsWith(root + '/timelines/') || path.startsWith(root + '/medialibrary/') || path.startsWith(root + '/timelineentries/'));
 }
 function oDataSnapshot(snapshot: NativeSnapshot, previous: Record<string, unknown> = {}, expanded = new Map<number, NativeSnapshot>()): Record<string, unknown> {
   const result: Record<string, unknown> = { ...previous, ...snapshot };
@@ -130,7 +130,7 @@ async function checkedRepositoryFetch(input: RequestInfo, init?: RequestInit, aw
   const action = /\/(?:HasPermission|AllowedChildTypes|EffectiveAllowedChildTypes|GetCurrentUser)$/i.test(url.pathname);
   const selectedFields = (url.searchParams.get('$select') || '').split(',');
   const editorRead = selectedFields.some(field => ['DisplayName', 'Title', 'Description', 'Position', 'Notes', 'SortOrder'].includes(field));
-  const domainCollection = collection && (domainPath(target) || typeof target === 'string' && target.startsWith(environment.projectRoot + '/'));
+  const domainCollection = collection && (domainPath(target) || typeof target === 'string' && target.toLowerCase().startsWith(environment.projectRoot.toLowerCase() + '/'));
   const displayContent = method === 'GET' && !action && (domainPath(target) || domainCollection);
   const readUrl = new URL(input, repositoryUrl);
   if (displayContent) {
@@ -210,7 +210,7 @@ function permissionUrl(target: string | number): URL {
     const id = Number(target); if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid permission target');
     url.pathname = `/odata.svc/content(${id})`;
   } else {
-    if (typeof target !== 'string' || !target.startsWith(environment.projectRoot + '/') && target !== environment.projectRoot || /\.\.|[\\?#]/.test(target) || [...target].some(character => character.charCodeAt(0) < 32)) throw new Error('Invalid permission target');
+    if (typeof target !== 'string' || !target.toLowerCase().startsWith(environment.projectRoot.toLowerCase() + '/') && target.toLowerCase() !== environment.projectRoot.toLowerCase() || /\.\.|[\\?#]/.test(target) || [...target].some(character => character.charCodeAt(0) < 32)) throw new Error('Invalid permission target');
     const slash = target.lastIndexOf('/');
     url.pathname = '/odata.svc' + target.slice(0, slash).split('/').map(encodeURIComponent).join('/') + "('" + encodeURIComponent(target.slice(slash + 1).replaceAll("'", "''")).replaceAll("'", '%27') + "')";
   }
@@ -247,7 +247,7 @@ function permissionContent(target: string | number): Promise<Record<string, unkn
           try {
             item.check();
             const parsed = oDataTarget(permissionUrl(item.target));
-            const row = rows.find(row => typeof parsed === 'number' ? row.Id === parsed : row.Path === parsed);
+            const row = rows.find(row => typeof parsed === 'number' ? row.Id === parsed : typeof parsed === 'string' && typeof row.Path === 'string' && row.Path.toLowerCase() === parsed.toLowerCase());
             if (!row) throw new Error('Permission target is unavailable');
             item.resolve(row);
           } catch (error) { item.reject(error); }

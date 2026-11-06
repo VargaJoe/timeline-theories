@@ -3,6 +3,27 @@ import assert from 'node:assert/strict';
 import { createDisplayPermissions } from '../client/services/displayPermissions.mjs';
 
 const pathFor = id => `/Root/Content/timelines/MediaLibrary/item-${id}`;
+
+test('case-insensitive SenseNet paths reuse caller-bound hints for the same content ID', async () => {
+  const canonical = '/Root/Content/timelines/Timelines/Conan the Barbarian';
+  const f = fixture();
+  f.store.remember({ ...content(7), Path: canonical });
+  for (const target of [canonical.toLowerCase(), canonical.toUpperCase(), canonical, 7]) {
+    assert.equal(await f.store.can([operation(target, 'read')]), true);
+    assert.equal(await f.store.can([operation(target, 'update')]), true);
+  }
+  assert.equal(f.loads.length, 0, 'Changing path capitalization is not another permission target');
+});
+
+test('a lower-case route accepts the canonical mixed-case Path returned by SenseNet', async () => {
+  const canonical = '/Root/Content/timelines/Timelines/Conan the Barbarian';
+  const f = fixture({ load: async () => ({ ...content(7), Path: canonical }) });
+  assert.equal(await f.store.can([operation(canonical.toLowerCase(), 'read')]), true);
+  assert.equal(await f.store.can([operation(canonical.toUpperCase(), 'update')]), true);
+  assert.equal(await f.store.can([operation(7, 'delete')]), true);
+  assert.equal(f.loads.length, 1, 'Canonical path and route aliases share one authorized descriptor');
+});
+
 function content(id = 7, actions = [{ Name: 'Edit', Forbidden: false }, { Name: 'Delete', Forbidden: false }]) {
   return { Id: id, Path: pathFor(id), Actions: { results: actions } };
 }

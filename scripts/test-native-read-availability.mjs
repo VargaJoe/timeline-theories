@@ -10,18 +10,31 @@ const response = (data, status = 200) => new Response(JSON.stringify(data), { st
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 let fixtureCount = 0;
-async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt', coverRows, actions, childTypes = [{ Name: 'MediaItem' }], permissionRows } = {}) {
+async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt', coverRows, actions, childTypes = [{ Name: 'MediaItem' }], permissionRows, canonicalContent } = {}) {
   const environment = { mode, repositoryUrl: 'https://repo.test', authority: 'https://auth.test', projectRoot: '/Root/Content/timelines', writable: true };
   globalThis.window = { location: { origin: 'https://ui.test' } };
   globalThis.__availabilityEnvironment = environment;
   const rawCalls = [], rawWrites = [], aclCalls = [], childTypeCalls = [], nativeCalls = [];
   const permissionState = { readAllowed, writeAllowed, actions, childTypes, permissionRows, beforeBatch: undefined, beforeContent: undefined };
   const snapshot = id => ({ Id: id, ParentId: 5, Name: 'media' + id, Path: environment.projectRoot + '/MediaLibrary/media' + id,
-    Type: 'MediaItem', revision: 'gw:fixture-hash:4', Title: 'Native title', DisplayName: 'Native title', Description: '' });
+    Type: 'MediaItem', revision: 'gw:fixture-hash:4', Title: 'Native title', DisplayName: 'Native title', Description: '',
+    ...(canonicalContent?.Id === id ? canonicalContent : {}) });
+  const canonicalTarget = target => canonicalContent && (target === canonicalContent.Id || typeof target === 'string' && target.toLowerCase() === canonicalContent.Path.toLowerCase());
+  const targetFromUrl = url => {
+    const path = decodeURIComponent(url.pathname).replace(/^\/odata\.svc/i, '');
+    const id = path.match(/^\/content\(([0-9]+)\)$/i)?.[1];
+    return id ? Number(id) : path.replace(/\/?\('((?:[^']|'')*)'\)$/, (_whole, name) => '/' + name.replaceAll("''", "'"));
+  };
+  const exactUrl = target => {
+    const url = new URL(environment.repositoryUrl);
+    if (typeof target === 'number' || /^[1-9][0-9]*$/.test(target)) url.pathname = '/odata.svc/content(' + target + ')';
+    else { const slash = target.lastIndexOf('/'); url.pathname = '/odata.svc' + target.slice(0, slash) + "('" + target.slice(slash + 1).replaceAll("'", "''") + "')"; }
+    return url.href;
+  };
   const capabilities = () => ({ repository: environment.repositoryUrl, authority: environment.authority, project: environment.projectRoot,
     readOnly, operations: ['lookup', 'snapshots', 'plans', 'plans/{id}/apply'], backendProtocolRequired: 'gateway-coordinated-v1' });
-  const permissionContent = target => ({ ...snapshot(typeof target === 'number' ? target : 1),
-    ...(typeof target === 'string' ? { Path: target } : {}),
+  const permissionContent = target => ({ ...snapshot(canonicalTarget(target) ? canonicalContent.Id : typeof target === 'number' ? target : 1),
+    ...(typeof target === 'string' && !canonicalTarget(target) ? { Path: target } : {}),
     Actions: permissionState.actions === undefined ? ['Edit', 'Add', 'Delete'].map(Name => ({ Name, Forbidden: !permissionState.writeAllowed })) : permissionState.actions,
     EffectiveAllowedChildTypes: permissionState.childTypes });
   const permissionBatch = url => {
@@ -51,7 +64,7 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
       return response(capabilities());
     }
     if (lookupError) return response({ code: lookupError.code, message: 'Lookup unavailable or denied' }, lookupError.status);
-    if (path.endsWith('/lookup')) { const body = JSON.parse(init.body); return response({ data: snapshot(typeof body.target === 'string' && body.target.startsWith('/Root/') ? 1 : Number(body.target)) }); }
+    if (path.endsWith('/lookup')) { const body = JSON.parse(init.body); return response({ data: snapshot(canonicalTarget(body.target) ? canonicalContent.Id : typeof body.target === 'string' && /^\/root\//i.test(body.target) ? 1 : Number(body.target)) }); }
     if (path.endsWith('/snapshots')) return response({ data: JSON.parse(init.body).ids.map(snapshot) });
     throw new Error('Unexpected native write');
   };
@@ -78,13 +91,13 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
         return response({ d: permissionContent(target ? Number(target) : environment.projectRoot + '/MediaLibrary/media1') });
       }
       await permissionState.beforeContent?.(call);
-      const value = { ...snapshot(1), revision: undefined, Title: 'Raw permitted title', DisplayName: 'Raw permitted title' };
-      if (this.configuration.token) value.Actions = permissionContent(1).Actions;
+      const value = { ...snapshot(canonicalTarget(targetFromUrl(parsed)) ? canonicalContent.Id : 1), revision: undefined, Title: 'Raw permitted title', DisplayName: 'Raw permitted title' };
+      if (this.configuration.token) value.Actions = permissionContent(value.Id).Actions;
       return response({ d: new URL(url).searchParams.has('query') ? { results: coverRows ?? [value] } : value });
     }
     async json(url, init) { const result = await this.fetch(url, init); if (!result.ok) throw new Error('Permission denied by repository GET'); return result.json(); }
     async load(options) {
-      return this.json(environment.repositoryUrl + '/odata.svc/content(' + options.idOrPath + ')?$select=' + (options.oDataOptions?.select || []).join(',') + '&$top=1000', { method: 'GET' });
+      return this.json(exactUrl(options.idOrPath) + '?$select=' + (options.oDataOptions?.select || []).join(',') + '&$top=1000', { method: 'GET' });
     }
     async loadCollection(options) {
       return this.json(environment.repositoryUrl + '/odata.svc' + options.path + '?query=TypeIs%3AMediaItem&$top=100', { method: 'GET' });
@@ -268,6 +281,36 @@ async function main() {
     assert.deepEqual(await Promise.all(targets.map(target => f.sense.canDisplayOperations([{ target, action: 'update' }]))), targets.map(() => true));
     assert.equal(f.rawCalls.length, 1);
     assertCompound(f.rawCalls[0], targets);
+    assert.equal(f.aclCalls.length, 0); assert.equal(f.childTypeCalls.length, 0); assert.equal(f.rawWrites.length, 0);
+  });
+  await test('a lowercase route accepts canonical mixed-case content and reuses its numeric Id without ACL calls', async () => {
+    const canonicalContent = { Id: 4298, Path: '/Root/Content/timelines/Timelines/Conan the Barbarian', Name: 'Conan the Barbarian', Type: 'Timeline' };
+    const route = canonicalContent.Path.toLowerCase(), f = await fixture({ discovery: 'ready', token: '', canonicalContent });
+    assert.equal(await f.sense.canDisplayOperations([{ target: route, action: 'read' }]), true);
+    assert.equal(f.rawCalls.length, 1); assertCompound(f.rawCalls[0], [route]);
+    for (const target of [canonicalContent.Id, String(canonicalContent.Id), canonicalContent.Path]) {
+      assert.equal(await f.sense.canDisplayOperations([{ target, action: 'read' }]), true);
+    }
+    assert.equal(f.rawCalls.length, 1, 'canonical Path and numeric Id aliases share the same loaded descriptor');
+    assert.equal(await f.sense.canDisplayOperations([{ target: '/root/content/foreign/timelines/conan the barbarian', action: 'read' }]), false);
+    assert.equal(f.rawCalls.length, 1, 'a foreign project is still rejected before transport');
+    const result = await f.sense.repository.load({ idOrPath: route, oDataOptions: { select: ['Id', 'Path'] } });
+    assert.equal(result.d.Id, canonicalContent.Id); assert.equal(result.d.Path, canonicalContent.Path);
+    assert.equal(f.rawCalls.length, 2);
+    assert.equal(decodeURIComponent(new URL(f.rawCalls[1].url).pathname), "/odata.svc/root/content/timelines/timelines('conan the barbarian')");
+    assert.deepEqual(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).map(call => JSON.parse(call.init.body).target), [route]);
+    assert.equal(f.aclCalls.length, 0); assert.equal(f.childTypeCalls.length, 0); assert.equal(f.rawWrites.length, 0);
+  });
+  await test('a fresh mutation review matches a mixed-case path to its canonical row and rejects another target', async () => {
+    const canonicalContent = { Id: 4298, Path: '/Root/Content/timelines/Timelines/Conan the Barbarian', Name: 'Conan the Barbarian', Type: 'Timeline' };
+    const route = '/rOoT/CoNtEnT/TIMELINES/tiMelines/conan the barbarian', f = await fixture({ discovery: 'ready', canonicalContent });
+    const operation = { target: route, action: 'update' };
+    await f.sense.assertOperations([operation]);
+    assert.equal(f.rawCalls.length, 1); assertCompound(f.rawCalls[0], [route]);
+    assert.equal(JSON.parse(f.nativeCalls.find(call => call.path.endsWith('/lookup')).init.body).target, route);
+    f.permissionState.permissionRows = rows => rows.map(row => ({ ...row, Id: row.Id + 1, Path: row.Path.replace('Barbarian', 'Destroyer') }));
+    await assert.rejects(f.sense.assertOperations([operation]), /Permission denied/);
+    assert.equal(f.rawCalls.length, 2); assertCompound(f.rawCalls[1], [route]);
     assert.equal(f.aclCalls.length, 0); assert.equal(f.childTypeCalls.length, 0); assert.equal(f.rawWrites.length, 0);
   });
   await test('a cached display allow cannot authorize a write after fresh server denial', async () => {

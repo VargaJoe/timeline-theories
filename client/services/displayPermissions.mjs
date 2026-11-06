@@ -3,7 +3,7 @@ export function createDisplayPermissions({ identity, writable, load, ready, now 
   let subject = identity(), revision = 0, active = 0;
   const records = new Map(), flights = new Map(), queue = [];
   const key = target => typeof target === 'number' && Number.isSafeInteger(target) && target > 0 || typeof target === 'string' && /^[1-9][0-9]*$/.test(target) && Number.isSafeInteger(Number(target))
-    ? 'id:' + Number(target) : typeof target === 'string' && target.startsWith('/Root/') && !/\.\.|[\\?#\x00-\x1f]/.test(target) ? 'path:' + target : null;
+    ? 'id:' + Number(target) : typeof target === 'string' && target.toLowerCase().startsWith('/root/') && !/\.\.|[\\?#\x00-\x1f]/.test(target) ? 'path:' + target.toLowerCase() : null;
   const invalidate = () => { revision++; subject = identity(); records.clear(); flights.clear(); };
   const context = () => { if (subject !== identity()) invalidate(); return { subject, revision }; };
   const current = start => start.subject === identity() && start.subject === subject && start.revision === revision;

@@ -21,6 +21,8 @@ Az Edit action a nyers Save jognál szigorúbb lehet: a beépített szerkesztő 
 
 ## Közös frissítés és írási védelem
 
+A tartalomazonosítók és az útvonal-aliasok a SenseNet nagybetűzéstől független útvonalkezelését követik. A kisbetűs `conan the barbarian` route és a visszakapott `Conan the Barbarian` Path ugyanahhoz a tartalomhoz tartozik. Ezt külön cache- és tényleges szolgáltatási regressziós teszt ellenőrzi; eltérő célpontot továbbra sem fogad el.
+
 A megjelenítési adatok a repositoryhoz és az aktuális identitáshoz kötöttek; bejelentkezésváltás és explicit invalidálás megszünteti az előző eredményt. Egyetlen közös 30 másodperces időzítő, fókusz- és visibility-kezelő frissíti az összes fogyasztót. A szükséges leírók egy összetett, projektre és konkrét célpontokra szűkített OData-GET-be kerülnek. Nincs kártyánként vagy akciónként külön hálózati ellenőrzés. A hitelesítés kezdeti felépülése külön olvasási hullámot indíthat.
 
 Valódi írás előtt a kliens külön, friss összetett action-választ kér az összes érintett célpontra; nem a megjelenítési cache-ből engedélyez. Megmarad a natív gateway rendelkezésreállásának ellenőrzése, a csak olvasható mód, a pontos létrehozható típus, az identitás-/revízióellenőrzés és az alkalmazás-API szerveroldali validálása. A támogatott friss ellenőrzés legfeljebb 1000 külön célpontot és 16 000 karakteres kódolt URL-t fogad; túl nagy ellenőrzés írás előtt megáll.
@@ -32,6 +34,10 @@ A saját, elkülönített böngészős teszt ugyanazokat a helyi tartalmakat és
 A kiinduló mérési ablakok: főoldal 3 kártya, 108 helyi HTTP-kérés / 10 HasPermission; All 20 kártya, 156 / 30; timeline 31 kártya, 347 / 236. A timeline mintája időben korlátozott, egy kérése még függőben volt. A párhuzamos tesztek, eltérő megnyugvási ablakok és natív gateway-kérések miatt ezekből nem állítunk általános betöltésiidő-gyorsulást. A HasPermission-szám, a helyes műveletgombok és az egy hullámon belüli összetett kérés darabszáma külön elfogadási feltétel.
 
 A hosszú első jelöltteszt a nullára csökkent HasPermission mellett még húsz külön action-leíró kérést talált a médiatárban. Az egyes hookok külön időzítői okozták; a közös frissítési ütemező ezt javítja. Az eredeti, hibát kimutató bizonyítékok is megmaradtak.
+
+A javított közös ütemezővel mind a 12 oldal/szerepkör kombinációban nulla volt a teljes böngészős életciklus HasPermission-száma; egy fókusz-/időzített frissítési hullám legfeljebb egy összetett action-kérést indított. A mért editor-ablakokban a főoldal `108 → 102`, az All nézet `156 → 129`, a 31 elemes timeline `347 → 101` helyi HTTP-kérést mutatott. Ezek kérésdarabszámok; a navigálás előtti dokumentumról átnyúló kérések és a párhuzamos futások miatt nem betöltésiidő-benchmarkok.
+
+A normál OIDC editor saját UUID-s timeline-t hozott létre, szerkesztett és törölt az app szolgáltatásain keresztül. Három friss összetett ellenőrzés és három sikeres natív apply kizárólag a saját tesztazonosítót érintette; a rekordszám `3009 → 3010 → 3009`, a végén az elem 404. A meglévő eredeti és generált képek hash-e, az aktív borító és a felhasználó félbemaradt készlete változatlan. A hosted próba a kis-/nagybetűs útvonal hibáját is külön feltárta; a javítás ezt a valós válaszformát kezeli.
 
 Parancsok: `npm test`, `npm run test:parity`, `npm run lint`, `npm run build`. A célzott tesztek: `tests/display-permissions.test.mjs`, `tests/operation-guard.test.mjs`, `tests/library-navigation.test.mjs`, `tests/native-creation-retry.test.mjs`, `scripts/test-native-read-availability.mjs`.
 
