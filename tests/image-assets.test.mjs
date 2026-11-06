@@ -1,12 +1,104 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { ImageAssets, decodeImageVariant, validateImageManifest, validateImageVariant, validateImageBytes } from '../client/api/image-assets.mjs';
 import { StockRepository } from '../client/api/stock-repository.mjs';
 import raster from '../scripts/helpers/image-variant-fixture.cjs';
 import { storedCoverMime } from '../client/api/covers.mjs';
+import { imageProtocolFixture } from './helpers/image-assets-protocol-fixture.mjs';
 
 const manifest = () => ({ schemaVersion: 1, kind: 'timeline-composite', projectPath: '/Root/Content/Images', ownerId: 20, generationId: randomUUID(), sourceIds: [10, 11], sourceStamps: [{ id: 10, stamp: 'a'.repeat(64) }, { id: 11, stamp: 'b'.repeat(64) }], recipe: { template: 'poster-strip-v1', sourceIds: [10, 11], seed: 42 }, variants: [] });
+const imageOwner = () => ({ Id: 20, ParentId: 2, Type: 'Timeline', Name: 'owner', Path: '/Root/Content/Images/Timelines/owner', ModificationDate: '2026-11-06T00:00:00Z', Version: 'V1.0' });
+const imageRoot = (owner, { legacy = false, id = 30 } = {}) => ({ Id: id, ParentId: owner.Id, Type: legacy ? 'Folder' : 'SystemFolder', IsSystemContent: !legacy, Name: legacy ? '_images' : '(images)', Path: owner.Path + (legacy ? '/_images' : '/(images)'), Description: JSON.stringify({ protocol: 'timeline-image-assets-v1', projectPath: '/Root/Content/Images', ownerId: owner.Id, activeSetId: null, generationId: null, selectionRevision: randomUUID() }) });
+
+// Exercise the stock endpoint/projection/collection code against the protocol
+// fixture, without claiming this controlled response model proves SenseNet.
+function imageRepositoryFixture(owner, rows = []) {
+  const contents = new Map([owner, ...rows].map(row => [row.Id, row])), requests = [], host = { deniedIds: new Set(), allowSave: true };
+  const fixture = imageProtocolFixture('/Root/Content/Images', contents, (res, status, value) => { res.response = { status, value: structuredClone(value) }; }, host);
+  fixture.state.enabled = true;
+  const repo = new StockRepository({ projectRoot: '/Root/Content/Images', repositoryUrl: 'https://fixture.invalid' }, { mode: 'Bearer', value: 'fixture' });
+  repo.request = async (target, options = {}) => {
+    const url = new URL(target), method = options.method || 'GET', body = options.body;
+    requests.push({ method, path: decodeURIComponent(url.pathname), query: Object.fromEntries(url.searchParams), ...(body ? { body: structuredClone(body) } : {}) });
+    const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]); req.method = method; req.headers = { authorization: 'Bearer fixture' };
+    const res = {};
+    if (!await fixture.handle(req, res, url)) {
+      const row = contents.get(Number(url.pathname.match(/content\((\d+)\)/)?.[1]));
+      if (row && url.pathname.endsWith('/HasPermission')) res.response = { status: 200, value: !host.deniedIds.has(row.Id) && (url.searchParams.get('permissions') !== 'Save' || host.allowSave) };
+      else res.response = { status: row ? 200 : 404, value: structuredClone(row || null) };
+    }
+    const response = res.response;
+    if (response.status >= 400) { const error = new Error('Fixture repository rejected the request.'); error.status = response.status; throw error; }
+    if (['POST', 'PATCH', 'DELETE'].includes(method)) options.onDispatch?.();
+    return response;
+  };
+  return { repo, contents, requests, host, state: fixture.state };
+}
+
+test('new storage creates a SystemFolder with its own child settings and retains owner content', async () => {
+  const owner = { ...imageOwner(), Title: 'Preserve owner', AllowedChildTypes: { results: [{ Name: 'TimelineEntry' }] } }, before = structuredClone(owner);
+  const { repo, contents, requests } = imageRepositoryFixture(owner);
+  const snapshot = await repo.read(owner.Id, { image: false }), root = await repo.images.ensureStorage(snapshot);
+  assert.equal(root.Name, '(images)'); assert.equal(root.Path, owner.Path + '/(images)'); assert.equal(root.Type, 'SystemFolder'); assert.equal(root.IsSystemContent, true);
+  const stored = contents.get(root.Id); assert.deepEqual(stored.AllowedChildTypes.results.map(type => type.Name), ['Folder', 'File']);
+  assert.deepEqual(owner.AllowedChildTypes.results.map(type => type.Name).filter(name => ['TimelineEntry', 'Folder', 'File'].includes(name)).sort(), ['File', 'Folder', 'TimelineEntry']);
+  for (const key of ['Title', 'Name', 'Path', 'Type']) assert.equal(owner[key], before[key]);
+  assert.equal(JSON.parse(root.Description).ownerId, owner.Id); assert.equal(JSON.parse(root.Description).activeSetId, null);
+  const creates = requests.filter(request => request.method === 'POST'); assert.equal(creates.length, 1); assert.equal(creates[0].body.__ContentType, 'SystemFolder');
+  assert(requests.some(request => request.path.endsWith('/EffectiveAllowedChildTypes') && request.path.includes('content(20)')));
+  assert(requests.filter(request => request.path.endsWith("('(images)')")).every(request => request.query.$select.split(',').includes('IsSystemContent')));
+  const writes = requests.filter(request => ['POST', 'PATCH'].includes(request.method)).length;
+  await repo.images.ensureStorage(await repo.read(owner.Id, { image: false }));
+  assert.equal(requests.filter(request => ['POST', 'PATCH'].includes(request.method)).length, writes, 'reopening existing storage never changes child settings or creates another root');
+});
+
+test('SystemFolder root and its generated Folder/File subtree obey default and OFF autofilters', async () => {
+  const owner = { ...imageOwner(), AllowedChildTypes: { results: [{ Name: 'Folder' }, { Name: 'File' }] } }, root = imageRoot(owner);
+  root.AllowedChildTypes = { results: [{ Name: 'Folder' }, { Name: 'File' }] };
+  const entry = { Id: 21, ParentId: owner.Id, Type: 'TimelineEntry', Name: 'entry', Path: owner.Path + '/entry' };
+  const { repo, contents, requests } = imageRepositoryFixture(owner, [root, entry]);
+  const generation = await repo.api(root.Id, null, { method: 'POST', body: { __ContentType: 'Folder', Name: randomUUID(), Description: '{}' } });
+  const file = await repo.api(generation.Id, null, { method: 'POST', body: { __ContentType: 'File', Name: 'w400.png' } });
+  assert.equal(generation.Type, 'Folder'); assert.equal(file.Type, 'File'); assert.equal(contents.get(generation.Id).IsSystemContent, true); assert.equal(contents.get(file.Id).IsSystemContent, true);
+  const query = '+InTree:' + owner.Path;
+  const normal = await repo.collection(owner.Path, { query, '$top': 20 });
+  assert.deepEqual(normal.results.map(row => row.Id).sort((a, b) => a - b), [20, 21]);
+  const all = await repo.collection(owner.Path, { query: query + ' .AUTOFILTERS:OFF', '$top': 20 });
+  assert.deepEqual(all.results.filter(row => row.IsSystemContent).map(row => row.Id).sort((a, b) => a - b), [root.Id, generation.Id, file.Id].sort((a, b) => a - b));
+  const rows = await repo.images.entries(root.Path, 20, root.Id); assert.deepEqual(rows.map(row => row.Id), [generation.Id]);
+  assert.match(requests.at(-1).query.query, /\.AUTOFILTERS:OFF\b/);
+});
+
+test('root creation requires SystemFolder permission even when ordinary Folder and File are allowed', async () => {
+  const owner = { ...imageOwner(), AllowedChildTypes: { results: [{ Name: 'Folder' }, { Name: 'File' }] } };
+  const { repo, requests } = imageRepositoryFixture(owner), api = repo.api.bind(repo);
+  repo.api = async (target, operation, options) => {
+    const value = await api(target, operation, options);
+    return operation === 'EffectiveAllowedChildTypes' ? { results: value.results.filter(type => type.Name !== 'SystemFolder') } : value;
+  };
+  await assert.rejects(repo.images.ensureStorage(await repo.read(owner.Id, { image: false })), error => error.code === 'child_type_denied');
+  assert.equal(requests.filter(request => ['POST', 'PATCH'].includes(request.method)).length, 0, 'allowed Folder/File types cannot authorize a SystemFolder root');
+});
+
+test('canonical storage takes precedence; only its 404 permits read-only legacy fallback', async () => {
+  const owner = { ...imageOwner(), ImageStorageEnabled: true }, legacy = imageRoot(owner, { legacy: true, id: 40 }), canonical = imageRoot(owner);
+  const { repo, contents, requests, host } = imageRepositoryFixture(owner, [legacy]);
+  assert.equal((await repo.images.storage(owner)).Id, legacy.Id);
+  assert.deepEqual(requests.map(request => request.path), ['/OData.svc' + owner.Path + "('(images)')", '/OData.svc' + owner.Path + "('_images')"]);
+  assert(requests.every(request => request.method === 'GET'), 'legacy lookup never renames or migrates existing storage');
+  contents.set(canonical.Id, canonical); requests.length = 0; repo.images.invalidate(owner.Id);
+  assert.equal((await repo.images.storage(owner)).Id, canonical.Id); assert.equal(requests.length, 1);
+  host.deniedIds.add(canonical.Id); requests.length = 0; repo.images.invalidate(owner.Id);
+  await assert.rejects(repo.images.storage(owner), error => error.status === 403); assert.equal(requests.length, 1, 'denied canonical root cannot fall back to an accessible legacy root');
+  host.deniedIds.clear(); canonical.Description = 'foreign content'; requests.length = 0; repo.images.invalidate(owner.Id);
+  await assert.rejects(repo.images.storage(owner), error => error.code === 'image_storage_collision'); assert.equal(requests.length, 1, 'foreign canonical content cannot be masked by a legacy root');
+  canonical.Description = legacy.Description; canonical.Type = 'Folder'; repo.images.invalidate(owner.Id);
+  await assert.rejects(repo.images.storage(owner), error => error.code === 'image_storage_collision');
+  canonical.Type = 'SystemFolder'; canonical.IsSystemContent = false; repo.images.invalidate(owner.Id);
+  await assert.rejects(repo.images.storage(owner), error => error.code === 'image_storage_collision');
+});
 test('stored generic MIME uses only supported signatures and never relabels a known mismatch', () => {
   const samples = [['image/png', Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])], ['image/jpeg', Buffer.from([255, 216, 255, 224])], ['image/webp', Buffer.from('RIFFxxxxWEBP')]];
   for (const [mime, bytes] of samples) {
@@ -62,7 +154,7 @@ test('snapshots hash only pointer metadata and make no schema or native image op
   const owner={Id:20,ParentId:2,Type:'Timeline',Name:'owner',Path:projectRoot+'/Timelines/owner',ModificationDate:'2026-11-06T00:00:00Z',Version:'V1.0',AllowedChildTypes:{results:[{Name:'File'},{Name:'Folder'}]}};
   const root={Id:30,ParentId:20,Name:'_images',Type:'Folder',Path:owner.Path+'/_images',Version:'V1.0',Description:JSON.stringify({protocol:'timeline-image-assets-v1',projectPath:projectRoot,ownerId:20,activeSetId:null,generationId:null,selectionRevision:generationId})};
   const calls=[],repo=new StockRepository({projectRoot,repositoryUrl:'https://fixture.invalid'},null);repo.assert=async()=>{};
-  repo.api=async(target,operation)=>{calls.push({target,operation});assert.equal(operation,null);return typeof target==='string'?root:owner;};
+  repo.api=async(target,operation)=>{calls.push({target,operation});assert.equal(operation,null);if(typeof target==='string'&&target.endsWith('/(images)')){const error=new Error('Canonical root absent');error.status=404;throw error;}return typeof target==='string'?root:owner;};
   const before=await repo.read(20),internal=await repo.read(20,{image:false});assert.equal(before.revision,internal.revision);assert.equal(before.image.state,'legacy');
   root.Version='V100.0';root.ModificationDate='2027-01-01T00:00:00Z';assert.equal((await repo.read(20)).revision,before.revision);
   root.Description=JSON.stringify({...JSON.parse(root.Description),selectionRevision:randomUUID()});assert.notEqual((await repo.read(20,{image:false})).revision,before.revision);
@@ -72,7 +164,7 @@ test('snapshots hash only pointer metadata and make no schema or native image op
 
 test('reserved folder and generation path or owner substitution fail closed', async () => {
   const value=manifest(),owner={Id:20,Type:'Timeline',Path:value.projectPath+'/Timelines/owner',ImageStorageEnabled:true};
-  const root={Id:30,ParentId:20,Type:'Folder',Name:'_images',Path:owner.Path+'/_images',Description:JSON.stringify({protocol:'timeline-image-assets-v1',projectPath:value.projectPath,ownerId:20,activeSetId:null,generationId:null,selectionRevision:randomUUID()})};
+  const root=imageRoot(owner);
   const set={Id:31,ParentId:30,Type:'Folder',Name:value.generationId,Path:root.Path+'/'+value.generationId,Description:JSON.stringify({protocol:'timeline-image-assets-v1',manifest:value,sealed:false,ownerRevision:'sha256:'+'a'.repeat(64)})};
   const repo={paths:{root:value.projectPath},read:async()=>owner,assert:async()=>{},api:async(target)=>typeof target==='string'?root:set};
   const images=new ImageAssets(repo);assert.deepEqual((await images.set(31,20,{sources:false})).manifest.recipe.sourceIds,[10,11]);
@@ -94,7 +186,7 @@ test('public owners cannot copy privately readable source originals into public 
 });
 
 test('direct occurrence ordering excludes managed images but keeps all occurrences and rejects hidden access', async () => {
-  const owner={Id:20,Type:'Timeline',Path:'/Root/Content/Images/Timelines/owner'},entries=[{Id:21,ParentId:20,Type:'TimelineEntry'},{Id:22,ParentId:20,Type:'TimelineEntry'}],managed=[{Id:30,ParentId:20,Type:'Folder'},{Id:31,ParentId:30,Type:'Folder'},{Id:32,ParentId:31,Type:'File'}];
+  const owner={Id:20,Type:'Timeline',Path:'/Root/Content/Images/Timelines/owner'},entries=[{Id:21,ParentId:20,Type:'TimelineEntry'},{Id:22,ParentId:20,Type:'TimelineEntry'}],managed=[{Id:30,ParentId:20,Type:'SystemFolder',IsSystemContent:true},{Id:31,ParentId:30,Type:'Folder',IsSystemContent:true},{Id:32,ParentId:31,Type:'File',IsSystemContent:true}];
   const repo=new StockRepository({projectRoot:'/Root/Content/Images'},null);repo.read=async id=>id===20?owner:entries.find(row=>row.Id===id);repo.inventoryRows=async()=>[...entries,...managed];
   let seen;repo.images.managedTree=async(_owner,rows)=>{seen=rows;return[];};repo.assert=async()=>{};
   assert.deepEqual((await repo.children(20,'order')).map(row=>row.Id),[21,22]);assert.deepEqual(seen,managed);
@@ -107,16 +199,18 @@ test('media reference checks contain occurrence references only, never generated
   assert.equal((await repo.references(10)).hasReferences,false);
 });
 
-test('media deletion preflights all managed Folder/File descendants and refuses foreign or denied files', async () => {
+for (const legacy of [false, true]) test(`media deletion preflights ${legacy ? 'legacy Folder' : 'SystemFolder'} storage and refuses foreign or denied descendants`, async () => {
   const value={...manifest(),kind:'media-sizes',sourceIds:[20],sourceStamps:[{id:20,stamp:'a'.repeat(64)}],recipe:{template:'media-sizes-v1',sourceIds:[20]}};
   const owner={Id:20,Type:'MediaItem',Path:value.projectPath+'/MediaLibrary/owner',ImageStorageEnabled:true};
-  const root={Id:30,ParentId:20,Type:'Folder',Name:'_images',Path:owner.Path+'/_images',Description:JSON.stringify({protocol:'timeline-image-assets-v1',projectPath:value.projectPath,ownerId:20,activeSetId:null,generationId:null,selectionRevision:randomUUID()})};
+  const root=imageRoot(owner,{legacy});
   const set={Id:31,ParentId:30,Type:'Folder',Name:value.generationId,Path:root.Path+'/'+value.generationId,Description:JSON.stringify({protocol:'timeline-image-assets-v1',manifest:value,sealed:false,ownerRevision:'sha256:'+'a'.repeat(64)})};
   const file={Id:32,ParentId:31,Type:'File',Name:'w400.png',Path:set.Path+'/w400.png'},nodes=[root,set,file];let denied=false;
-  const repo={paths:{root:value.projectPath},api:async target=>typeof target==='string'?root:nodes.find(row=>row.Id===target),assert:async ops=>{assert.equal(ops.some(op=>op.action==='cover'),false,'ordinary deletion does not invent owner Save');if(denied&&ops.some(op=>op.target===32&&op.action==='delete')){const error=new Error('Denied');error.status=403;throw error;}}};
+  let changedType=false;
+  const repo={paths:{root:value.projectPath},api:async target=>{if(typeof target==='string'){if(legacy&&target.endsWith('/(images)')){const error=new Error('Canonical root absent');error.status=404;throw error;}return root;}const node=nodes.find(row=>row.Id===target);return changedType&&target===root.Id?{...node,Type:legacy?'SystemFolder':'Folder'}:node;},assert:async ops=>{assert.equal(ops.some(op=>op.action==='cover'),false,'ordinary deletion does not invent owner Save');if(denied&&ops.some(op=>op.target===32&&op.action==='delete')){const error=new Error('Denied');error.status=403;throw error;}}};
   const images=new ImageAssets(repo);assert.deepEqual((await images.managedTree(owner,nodes,{deleting:true})).map(row=>row.id),[30,31,32]);
   denied=true;await assert.rejects(images.managedTree(owner,nodes,{deleting:true}),error=>error.status===403);
-  denied=false;file.Name='original.png';file.Path=set.Path+'/'+file.Name;await assert.rejects(images.managedTree(owner,nodes,{deleting:true}),error=>error.code==='unexpected_children');
+  denied=false;changedType=true;await assert.rejects(images.managedTree(owner,nodes,{deleting:true}),error=>error.code==='unexpected_children');
+  changedType=false;file.Name='original.png';file.Path=set.Path+'/'+file.Name;await assert.rejects(images.managedTree(owner,nodes,{deleting:true}),error=>error.code==='unexpected_children');
 });
 
 test('delete receipts observe the exact target ID rather than a missing or renamed storage root', async () => {

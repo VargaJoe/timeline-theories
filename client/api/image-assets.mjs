@@ -4,6 +4,7 @@ import { assertUuid, hash, stableJson } from './store.mjs';
 import { storedCoverMime } from './covers.mjs';
 
 export const IMAGE_PROTOCOL = 'timeline-image-assets-v1';
+export const IMAGE_STORAGE_NAME = '(images)';
 export const IMAGE_LIMITS = Object.freeze({ variantBytes: 1024 * 1024, variants: 3, totalBytes: 3 * 1024 * 1024, manifestBytes: 16384 });
 const OWNER_TYPES = new Set(['Timeline', 'MediaItem', 'BookMediaItem']);
 const IMAGE_ACTIONS = new Set(['image-draft', 'image-variant', 'image-seal', 'image-delete']);
@@ -49,7 +50,7 @@ export function decodeImageVariant(input, variant) {
 
 const extension = mime => ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' })[mime];
 const fileName = variant => `${variant.name}.${extension(variant.mimeType)}`;
-const projection = 'Id,ParentId,Name,Path,Type,Description,Version,VersionId,ModificationDate';
+const projection = 'Id,ParentId,Name,Path,Type,IsSystemContent,Description,Version,VersionId,ModificationDate';
 function description(value, limit = 20000) {
   if (typeof value !== 'string' || Buffer.byteLength(value) > limit) fail('image_storage_collision', 'Managed image metadata is invalid or foreign.', 409);
   try { return JSON.parse(value); } catch { fail('image_storage_collision', 'Managed image metadata is invalid or foreign.', 409); }
@@ -99,8 +100,17 @@ export class ImageAssets {
   async storage(owner, { force = false, fresh = false } = {}) {
     if (!force && owner.ImageStorageEnabled === false) return null;
     if (!fresh && this.roots.has(owner.Id)) return this.roots.get(owner.Id);
-    let row; try { row = await this.node(owner.Path + '/_images'); } catch (error) { if (error.status === 404) return null; throw error; }
-    if (row.Type !== 'Folder' || row.Name !== '_images' || row.Path !== owner.Path + '/_images' || row.ParentId !== owner.Id) fail('image_storage_collision', 'The reserved image folder belongs to different content.', 409);
+    let row, name = IMAGE_STORAGE_NAME;
+    try { row = await this.node(owner.Path + '/' + name); }
+    catch (error) {
+      if (error.status !== 404) throw error;
+      // Existing published sets remain readable until an explicit preserving
+      // migration. Never rename or move content as a side effect of reading it.
+      name = '_images';
+      try { row = await this.node(owner.Path + '/' + name); } catch (legacyError) { if (legacyError.status === 404) return null; throw legacyError; }
+    }
+    const canonical = name === IMAGE_STORAGE_NAME;
+    if (row.Type !== (canonical ? 'SystemFolder' : 'Folder') || canonical && row.IsSystemContent !== true || row.Name !== name || row.Path !== owner.Path + '/' + name || row.ParentId !== owner.Id) fail('image_storage_collision', 'The reserved image folder belongs to different content.', 409);
     const value = description(row.Description, 2048);
     only(value, ['protocol', 'projectPath', 'ownerId', 'activeSetId', 'generationId', 'selectionRevision']);
     if (value.protocol !== IMAGE_PROTOCOL || value.projectPath !== this.repo.paths.root || value.ownerId !== owner.Id || value.activeSetId !== null && (!Number.isSafeInteger(value.activeSetId) || value.activeSetId < 1) || (value.activeSetId === null) !== (value.generationId === null)) fail('image_storage_collision', 'The reserved image folder has a foreign binding.', 409);
@@ -242,7 +252,7 @@ export class ImageAssets {
     }
     for (const summary of rows) {
       const row = await this.node(summary.Id);
-      if (row.Id === root.Id) { if (row.Path !== root.Path || row.Type !== 'Folder') fail('unexpected_children', 'Managed image root changed.', 409); }
+      if (row.Id === root.Id) { if (row.Path !== root.Path || row.Type !== root.Type || root.Type === 'SystemFolder' && row.IsSystemContent !== true) fail('unexpected_children', 'Managed image root changed.', 409); }
       else if (generations.has(row.Id)) { if (row.Path !== generations.get(row.Id).Path) fail('unexpected_children', 'Managed image generation changed.', 409); }
       else {
         const set = generations.get(row.ParentId);
@@ -256,6 +266,9 @@ export class ImageAssets {
   async ensureStorage(owner, onDispatch) {
     let root = await this.storage(owner, { force: true }); if (root) return root;
     await this.addNew(owner.Id);
+    // SystemFolder is a stock special type, but its CTD must still be visible
+    // to this caller. Refuse before changing any owner child-type settings.
+    await this.repo.assert([{ target: owner.Id, action: 'create', type: 'SystemFolder' }]);
     const before = hash(ownerData(owner));
     const ownerOriginal = owner.CoverImageBin?.ContentType ? digest(await this.repo.coverBytes(owner.Id, { image: false })) : null;
     const allowed = await this.repo.api(owner.Id, 'EffectiveAllowedChildTypes', { query: { '$select': 'Name', metadata: 'no' } });
@@ -264,9 +277,8 @@ export class ImageAssets {
     if (!owner.ImageStorageEnabled) await this.repo.api(owner.Id, null, { method: 'PATCH', query: { '$select': 'Id', metadata: 'no' }, body: { AllowedChildTypes: names }, onDispatch });
     const after = await this.repo.read(owner.Id, { image: false });
     if (!after.ImageStorageEnabled || hash(ownerData(after)) !== before || ownerOriginal !== null && digest(await this.repo.coverBytes(owner.Id, { image: false })) !== ownerOriginal) fail('revision_conflict', 'Owner content changed during image storage setup.', 409);
-    await this.repo.assert([{ target: owner.Id, action: 'create', type: 'Folder' }]);
     const value = { protocol: IMAGE_PROTOCOL, projectPath: this.repo.paths.root, ownerId: owner.Id, activeSetId: null, generationId: null, selectionRevision: randomUUID() };
-    await this.repo.api(owner.Id, null, { method: 'POST', query: { '$select': 'Id', metadata: 'no' }, body: { __ContentType: 'Folder', Name: '_images', Description: JSON.stringify(value) }, onDispatch });
+    await this.repo.api(owner.Id, null, { method: 'POST', query: { '$select': 'Id', metadata: 'no' }, body: { __ContentType: 'SystemFolder', Name: IMAGE_STORAGE_NAME, AllowedChildTypes: ['Folder', 'File'], Description: JSON.stringify(value) }, onDispatch });
     this.invalidate(owner.Id); root = await this.storage(after, { force: true, fresh: true }); return root;
   }
   async before(payload) {

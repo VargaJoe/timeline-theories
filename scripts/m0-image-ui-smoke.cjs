@@ -14,7 +14,7 @@ const chromiumParts = ['ms-playwright', 'chromium-1234', 'chrome-win64', 'chrome
 const localChromium = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), ...chromiumParts);
 const chromium = process.env.M0_CHROMIUM_EXECUTABLE_PATH || (fs.existsSync(localChromium) ? localChromium : path.join(os.homedir(), 'AppData', 'Local', ...chromiumParts));
 const FRONTEND = 'https://localhost:8080', ROOT = '/Root/Content/timelines';
-const IMAGE_PROTOCOL = 'timeline-image-assets-v1', STORAGE = 'stock-owner-images-v1';
+const IMAGE_PROTOCOL = 'timeline-image-assets-v1', STORAGE = 'stock-owner-images-systemfolder-v1';
 const VISITOR = '/Root/IMS/BuiltIn/Portal/Visitor';
 const keepDemo = process.argv.includes('--keep-demo');
 const resumeIndex = process.argv.indexOf('--resume');
@@ -30,14 +30,14 @@ async function smoke() {
     const evidenceRoot = fs.realpathSync(path.join(local.ROOT, 'image-ui-smoke')) + path.sep;
     assert(previousPath.toLowerCase().startsWith(evidenceRoot.toLowerCase()) && path.basename(previousPath) === 'report.json', 'Resume must use project-local UI proof.');
     previousReport = JSON.parse(fs.readFileSync(previousPath, 'utf8'));
-    assert.equal(previousReport.storage, STORAGE, 'Do not resume extension-backed proof against ordinary Folder/File storage.');
+    assert.equal(previousReport.storage, STORAGE, 'Resume requires proof from the same SystemFolder storage layout.');
     assert(/^q-m0-image-ui-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(previousReport.fixturePrefix));
     assert(previousReport.preservedForRecovery && Array.isArray(previousReport.fixtureOwners), 'Resume needs the preserved owned fixture inventory.');
   }
   const accounts = local.readAccounts(), id = previousReport ? previousReport.fixturePrefix.slice('q-m0-image-ui-'.length) : crypto.randomUUID(), prefix = 'q-m0-image-ui-' + id;
   const output = previousReport ? path.join(local.ROOT, 'image-ui-smoke', id, 'continuations', crypto.randomUUID()) : path.join(local.ROOT, 'image-ui-smoke', id);
   fs.mkdirSync(output, { recursive: true });
-  const report = { version: 2, storage: STORAGE, ranAt: new Date().toISOString(), fixturePrefix: prefix, frontend: FRONTEND, checks: [], passed: false, keepDemo, ...(previousPath ? { resumeOf: previousPath } : {}) };
+  const report = { version: 3, storage: STORAGE, ranAt: new Date().toISOString(), fixturePrefix: prefix, frontend: FRONTEND, checks: [], passed: false, keepDemo, ...(previousPath ? { resumeOf: previousPath } : {}) };
   if (previousReport?.controlledLostResponse?.passed) report.controlledLostResponse = { ...previousReport.controlledLostResponse, carriedFrom: previousPath };
   const secrets = Object.values(accounts).flatMap(account => [account.password, account.apiKey, account.token]).filter(value => typeof value === 'string' && value.length > 7);
   const redact = value => secrets.reduce((result, secret) => result.replaceAll(secret, '[redacted]'), String(value))
@@ -54,15 +54,18 @@ async function smoke() {
   };
   report.initialCount = await repositoryCount(); checkpoint();
   let browser, editor, visitor, timeline, media;
-  const selected = target => local.api(target, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type,Description', metadata: 'no' } });
-  const children = async parent => {
-    const parentPath = typeof parent === 'string' ? parent : (await selected(parent)).Path;
+  const selected = target => local.api(target, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type,IsSystemContent,Description', metadata: 'no' } });
+  const queryContents = async (parentPath, query) => {
     assert(parentPath.startsWith(ROOT + '/'));
     const url = new URL(local.REPOSITORY); url.pathname = '/OData.svc' + parentPath.split('/').map(encodeURIComponent).join('/');
-    url.search = new URLSearchParams({ $select: 'Id,Name,Path,Type,Description', $top: '100', metadata: 'no' }).toString();
+    url.search = new URLSearchParams({ query, $select: 'Id,Name,Path,Type,IsSystemContent,Description', $top: '100', metadata: 'no' }).toString();
     const response = await local.request(url.href, { account: accounts.admin });
-    assert.equal(response.status, 200); assert(Array.isArray(response.value.d.results)); assert(response.value.d.results.length < 100, 'Never clean an unenumerated managed tree.');
+    assert.equal(response.status, 200); assert(Array.isArray(response.value.d.results)); assert(response.value.d.results.length < 100, 'Never accept a truncated managed tree.');
     return response.value.d.results;
+  };
+  const children = async parent => {
+    const content = await selected(parent);
+    return queryContents(content.Path, '+ParentId:' + content.Id + ' .AUTOFILTERS:OFF .LIFESPAN:OFF');
   };
   const safeMetadata = value => Array.isArray(value) ? value.map(safeMetadata) : value && typeof value === 'object'
     ? Object.fromEntries(Object.entries(value).filter(([key]) => !/^(?:bytesBase64|authorization|cookie|access_token|refresh_token|id_token|credential)$/i.test(key)).map(([key, item]) => [key, safeMetadata(item)])) : value;
@@ -262,7 +265,7 @@ async function smoke() {
           const result = await response.json(), setId = Number(new URL(request.url()).pathname.match(/drafts\/(\d+)/)[1]);
           const set = await local.api(setId, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type', metadata: 'no' } });
           const owner = owners.find(item => item.Id === ownerId);
-          assert.equal(set.Type, 'Folder'); assert(set.Path.startsWith(owner.Path + '/_images/'));
+          assert.equal(set.Type, 'Folder'); assert(set.Path.startsWith(owner.Path + '/(images)/'));
           const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[payload.variant.mimeType];
           lost.file = await fileSnapshot(set.Path + '/w400.' + extension); assert.equal(lost.file.id, result.data.id);
           lost.url = request.url(); lost.requestHash = sha256(Buffer.from(request.postData()));
@@ -305,7 +308,7 @@ async function smoke() {
     await checked('Real editor OIDC login and standard local image capability', async () => {
       await login(editor.page);
       const capability = await nativeRead(editor.page, '/images/capabilities');
-      assert.equal(capability.available, true, 'The existing app API must support ordinary Folder/File images before running this proof.');
+      assert.equal(capability.available, true, 'The existing app API must support stock SystemFolder/Folder/File images before running this proof.');
       assert.equal(editor.rawMutations.length, 0);
       return { protocol: capability.protocol };
     });
@@ -358,14 +361,21 @@ async function smoke() {
       const after = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`); assert.equal(after.generationId, before.generationId);
       return { deletedInactiveSets: sets.length - remaining.length, activeSetKept: true };
     });
-    await checked('An _images Folder sibling is excluded from direct timeline entry occurrences', async () => {
+    await checked('The (images) SystemFolder is hidden by default queries, visible with OFF, and excluded from entry occurrences', async () => {
       const direct = await children(timeline.Id), entries = direct.filter(item => item.Type === 'TimelineEntry');
       assert.equal(entries.length, 4); assert.deepEqual(entries.map(item => item.Id).sort((a, b) => a - b), fixtures.filter(item => item.Type === 'TimelineEntry').map(item => item.Id).sort((a, b) => a - b));
-      const imageRoot = direct.find(item => item.Name === '_images'); assert.equal(imageRoot?.Type, 'Folder'); assert.equal(imageRoot.Path, timeline.Path + '/_images');
+      const imageRoot = direct.find(item => item.Name === '(images)'); assert.equal(imageRoot?.Type, 'SystemFolder'); assert.equal(imageRoot.Path, timeline.Path + '/(images)'); assert.equal(imageRoot.IsSystemContent, true);
+      const treeQuery = '+InTree:' + timeline.Path;
+      const defaults = await queryContents(timeline.Path, treeQuery), unfiltered = await queryContents(timeline.Path, treeQuery + ' .AUTOFILTERS:OFF .LIFESPAN:OFF');
+      const generated = unfiltered.filter(item => item.Path === imageRoot.Path || item.Path.startsWith(imageRoot.Path + '/'));
+      assert(generated.some(item => item.Id === imageRoot.Id)); assert(generated.some(item => item.Type === 'Folder')); assert(generated.some(item => item.Type === 'File'));
+      assert(generated.every(item => item.IsSystemContent === true), 'Stock SystemFolder must mark every generated descendant as system content.');
+      assert(defaults.every(item => !generated.some(generatedItem => generatedItem.Id === item.Id)), 'Default autofilters must hide the root, generations and variant files.');
+      assert.deepEqual(defaults.filter(item => item.Type === 'TimelineEntry').map(item => item.Id).sort((a, b) => a - b), entries.map(item => item.Id).sort((a, b) => a - b));
       const pointer = JSON.parse(imageRoot.Description); assert.equal(pointer.protocol, IMAGE_PROTOCOL); assert.equal(pointer.ownerId, timeline.Id); assert.equal(pointer.projectPath, ROOT);
       const current = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`); assert.equal(pointer.activeSetId, current.setId);
       await goto(editor.page, '/timelines/' + timeline.Name); await editor.page.locator('.entry-card').nth(3).waitFor(); assert.equal(await editor.page.locator('.entry-card').count(), 4);
-      return { entryOccurrences: 4, excludedFolderId: imageRoot.Id, activeSetId: current.setId };
+      return { entryOccurrences: 4, excludedSystemFolderId: imageRoot.Id, defaultQueryGeneratedItems: 0, offQueryGeneratedItems: generated.length, activeSetId: current.setId };
     });
     await checked('Actual editor blocks public publication from a currently private source', async () => {
       const before = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`);
@@ -491,7 +501,7 @@ async function smoke() {
         await goto(visitor.page, '/timelines?filter=q'); await image.scrollIntoViewIfNeeded(); await card.locator('[data-image-state="loaded"]').waitFor();
         await visitor.page.screenshot({ path: path.join(output, 'visitor-static-copy-source-private.png') });
       } finally { await permissions(media[0].Id, [{ identity: VISITOR, ...READ_PERMISSIONS }]); }
-      const pointer = JSON.parse((await selected(timeline.Path + '/_images')).Description), generation = JSON.parse((await selected(pointer.activeSetId)).Description);
+      const pointer = JSON.parse((await selected(timeline.Path + '/(images)')).Description), generation = JSON.parse((await selected(pointer.activeSetId)).Description);
       const fileId = generation.manifest.variants.find(variant => variant.name === 'w400').id;
       const beforeOwnerDenial = byteRequests(); await permissions(timeline.Id, [{ identity: VISITOR, Open: 'deny', OpenMinor: 'deny' }]);
       try {
@@ -541,10 +551,10 @@ async function smoke() {
     } else if (!keepDemo) {
       try {
         for (const owner of owners) {
-          const folderPath = owner.Path + '/_images';
+          const folderPath = owner.Path + '/(images)';
           let folder;
           try { folder = await selected(folderPath); } catch (error) { if (error.status === 404) continue; throw error; }
-          assert.equal(folder.Path, folderPath); assert.equal(folder.Name, '_images'); assert.equal(folder.Type, 'Folder');
+          assert.equal(folder.Path, folderPath); assert.equal(folder.Name, '(images)'); assert.equal(folder.Type, 'SystemFolder'); assert.equal(folder.IsSystemContent, true);
           const pointer = JSON.parse(folder.Description); assert.equal(pointer.protocol, IMAGE_PROTOCOL); assert.equal(pointer.ownerId, owner.Id); assert.equal(pointer.projectPath, ROOT);
           await local.api(folder.Id, { account: accounts.admin, method: 'PATCH', query: { $select: 'Id', metadata: 'no' }, body: { Description: JSON.stringify({ ...pointer, activeSetId: null, generationId: null, selectionRevision: crypto.randomUUID() }) } });
           for (const set of await children(folder.Id)) {

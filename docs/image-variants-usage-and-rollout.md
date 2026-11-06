@@ -13,7 +13,7 @@ A timeline-borító a jelenlegi, legfeljebb négy poszteres statikus kompozíci�
 ```text
 <timeline vagy média>
   CoverImageBin / CoverImageUrl       meglévő eredeti, változatlan
-  _images/                           standard Folder
+  (images)/                          standard SystemFolder, IsSystemContent=true
     Description                      alkalmazási kötés + aktív készlet
     <generationUUID>/                standard Folder
       Description                    recept, forrás-hash-ek, manifest, lezárt állapot
@@ -23,6 +23,12 @@ A timeline-borító a jelenlegi, legfeljebb négy poszteres statikus kompozíci�
 ```
 
 Médiánál a logikai méretek tipikusan `w160`, `w320`, `w640`. Kis eredetit nem skálázunk fel. A tényleges fájlnév a formátumnak megfelelő kiterjesztést kap; PNG-fallback esetén `.png`.
+
+A `(images)` valódi, beépített **SystemFolder**: a rendszerjelölést a típus adja, nem önmagában a zárójeles név. Alapértelmezett autofilterrel a képtároló és leszármazottai kimaradnak a tartalmi találatokból. SenseNet adminban kapcsold ki az autofiltert; lekérdezésben `.AUTOFILTERS:OFF` mellett láthatók. Az app belső generáció- és fájlfelsorolásai ezt kifejezetten használják; a közvetlen, jogosultsággal védett ID-/útvonal- és binárisolvasás továbbra is működik. A rendszerjelölés nem jogosultsági korlát.
+
+A rendszer-mappa saját `AllowedChildTypes` beállítása csak `Folder,File`; a generációk standard Folderek, a képek standard File tartalmak. Az előző verzió `_images` Folder tárolója kötésellenőrzött kompatibilis olvasással megmarad, és olvasáskor nem alakul át automatikusan. Meglévő készlet átállításakor azonos tulajdonos alatt hozd létre a `(images)` SystemFoldert, másold a vezérlőleírást, majd az UUID generációs mappákat standard Move művelettel mozgasd át. A generáció- és File-ID-ket, manifestet, aktív készletet és képbyte-okat őrizd meg; csak az ellenőrzötten üres régi mappát töröld. Ezt írásmentes/karbantartási időben végezd; a két tároló közti mozgatás nem atomi.
+
+A szerkesztőnek a tulajdonos tartalmon szükséges írás/létrehozás mellett a beépített **SystemFolder tartalomtípust is látnia kell**. Az app ezt ellenőrzi, jogosultságot nem oszt. A helyi M0Editor a meglévő SystemFolder típuson kizárólag helyi See/Open jogot kapott; típusszerkesztési, séma- vagy ACL-módosítási jogot nem. Más repositoryban a meglévő szerkesztői szerepkör megfelelő típusláthatóságát az admin ellenőrizze. A tulajdonos eddigi Folder/File engedélyezési jelölése megmarad, hogy a még nem inicializált régi tartalmak olvasásakor ne kelljen minden elem alatt külön tárolót keresni.
 
 A Folder saját, már létező `Description` mezője tárolja a korlátozott méretű JSON-adatot. Ez az alkalmazás újonnan létrehozott mappáinak leírása; az eredeti timeline/média leírását nem írjuk át. Az aktív generáció kiválasztása ennek a kis vezérlőadatnak a mentése. A korábbi készlet a teljes új feltöltés és ellenőrzés alatt használható marad.
 
@@ -66,7 +72,7 @@ docker compose -f compose.local.yaml up -d --build
 
 App: **https://localhost:8080**, profil `m0-local`, repository `https://localhost:41016`. A teljes app a `timeline-local` / `app` Docker-konténerben fut; újraindítás: `docker compose -f compose.local.yaml restart app`. A beállításokat a gyökér ignored `.env` adja, az egyszer másolandó `.env.example` kizárólag a projekt saját localhost mintáját tartalmazza. Részletek: [helyi Docker-indítás](local-docker.md). A meglévő helyi accountok az ignored `deployment/.local/accounts.json` fájlban vannak; új account vagy éles belépés nem kell.
 
-A megtartott, valódi poszteres helyi példa: [Local Conan demo](https://localhost:8080/timelines/local-conan-demo-833b49e7-0cf7-4359-8c4a-cdc84ba967e0). A timeline `9146`, három bejegyzése a meglévő `3007/3009/3011` médiákra hivatkozik. Alatta `_images` Folder `9150`, generáció Folder `9151`, három standard File `9152–9154` található. A demó pontosan kilenc új, helyi rekord; a 2998 eredeti rekord megmaradt. Részletes fa, receptek és bizonyíték: ignored `deployment/.local/image-variants-demo.json`; a kis előnézet `deployment/.local/image-variants-demo-preview.png`.
+A megtartott, valódi poszteres helyi példa: [Local Conan demo](https://localhost:8080/timelines/local-conan-demo-833b49e7-0cf7-4359-8c4a-cdc84ba967e0). A timeline `9146`, három bejegyzése a meglévő `3007/3009/3011` médiákra hivatkozik. Alatta `(images)` SystemFolder `10102`, változatlan aktív generáció Folder `9151`, három standard File `9152–9154` található. A felhasználó későbbi, félbemaradt `10071` készlete és `10072` fájlja is megmaradt. Az átállítás képmásolás helyett standard Move: a generáció-/fájlazonosítók, manifestek, aktív kiválasztás, eredeti és generált SHA-k változatlanok; rekordszám `3009 → 3009`. Alapértelmezett lekérdezés a képrészfára `0`, `.AUTOFILTERS:OFF` mellett `7` találat. Aktuális bizonyíték: ignored `deployment/.local/system-image-storage-2026-11-06/migration-acceptance.json`; a korábbi demó-előnézet `deployment/.local/image-variants-demo-preview.png`.
 
 Kézi próba:
 
