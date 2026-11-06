@@ -85,7 +85,8 @@ function fixture() {
     visible(value = true) { this.observers.at(-1).callback([{ isIntersecting: value }]); },
     focus() { for (const listener of [...(windowEvents.get('focus') ?? [])]) listener(); },
     poll() { for (const timer of [...timers.values()]) timer.listener(); },
-    timers,
+    documentVisibility(value) { document.visibilityState = value; for (const listener of [...(documentEvents.get('visibilitychange') ?? [])]) listener(); },
+    timers, windowEvents, documentEvents,
     restore() {
       globalThis.window = previous.window; globalThis.document = previous.document; globalThis.IntersectionObserver = previous.IntersectionObserver; globalThis.ResizeObserver = previous.ResizeObserver;
       URL.createObjectURL = previous.create; URL.revokeObjectURL = previous.revoke;
@@ -153,46 +154,70 @@ test('a DPR increase upgrades the same CSS slot and a DPR decrease keeps the lar
   } finally { ui.unmount(); state.restore(); }
 });
 
-test('loaded image rechecks its owner presentation on focus: unchanged generation reuses bytes, blocked descriptor revokes the Blob', async () => {
+test('offscreen and loaded images send no idle, focus or visibility requests and register no refresh lifecycle', async () => {
   const state = fixture(), ui = host(() => LazyImage({ image: descriptor, src: 'private-original' }), state.target);
   try {
-    ui.flush(); state.visible(); await settle(ui);
+    ui.flush(); state.focus(); state.poll(); state.documentVisibility('hidden'); state.documentVisibility('visible');
+    await settle(ui); assert.equal(state.requests.length, 0);
+    state.visible(); await settle(ui);
     state.requests[0].resolve(new Response('private-composite')); let tree = await settle(ui);
     find(tree, 'img').props.onLoad({}); ui.flush();
-    assert.equal(state.timers.size, 1); assert.equal([...state.timers.values()][0].delay, 30000);
-    state.focus(); await settle(ui); assert.equal(state.requests[1].path, '/content/1/image-presentation');
-    state.requests[1].resolve(Response.json({ data: { state: 'active', generationId } })); tree = await settle(ui);
+    assert.equal(state.timers.size, 0); assert.equal(state.windowEvents.get('focus')?.size || 0, 0);
+    assert.equal(state.documentEvents.get('visibilitychange')?.size || 0, 0);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      state.focus(); state.poll(); state.documentVisibility('hidden'); state.documentVisibility('visible');
+      tree = await settle(ui);
+    }
     assert.equal(find(tree, 'img').props.src, state.created[0]); assert.equal(state.created.length, 1); assert.deepEqual(state.revoked, []);
-    state.focus(); await settle(ui); state.requests[2].resolve(Response.json({ data: { state: 'blocked' } })); tree = await settle(ui);
-    assert.equal(find(tree, 'img'), undefined); assert.equal(tree.props['data-image-state'], 'blocked'); assert.deepEqual(state.revoked, state.created);
-    assert.equal(state.requests.filter(request => request.path.includes('/images/')).length, 1, 'Metadata refresh must never download image bytes or a legacy original.');
-    assert.equal(state.timers.size, 0);
+    state.visible(false); ui.flush(); state.focus(); state.poll(); state.visible(); tree = await settle(ui);
+    assert.equal(tree.props['data-image-state'], 'loaded'); assert.equal(state.requests.length, 1);
+    assert.match(state.requests[0].path, /\/images\/.*\/w320$/);
   } finally { ui.unmount(); state.restore(); }
 });
 
-test('generated images do not poll offscreen and a visible 403 refresh masks the cached image', async () => {
-  const state = fixture(), ui = host(() => LazyImage({ image: descriptor }), state.target);
+test('explicit permission invalidation revokes cached bytes and a denied fresh image GET fails closed', async () => {
+  const state = fixture(), ui = host(() => LazyImage({ image: descriptor, src: 'private-original' }), state.target);
   try {
-    ui.flush(); state.focus(); state.poll(); await settle(ui); assert.equal(state.requests.length, 0);
-    state.visible(); await settle(ui); state.requests[0].resolve(new Response('private-image')); await settle(ui);
-    state.visible(false); ui.flush(); assert.equal(state.timers.size, 0);
-    state.focus(); state.poll(); await settle(ui); assert.equal(state.requests.length, 1);
-    state.visible(); ui.flush(); state.poll(); await settle(ui); assert.equal(state.requests[1].path, '/content/1/image-presentation');
+    ui.flush(); state.visible(); await settle(ui); state.requests[0].resolve(new Response('private-image')); await settle(ui);
+    state.invalidate(); assert.equal(find(ui.render(), 'img'), undefined); ui.flush();
+    assert(state.requests[0].options.signal.aborted); assert.deepEqual(state.revoked, state.created);
+    assert.equal(state.requests.length, 1, 'invalidation requires a fresh viewport observation before another image fetch');
+    state.visible(); await settle(ui); assert.equal(state.requests.length, 2);
+    assert.equal(state.requests[1].path, state.requests[0].path); assert.equal(state.requests[1].options.cache, 'no-store');
     state.requests[1].resolve(new Response('{}', { status: 403 })); const tree = await settle(ui);
-    assert.equal(find(tree, 'img'), undefined); assert.deepEqual(state.revoked, state.created); assert.equal(tree.props['data-image-state'], 'blocked');
+    assert.equal(find(tree, 'img'), undefined); assert.deepEqual(state.revoked, state.created); assert.equal(tree.props['data-image-state'], 'error');
+    state.focus(); state.poll(); await settle(ui); assert.equal(state.requests.length, 2, 'a denial never fetches the original source');
   } finally { ui.unmount(); state.restore(); }
 });
 
-test('stale or replaced generations revoke a visible composite without fetching replacement or legacy bytes', async () => {
-  for (const changed of [{ state: 'stale', generationId }, { state: 'active', generationId: '87654321-1234-4123-8123-123456789abc' }]) {
-    const state = fixture(), ui = host(() => LazyImage({ image: descriptor, src: 'legacy-original' }), state.target);
+test('an explicit blocked, stale or missing descriptor masks and revokes a loaded composite without fallback', async () => {
+  for (const status of ['blocked', 'stale', 'missing']) {
+    const state = fixture(); let image = descriptor;
+    const ui = host(() => LazyImage({ image, src: 'legacy-original' }), state.target);
     try {
       ui.flush(); state.visible(); await settle(ui); state.requests[0].resolve(new Response('old-composite')); await settle(ui);
-      state.focus(); await settle(ui); state.requests[1].resolve(Response.json({ data: changed })); const tree = await settle(ui);
-      assert.equal(find(tree, 'img'), undefined); assert.deepEqual(state.revoked, state.created); assert.equal(state.requests.length, 2);
-      assert.equal(tree.props['data-image-state'], changed.state === 'stale' ? 'stale' : 'blocked');
+      image = { ...descriptor, state: status };
+      assert.equal(find(ui.render(), 'img'), undefined); const tree = await settle(ui);
+      assert.equal(find(tree, 'img'), undefined); assert.deepEqual(state.revoked, state.created); assert.equal(state.requests.length, 1);
+      assert(state.requests[0].options.signal.aborted); assert.equal(tree.props['data-image-state'], status);
     } finally { ui.unmount(); state.restore(); }
   }
+});
+
+test('an explicit replacement generation requires fresh viewport loading and never reuses the old Blob', async () => {
+  const state = fixture(); let image = descriptor;
+  const ui = host(() => LazyImage({ image, src: 'legacy-original' }), state.target);
+  try {
+    ui.flush(); state.visible(); await settle(ui); state.requests[0].resolve(new Response('old-composite')); await settle(ui);
+    const nextGeneration = '87654321-1234-4123-8123-123456789abc';
+    image = { ...descriptor, generationId: nextGeneration, variants: descriptor.variants.map(variant => ({ ...variant, url: variant.url.replace(generationId, nextGeneration) })) };
+    assert.equal(find(ui.render(), 'img'), undefined); ui.flush();
+    assert.deepEqual(state.revoked, state.created); assert(state.requests[0].options.signal.aborted);
+    assert.equal(state.requests.length, 1);
+    state.visible(); await settle(ui); assert.equal(state.requests.length, 2); assert(state.requests[1].path.includes(nextGeneration));
+    state.requests[1].resolve(new Response('new-composite')); const tree = await settle(ui);
+    assert.equal(find(tree, 'img').props.src, state.created[1]); assert.equal(state.revoked.length, 1);
+  } finally { ui.unmount(); state.restore(); }
 });
 
 test('blocked, missing and stale descriptors never fetch the legacy source; 403 does not retry an original', async () => {

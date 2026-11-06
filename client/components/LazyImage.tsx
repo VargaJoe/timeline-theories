@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { captureOperationContext, subscribePermissions } from '../services/sensenet';
 import { useSharedAuth } from '../context/useSharedAuth';
-import { fetchImageBlob, imageRequestQueue, nativeImagePresentationTarget, readNativeImagePresentation } from '../utils/imageLoading';
+import { fetchImageBlob, imageRequestQueue } from '../utils/imageLoading';
 import { selectImageUrl, type ImageDescriptor } from '../utils/imageVariants';
 
 export interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src' | 'loading' | 'srcSet' | 'sizes'> {
@@ -18,11 +18,8 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
   const requestKey = JSON.stringify([src, descriptor, accessToken, user?.Id, user?.sub, isLoading, revision]);
   const [slot, setSlot] = useState<{ key: string; width: number; dpr: number; visible: boolean }>();
   const [image, setImage] = useState<{ key: string; source?: string; loaded: boolean; error: boolean }>();
-  const [rejected, setRejected] = useState<{ key: string; state: 'blocked' | 'stale' | 'missing' }>();
-  const rejectedHere = rejected?.key === requestKey;
-  const current = image?.key === requestKey && !rejectedHere ? image : undefined;
-  const blocked = rejectedHere || !!descriptor && !['active', 'legacy'].includes(descriptor.state);
-  const releaseImage = useRef<{ key: string; release: () => void }>();
+  const current = image?.key === requestKey ? image : undefined;
+  const blocked = !!descriptor && !['active', 'legacy'].includes(descriptor.state);
 
   useEffect(() => {
     const target = element.current;
@@ -74,43 +71,11 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
       ? previous : { key: requestKey, url: selectedUrl, width: selectedWidth });
   }, [selectedUrl, selectedWidth, requestKey]);
 
-  const visible = slot?.key === requestKey && slot.visible;
-  const presentation = descriptor?.state === 'active' && selection?.key === requestKey
-    ? nativeImagePresentationTarget(selection.url, descriptor.generationId) : undefined;
-  const presentationPath = presentation?.path, generationId = presentation?.generationId;
-  useEffect(() => {
-    if (!visible || blocked || !presentationPath || !generationId || isLoading) return;
-    const controller = new AbortController(), checkContext = captureOperationContext();
-    let pending = false;
-    const active = () => { if (controller.signal.aborted) return false; try { checkContext(); return true; } catch { return false; } };
-    const reject = (state: 'blocked' | 'stale' | 'missing') => {
-      if (!active()) return;
-      if (releaseImage.current?.key === requestKey) releaseImage.current.release();
-      setRejected({ key: requestKey, state });
-    };
-    const refresh = async () => {
-      if (pending || !active() || document.visibilityState === 'hidden') return;
-      pending = true;
-      try {
-        const result = await readNativeImagePresentation(presentationPath, { signal: controller.signal, assertContext: checkContext });
-        if (!active()) return;
-        if (result.state !== 'active' || result.generationId !== generationId) reject(result.state === 'stale' ? 'stale' : result.state === 'missing' ? 'missing' : 'blocked');
-      } catch { reject('blocked'); }
-      finally { pending = false; }
-    };
-    const onFocus = () => { void refresh(); };
-    const timer = window.setInterval(onFocus, 30_000);
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
-    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
-  }, [visible, blocked, presentationPath, generationId, requestKey, isLoading]);
-
   useEffect(() => {
     if (!selection || selection.key !== requestKey || isLoading || blocked) return;
     const controller = new AbortController(), checkContext = captureOperationContext();
     let objectUrl: string | undefined;
     const release = () => { controller.abort(); if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = undefined; } };
-    releaseImage.current = { key: requestKey, release };
     const active = () => {
       if (controller.signal.aborted) return false;
       try { checkContext(); return true; } catch { return false; }
@@ -123,14 +88,14 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
     }, controller.signal).catch(() => {
       if (active()) setImage({ key: requestKey, loaded: false, error: true });
     });
-    return () => { release(); if (releaseImage.current?.release === release) releaseImage.current = undefined; };
+    return release;
   }, [selection, requestKey, isLoading, blocked, accessToken]);
 
   const isLoaded = current?.loaded === true;
   const imageStyle: React.CSSProperties = { display: 'block', width: '100%', height: '100%', objectFit: style?.objectFit ?? 'cover', transition: 'opacity 0.3s ease-in-out', opacity: isLoaded ? 1 : 0 };
   const wrapperStyle: React.CSSProperties = { width: '100%', height: '100%', overflow: 'hidden', ...style, position: style?.position ?? 'relative' };
   const placeholderStyle: React.CSSProperties = { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 14, background: style?.background ?? style?.backgroundColor ?? '#f0f0f0' };
-  return <div ref={element} style={wrapperStyle} data-image-state={rejectedHere ? rejected.state : blocked ? descriptor?.state : current?.error ? 'error' : isLoaded ? 'loaded' : 'pending'}>
+  return <div ref={element} style={wrapperStyle} data-image-state={blocked ? descriptor?.state : current?.error ? 'error' : isLoaded ? 'loaded' : 'pending'}>
     {!isLoaded && <div style={placeholderStyle} role="img" aria-label={alt}>{placeholder || '📷'}</div>}
     {current?.source && <img {...restProps} src={current.source} alt={alt} className={className} style={imageStyle}
       onLoad={event => { if (current.key === requestKey) setImage(previous => previous?.key === requestKey ? { ...previous, loaded: true } : previous); onLoad?.(event); }}

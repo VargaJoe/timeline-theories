@@ -1,5 +1,5 @@
 /** Caller-bound UI hints only. Actual writes still use the fresh operation guard. */
-export function createDisplayPermissions({ identity, writable, load, ready, now = Date.now, ttlMs = 30_000, concurrency = 4 }) {
+export function createDisplayPermissions({ identity, writable, load, ready, now = Date.now, ttlMs = Infinity, concurrency = 4 }) {
   let subject = identity(), revision = 0, active = 0;
   const records = new Map(), flights = new Map(), queue = [];
   const key = target => typeof target === 'number' && Number.isSafeInteger(target) && target > 0 || typeof target === 'string' && /^[1-9][0-9]*$/.test(target) && Number.isSafeInteger(Number(target))

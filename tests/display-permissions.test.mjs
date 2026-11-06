@@ -179,10 +179,24 @@ test('simultaneous checks coalesce the same target read', async () => {
   assert.equal(f.loads.length, 1);
 });
 
-test('default 30 second TTL reuses fresh content and reloads expired hints', async () => {
+test('default display hints remain snapshots until explicit invalidation or fresh content', async () => {
   const f = fixture();
   f.store.remember(content());
   assert.equal(await f.store.can([operation(7, 'update')]), true);
+  f.setNow(86_500_000);
+  assert.equal(await f.store.can([operation(7, 'update')]), true);
+  assert.equal(f.loads.length, 0);
+  f.store.remember(content(7, [{ Name: 'Edit', Forbidden: true }]));
+  assert.equal(await f.store.can([operation(7, 'update')]), false);
+  assert.equal(f.loads.length, 0, 'A newly loaded Actions response replaces the displayed snapshot.');
+  f.store.invalidate();
+  assert.equal(await f.store.can([operation(7, 'update')]), true);
+  assert.equal(f.loads.length, 1, 'Explicit invalidation obtains current metadata.');
+});
+
+test('an explicitly requested TTL expires hints without installing a background refresh', async () => {
+  const f = fixture({ ttlMs: 30_000 });
+  f.store.remember(content());
   f.setNow(129_999);
   assert.equal(await f.store.can([operation(7, 'update')]), true);
   assert.equal(f.loads.length, 0);
@@ -191,7 +205,7 @@ test('default 30 second TTL reuses fresh content and reloads expired hints', asy
   assert.equal(f.loads.length, 1);
 });
 
-test('focus refreshSince observes revoked rights and reuses the denial fetched at the threshold', async () => {
+test('explicit refreshSince observes revoked rights and reuses the denial fetched at the threshold', async () => {
   const f = fixture({ load: async () => content(7, [{ Name: 'Edit', Forbidden: true }]) });
   f.store.remember(content());
   f.setNow(102_000);

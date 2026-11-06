@@ -214,7 +214,7 @@ test('a late allowed permission response cannot authorize the next identity', as
   } finally { ui.unmount(); }
 });
 
-test('20 permission consumers share one refresh lifecycle and release it after the last unmount', () => {
+test('20 permission consumers make no idle/focus/visibility refresh and still honor explicit invalidation', async () => {
   function lifecycleFixture() {
     const state = fixture(), intervals = new Map(), windowEvents = new Map(), documentEvents = new Map();
     const added = { interval: 0, focus: 0, visibilitychange: 0 };
@@ -237,35 +237,36 @@ test('20 permission consumers share one refresh lifecycle and release it after t
     return { state, intervals, added, assertResources, focus: () => emit(windowEvents, 'focus'), visible: () => emit(documentEvents, 'visibilitychange') };
   }
   const session = lifecycleFixture(), mounted = new Set(), originalNow = Date.now;
-  let time = 1_000;
   try {
     for (let target = 1; target <= 20; target++) {
       const ui = host(() => ({ props: { children: String(usePermissions([{ target, action: 'read' }])) } }));
       mounted.add(ui); ui.flush();
     }
     assert.equal(session.state.permissions.length, 20);
-    session.assertResources(1); assert.deepEqual(session.added, { interval: 1, focus: 1, visibilitychange: 1 });
-    assert.equal([...session.intervals.values()][0].delay, 30_000);
-    Date.now = () => ++time;
-    for (const dispatch of [() => [...session.intervals.values()][0].run(), session.focus, session.visible]) {
-      const start = session.state.permissions.length, expectedSince = time + 1;
-      dispatch();
-      const refreshed = session.state.permissions.slice(start);
-      assert.equal(refreshed.length, 20, 'one shared event refreshes every mounted consumer synchronously');
-      assert.deepEqual(refreshed.map(call => call.operations[0].target), Array.from({ length: 20 }, (_, index) => index + 1));
-      assert.ok(refreshed.every(call => call.options.refreshSince === expectedSince), 'every consumer receives the same event timestamp');
-      assert.equal(time, expectedSince, 'a refresh event captures the clock once');
+    session.assertResources(0); assert.deepEqual(session.added, { interval: 0, focus: 0, visibilitychange: 0 });
+    for (const pending of session.state.permissions) pending.resolve(true);
+    for (const ui of mounted) await settle(ui);
+    Date.now = () => 86_500_000;
+    for (let event = 0; event < 3; event++) {
+      session.focus(); session.visible();
+      for (const timer of session.intervals.values()) timer.run();
+      for (const ui of mounted) await settle(ui);
     }
+    assert.equal(session.state.permissions.length, 20, 'a loaded content view is not a live service');
+    session.state.invalidate();
+    for (const ui of mounted) ui.flush();
+    assert.equal(session.state.permissions.length, 40, 'explicit app invalidation still rechecks each mounted consumer');
+    assert.deepEqual(session.state.permissions.slice(20).map(call => call.operations[0].target), Array.from({ length: 20 }, (_, index) => index + 1));
     const consumers = [...mounted];
     for (const ui of consumers.slice(0, -1)) { ui.unmount(); mounted.delete(ui); }
-    session.assertResources(1); assert.equal(session.state.listeners.size, 1);
+    session.assertResources(0); assert.equal(session.state.listeners.size, 1);
     consumers.at(-1).unmount(); mounted.clear();
     session.assertResources(0); assert.equal(session.state.listeners.size, 0);
 
     const next = lifecycleFixture(), remounted = host(() => ({ props: { children: String(usePermissions([{ target: 99, action: 'read' }])) } }));
-    mounted.add(remounted); remounted.flush(); next.assertResources(1);
-    assert.deepEqual(next.added, { interval: 1, focus: 1, visibilitychange: 1 });
-    next.focus(); assert.equal(next.state.permissions.length, 2, 'the next fixture must not inherit earlier consumers');
+    mounted.add(remounted); remounted.flush(); next.assertResources(0);
+    assert.deepEqual(next.added, { interval: 0, focus: 0, visibilitychange: 0 });
+    next.focus(); assert.equal(next.state.permissions.length, 1, 'the next fixture must not inherit earlier consumers');
     remounted.unmount(); mounted.clear(); next.assertResources(0);
   } finally {
     for (const ui of mounted) ui.unmount();
