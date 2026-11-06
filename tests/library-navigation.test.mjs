@@ -40,7 +40,8 @@ export const useNavigate=()=>()=>{};
 export const useSearchParams=()=>{const state=globalThis.__libraryNavigationFixture;return [state.searchParams,value=>{state.searchParams=value;}];};`);
 const checked = moduleUrl(`
 export const subscribePermissions=listener=>{const state=globalThis.__libraryNavigationFixture;state.listeners.add(listener);return ()=>state.listeners.delete(listener);};
-export const canOperations=operations=>globalThis.__libraryNavigationFixture.canOperations(operations);
+export const canDisplayOperations=(operations,options)=>globalThis.__libraryNavigationFixture.canDisplayOperations(operations,options);
+export const canOperations=()=>{throw Error('UI display must not invoke the fresh write guard');};
 export const captureOperationContext=()=>{const state=globalThis.__libraryNavigationFixture,epoch=state.epoch;return ()=>{if(epoch!==state.epoch)throw Error('identity or permissions changed');};};
 export const loadBackgroundImage=async()=>null;
 export const assertOperations=async()=>{};
@@ -84,9 +85,9 @@ function fixture() {
   const state = {
     auth: { isAuthenticated: true, isLoading: false, accessToken: 'owner-one', user: { sub: 'owner-one' } },
     epoch: 0, listeners: new Set(), permissions: [], requests: [], searchParams: new URLSearchParams('filter=a'),
-    canOperations(operations) {
+    canDisplayOperations(operations, options) {
       if (operations.some(operation => operation.action !== 'read')) return Promise.resolve(false);
-      const pending = deferred(); this.permissions.push({ operations, ...pending }); return pending.promise;
+      const pending = deferred(); this.permissions.push({ operations, options, ...pending }); return pending.promise;
     },
     request(kind, args) {
       const pending = deferred(); this.requests.push({ kind, args, ...pending }); return pending.promise;
@@ -211,6 +212,65 @@ test('a late allowed permission response cannot authorize the next identity', as
     earlierIdentity.resolve(true); await settle(ui);
     assert.equal(text(ui.render()), 'denied');
   } finally { ui.unmount(); }
+});
+
+test('20 permission consumers share one refresh lifecycle and release it after the last unmount', () => {
+  function lifecycleFixture() {
+    const state = fixture(), intervals = new Map(), windowEvents = new Map(), documentEvents = new Map();
+    const added = { interval: 0, focus: 0, visibilitychange: 0 };
+    const add = (events, type, listener) => { if (!events.has(type)) events.set(type, new Set()); events.get(type).add(listener); added[type]++; };
+    const remove = (events, type, listener) => events.get(type)?.delete(listener);
+    globalThis.window = {
+      addEventListener: (type, listener) => add(windowEvents, type, listener),
+      removeEventListener: (type, listener) => remove(windowEvents, type, listener),
+      setInterval: (run, delay) => { const id = ++added.interval; intervals.set(id, { run, delay }); return id; },
+      clearInterval: id => intervals.delete(id),
+    };
+    globalThis.document = { visibilityState: 'visible',
+      addEventListener: (type, listener) => add(documentEvents, type, listener),
+      removeEventListener: (type, listener) => remove(documentEvents, type, listener) };
+    const emit = (events, type) => { for (const listener of events.get(type) || []) listener(); };
+    const assertResources = count => {
+      assert.equal(intervals.size, count); assert.equal(windowEvents.get('focus')?.size || 0, count);
+      assert.equal(documentEvents.get('visibilitychange')?.size || 0, count);
+    };
+    return { state, intervals, added, assertResources, focus: () => emit(windowEvents, 'focus'), visible: () => emit(documentEvents, 'visibilitychange') };
+  }
+  const session = lifecycleFixture(), mounted = new Set(), originalNow = Date.now;
+  let time = 1_000;
+  try {
+    for (let target = 1; target <= 20; target++) {
+      const ui = host(() => ({ props: { children: String(usePermissions([{ target, action: 'read' }])) } }));
+      mounted.add(ui); ui.flush();
+    }
+    assert.equal(session.state.permissions.length, 20);
+    session.assertResources(1); assert.deepEqual(session.added, { interval: 1, focus: 1, visibilitychange: 1 });
+    assert.equal([...session.intervals.values()][0].delay, 30_000);
+    Date.now = () => ++time;
+    for (const dispatch of [() => [...session.intervals.values()][0].run(), session.focus, session.visible]) {
+      const start = session.state.permissions.length, expectedSince = time + 1;
+      dispatch();
+      const refreshed = session.state.permissions.slice(start);
+      assert.equal(refreshed.length, 20, 'one shared event refreshes every mounted consumer synchronously');
+      assert.deepEqual(refreshed.map(call => call.operations[0].target), Array.from({ length: 20 }, (_, index) => index + 1));
+      assert.ok(refreshed.every(call => call.options.refreshSince === expectedSince), 'every consumer receives the same event timestamp');
+      assert.equal(time, expectedSince, 'a refresh event captures the clock once');
+    }
+    const consumers = [...mounted];
+    for (const ui of consumers.slice(0, -1)) { ui.unmount(); mounted.delete(ui); }
+    session.assertResources(1); assert.equal(session.state.listeners.size, 1);
+    consumers.at(-1).unmount(); mounted.clear();
+    session.assertResources(0); assert.equal(session.state.listeners.size, 0);
+
+    const next = lifecycleFixture(), remounted = host(() => ({ props: { children: String(usePermissions([{ target: 99, action: 'read' }])) } }));
+    mounted.add(remounted); remounted.flush(); next.assertResources(1);
+    assert.deepEqual(next.added, { interval: 1, focus: 1, visibilitychange: 1 });
+    next.focus(); assert.equal(next.state.permissions.length, 2, 'the next fixture must not inherit earlier consumers');
+    remounted.unmount(); mounted.clear(); next.assertResources(0);
+  } finally {
+    for (const ui of mounted) ui.unmount();
+    Date.now = originalNow;
+  }
 });
 
 for (const [kind, Component] of pages) {

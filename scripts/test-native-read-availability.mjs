@@ -10,15 +10,27 @@ const response = (data, status = 200) => new Response(JSON.stringify(data), { st
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 let fixtureCount = 0;
-async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt', coverRows } = {}) {
+async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt', coverRows, actions, childTypes = [{ Name: 'MediaItem' }], permissionRows } = {}) {
   const environment = { mode, repositoryUrl: 'https://repo.test', authority: 'https://auth.test', projectRoot: '/Root/Content/timelines', writable: true };
   globalThis.window = { location: { origin: 'https://ui.test' } };
   globalThis.__availabilityEnvironment = environment;
   const rawCalls = [], rawWrites = [], aclCalls = [], childTypeCalls = [], nativeCalls = [];
+  const permissionState = { readAllowed, writeAllowed, actions, childTypes, permissionRows, beforeBatch: undefined, beforeContent: undefined };
   const snapshot = id => ({ Id: id, ParentId: 5, Name: 'media' + id, Path: environment.projectRoot + '/MediaLibrary/media' + id,
     Type: 'MediaItem', revision: 'gw:fixture-hash:4', Title: 'Native title', DisplayName: 'Native title', Description: '' });
   const capabilities = () => ({ repository: environment.repositoryUrl, authority: environment.authority, project: environment.projectRoot,
     readOnly, operations: ['lookup', 'snapshots', 'plans', 'plans/{id}/apply'], backendProtocolRequired: 'gateway-coordinated-v1' });
+  const permissionContent = target => ({ ...snapshot(typeof target === 'number' ? target : 1),
+    ...(typeof target === 'string' ? { Path: target } : {}),
+    Actions: permissionState.actions === undefined ? ['Edit', 'Add', 'Delete'].map(Name => ({ Name, Forbidden: !permissionState.writeAllowed })) : permissionState.actions,
+    EffectiveAllowedChildTypes: permissionState.childTypes });
+  const permissionBatch = url => {
+    const query = url.searchParams.get('query') || '';
+    const targets = [...query.matchAll(/\bId:([0-9]+)/g)].map(match => Number(match[1]));
+    targets.push(...[...query.matchAll(/\bPath:("(?:\\.|[^"\\])*")/g)].map(match => JSON.parse(match[1])));
+    const rows = targets.map(permissionContent);
+    return permissionState.permissionRows === undefined ? rows : typeof permissionState.permissionRows === 'function' ? permissionState.permissionRows(rows) : permissionState.permissionRows;
+  };
   globalThis.fetch = async (url, init) => {
     const path = new URL(url).pathname; nativeCalls.push({ path, init });
     const headers = new Headers(init.headers);
@@ -47,29 +59,41 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
     constructor() {
       this.configuration = { repositoryUrl: environment.repositoryUrl, token: token || undefined };
       this.security = { hasPermission: async (target, permissions) => {
-        aclCalls.push({ target, permissions, token: this.configuration.token }); return permissions.includes('Open') ? readAllowed : writeAllowed;
+        aclCalls.push({ target, permissions, token: this.configuration.token }); throw new Error('HasPermission must never be requested');
       } };
-      this.allowedChildTypes = { get: async target => { childTypeCalls.push(target); return { d: { results: [{ Name: 'MediaItem' }] } }; } };
+      this.allowedChildTypes = { get: async target => { childTypeCalls.push(target); throw new Error('Child types must come from the compound descriptor'); } };
     }
     async awaitReadyState() {}
     async fetch(url, init = {}) {
-      rawCalls.push({ url, method: init.method || 'GET', token: this.configuration.token });
-      if (!readAllowed) return response({ error: 'Forbidden' }, 403);
+      const parsed = new URL(url), call = { url, method: init.method || 'GET', token: this.configuration.token };
+      rawCalls.push(call);
+      if (call.method !== 'GET' && call.method !== 'HEAD') { rawWrites.push(call); throw new Error('Unexpected raw write'); }
+      if (!permissionState.readAllowed) return response({ error: 'Forbidden' }, 403);
+      if (parsed.searchParams.get('$expand') === 'Actions,EffectiveAllowedChildTypes') {
+        if (parsed.searchParams.has('query')) {
+          await permissionState.beforeBatch?.(call);
+          return response({ d: { results: permissionBatch(parsed) } });
+        }
+        const target = decodeURIComponent(parsed.pathname).match(/^\/odata\.svc\/content\(([0-9]+)\)$/)?.[1];
+        return response({ d: permissionContent(target ? Number(target) : environment.projectRoot + '/MediaLibrary/media1') });
+      }
+      await permissionState.beforeContent?.(call);
       const value = { ...snapshot(1), revision: undefined, Title: 'Raw permitted title', DisplayName: 'Raw permitted title' };
+      if (this.configuration.token) value.Actions = permissionContent(1).Actions;
       return response({ d: new URL(url).searchParams.has('query') ? { results: coverRows ?? [value] } : value });
     }
+    async json(url, init) { const result = await this.fetch(url, init); if (!result.ok) throw new Error('Permission denied by repository GET'); return result.json(); }
     async load(options) {
-      return (await this.fetch(environment.repositoryUrl + '/odata.svc/content(' + options.idOrPath + ')?$select=' + (options.oDataOptions?.select || []).join(',') + '&$top=1000', { method: 'GET' })).json();
+      return this.json(environment.repositoryUrl + '/odata.svc/content(' + options.idOrPath + ')?$select=' + (options.oDataOptions?.select || []).join(',') + '&$top=1000', { method: 'GET' });
     }
     async loadCollection(options) {
-      return (await this.fetch(environment.repositoryUrl + '/odata.svc' + options.path + '?query=TypeIs%3AMediaItem&$top=100', { method: 'GET' })).json();
+      return this.json(environment.repositoryUrl + '/odata.svc' + options.path + '?query=TypeIs%3AMediaItem&$top=100', { method: 'GET' });
     }
     async patch(options) {
-      rawWrites.push({ action: 'update', options });
-      return (await this.fetch(environment.repositoryUrl + '/odata.svc/content(' + options.idOrPath + ')', { method: 'PATCH', body: JSON.stringify(options.content) })).json();
+      return this.json(environment.repositoryUrl + '/odata.svc/content(' + options.idOrPath + ')', { method: 'PATCH', body: JSON.stringify(options.content) });
     }
-    async post(options) { rawWrites.push({ action: 'create', options }); throw new Error('Unexpected raw write'); }
-    async delete(options) { rawWrites.push({ action: 'delete', options }); throw new Error('Unexpected raw write'); }
+    async post(options) { return this.json(environment.repositoryUrl + '/odata.svc/content(' + options.parentPath + ')', { method: 'POST', body: JSON.stringify({ __ContentType: options.contentType, ...options.content }) }); }
+    async delete(options) { return this.json(environment.repositoryUrl + '/odata.svc/Root/Content/DeleteBatch', { method: 'POST', body: JSON.stringify({ paths: [].concat(options.idOrPath), permanent: false }) }); }
   }
   globalThis.__availabilityRepository = MockRepository;
   const nonce = '\n// availability fixture ' + ++fixtureCount;
@@ -82,28 +106,44 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
     .replace("import { Repository } from '@sensenet/client-core';", 'const Repository=globalThis.__availabilityRepository;')
     .replace("import { repositoryUrl, environment } from '../configuration';", 'const environment=globalThis.__availabilityEnvironment;const repositoryUrl=environment.repositoryUrl;')
     .replace("from './operationGuard.mjs'", 'from ' + JSON.stringify(new URL('client/services/operationGuard.mjs', root).href))
+    .replace("from './displayPermissions.mjs'", 'from ' + JSON.stringify(new URL('client/services/displayPermissions.mjs', root).href))
     .replace("from '../domain/content.mjs'", 'from ' + JSON.stringify(new URL('client/domain/content.mjs', root).href))
     .replace("from './nativeApi'", 'from ' + JSON.stringify(nativeUrl));
   const sense = await import(compile(senseSource + nonce));
   const load = () => sense.repository.load({ idOrPath: 1, oDataOptions: { select: ['Id', 'Title', 'DisplayName'] } });
-  return { native, sense, load, rawCalls, rawWrites, aclCalls, childTypeCalls, nativeCalls, environment };
+  return { native, sense, load, rawCalls, rawWrites, aclCalls, childTypeCalls, nativeCalls, environment, permissionState };
 }
 let checks = 0;
 async function test(name, run) { await run(); checks++; process.stdout.write('PASS ' + name + '\n'); }
+function assertCompound(call, targets) {
+  const url = new URL(call.url), query = url.searchParams.get('query') || '';
+  assert.equal(call.method, 'GET');
+  assert.equal(decodeURIComponent(url.pathname), '/odata.svc/Root/Content/timelines');
+  assert.equal(url.searchParams.get('$select'), 'Id,Path,Actions/Name,Actions/Forbidden,EffectiveAllowedChildTypes/Name');
+  assert.equal(url.searchParams.get('$expand'), 'Actions,EffectiveAllowedChildTypes');
+  assert.equal(url.searchParams.get('metadata'), 'no');
+  assert.ok(Number(url.searchParams.get('$top')) >= targets.length);
+  assert.match(query, /\.AUTOFILTERS:OFF \.LIFESPAN:OFF/);
+  const actual = [...query.matchAll(/\bId:([0-9]+)/g)].map(match => Number(match[1]));
+  actual.push(...[...query.matchAll(/\bPath:("(?:\\.|[^"\\])*")/g)].map(match => JSON.parse(match[1])));
+  assert.deepEqual(actual.map(String).sort(), [...new Set(targets)].map(String).sort());
+  assert.doesNotMatch(url.pathname, /HasPermission/i);
+}
 async function main() {
-  await test('display-only covers keep exact Open checks without requesting editor snapshots', async () => {
+  await test('display-only covers use one exact authorized projection without editor snapshots or Open preflight', async () => {
     const root = '/Root/Content/timelines';
     const f = await fixture({ discovery: 'ready', token: '', coverRows: [{ Id: 3, Type: 'TimelineEntry', Path: root + '/Timelines/Conan the Barbarian/entry',
       MediaItem: { Id: 4, Type: 'MediaItem', Path: root + '/MediaLibrary/media', CoverImageUrl: 'https://covers.test/cover.jpg' } }] });
     const rows = await f.sense.readTimelineCoverReferences(f.environment.projectRoot + '/Timelines/Conan the Barbarian');
     assert.equal(rows.length, 1);
-    assert.equal(f.rawCalls.length, 2, 'Exact Open GET plus fixed cover projection');
-    const url = new URL(f.rawCalls[1].url);
+    assert.equal(f.rawCalls.length, 1, 'The projection GET itself enforces repository access');
+    const url = new URL(f.rawCalls[0].url);
     assert.equal(decodeURIComponent(url.pathname), '/odata.svc' + f.environment.projectRoot + '/Timelines/Conan the Barbarian');
     assert.equal(url.searchParams.get('$top'), '50');
     assert.equal(url.searchParams.get('$expand'), 'MediaItem');
     assert.equal(url.searchParams.get('$select'), 'Id,Path,Name,Type,MediaItem/Id,MediaItem/Path,MediaItem/Type,MediaItem/CoverImageUrl,MediaItem/CoverImageBin');
     assert.equal(f.nativeCalls.length, 0);
+    assert.equal(f.aclCalls.length, 0);
     assert.equal(f.rawWrites.length, 0);
   });
   await test('cover projection rejects cross-project and wrong-type entries or expanded media', async () => {
@@ -121,11 +161,12 @@ async function main() {
       await assert.rejects(f.sense.readTimelineCoverReferences(root + '/Timelines/example'));
     }
   });
-  await test('cover projection fails closed on denied Open, invalid path and aborted view', async () => {
+  await test('cover projection fails closed on denied GET, invalid path and aborted view', async () => {
     const f = await fixture({ discovery: 'ready', token: '', readAllowed: false });
     const target = f.environment.projectRoot + '/Timelines/example';
     await assert.rejects(f.sense.readTimelineCoverReferences(target));
-    assert.equal(f.rawCalls.length, 1, 'Denied Open must not dispatch a cover query');
+    assert.equal(f.rawCalls.length, 1, 'The denied exact projection is the only request');
+    assert.equal(new URL(f.rawCalls[0].url).searchParams.get('$expand'), 'MediaItem');
     const count = f.rawCalls.length;
     for (const path of [f.environment.projectRoot + '/MediaLibrary/example', target + '/child', target + '?query=x', target + '#fragment']) {
       await assert.rejects(f.sense.readTimelineCoverReferences(path), /Invalid timeline cover target/);
@@ -135,6 +176,18 @@ async function main() {
     const controller = new AbortController(); controller.abort();
     await assert.rejects(allowed.sense.readTimelineCoverReferences(target, controller.signal), error => error.name === 'AbortError');
     assert.equal(allowed.rawCalls.length, 0);
+  });
+  for (const change of ['identity', 'abort']) await test('cover projection discards an in-flight response after ' + change, async () => {
+    const root = '/Root/Content/timelines', target = root + '/Timelines/example';
+    const f = await fixture({ discovery: 'ready', coverRows: [{ Id: 3, Type: 'TimelineEntry', Path: target + '/entry' }] });
+    const gate = deferred(), controller = new AbortController();
+    f.permissionState.beforeContent = () => gate.promise;
+    const pending = assert.rejects(f.sense.readTimelineCoverReferences(target, controller.signal),
+      error => change === 'abort' ? error.name === 'AbortError' : /context changed/i.test(error.message));
+    await tick(); assert.equal(f.rawCalls.length, 1);
+    if (change === 'abort') controller.abort(); else f.sense.setRepositoryAccessToken('next-cover-identity');
+    gate.resolve(); await pending;
+    assert.equal(f.rawCalls.length, 1); assert.equal(f.aclCalls.length, 0); assert.equal(f.nativeCalls.length, 0);
   });
   const writeOperations = ['update', 'create', 'upload', 'delete'].map(action => ({ target: 1, action, ...(action === 'create' ? { contentType: 'MediaItem' } : {}) }));
   for (const operation of writeOperations) await test('anonymous ' + operation.action + ' checks stop before all readiness, ACL and write requests', async () => {
@@ -154,12 +207,12 @@ async function main() {
     assert.equal(f.rawCalls.length, 0);
     assert.equal(f.rawWrites.length, 0);
   });
-  await test('anonymous Open proves the exact backend GET and retains native snapshot reads', async () => {
+  await test('anonymous read uses the exact backend GET once and retains native snapshot reads', async () => {
     const f = await fixture({ discovery: 'ready', token: '' });
     assert.equal((await f.load()).d.Title, 'Native title');
-    assert.equal(f.rawCalls.length, 2);
+    assert.equal(f.rawCalls.length, 1);
     assert.equal(new URL(f.rawCalls[0].url).pathname, '/odata.svc/content(1)');
-    assert.equal(new URL(f.rawCalls[0].url).searchParams.get('$select'), 'Id');
+    assert.equal(new URL(f.rawCalls[0].url).searchParams.get('$select'), 'Id,Title,DisplayName,Path');
     assert.ok(f.rawCalls.every(call => call.method === 'GET' && call.token === undefined));
     assert.ok(f.nativeCalls.some(call => call.path.endsWith('/lookup')));
     assert.equal(f.aclCalls.length, 0);
@@ -175,34 +228,126 @@ async function main() {
     assert.equal(f.aclCalls.length, 0);
     assert.equal(f.rawWrites.length, 0);
   });
-  await test('anonymous Open fails closed when the exact backend GET is denied', async () => {
+  await test('anonymous read guard and actual backend GET both fail closed on denial', async () => {
     const f = await fixture({ discovery: 'ready', token: '', readAllowed: false });
     assert.equal(await f.sense.canOperations([{ target: 1, action: 'read' }]), false);
     await assert.rejects(f.load(), /Permission denied/);
-    assert.ok(f.rawCalls.every(call => call.method === 'GET' && new URL(call.url).searchParams.get('$select') === 'Id'));
+    assert.equal(f.rawCalls.length, 2, 'Explicit guard review and actual load each make their own GET');
+    assert.ok(f.rawCalls.every(call => call.method === 'GET'));
+    assert.equal(new URL(f.rawCalls[1].url).pathname, '/odata.svc/content(1)');
     assert.equal(f.aclCalls.length, 0);
     assert.equal(f.rawWrites.length, 0);
   });
-  for (const writeAllowed of [true, false]) await test('authenticated write checks preserve backend ACL ' + (writeAllowed ? 'approval' : 'denial'), async () => {
+  for (const writeAllowed of [true, false]) await test('fresh authenticated Actions preserve backend ' + (writeAllowed ? 'approval' : 'denial'), async () => {
     const f = await fixture({ discovery: 'ready', writeAllowed });
     for (const operation of writeOperations) {
       assert.equal(await f.sense.canOperations([operation]), writeAllowed);
       if (writeAllowed) await f.sense.assertOperations([operation]);
       else await assert.rejects(f.sense.assertOperations([operation]), /Permission denied/);
     }
-    assert.deepEqual(f.aclCalls.map(call => call.permissions), [['Save'], ['Save'], ['AddNew'], ['AddNew'], ['Save'], ['Save'], ['Delete'], ['Delete']]);
-    assert.ok(f.aclCalls.every(call => call.token === 'fixture-backend-jwt'));
+    assert.equal(f.aclCalls.length, 0);
+    assert.ok(f.rawCalls.every(call => call.token === 'fixture-backend-jwt'));
     assert.ok(f.nativeCalls.some(call => call.path.endsWith('/lookup')));
-    assert.equal(f.childTypeCalls.length, writeAllowed ? 2 : 0);
-    assert.equal(f.rawCalls.length, 0);
+    assert.equal(f.childTypeCalls.length, 0);
+    assert.equal(f.rawCalls.length, 8, 'Each explicit guard call must review a fresh compound response');
+    for (const call of f.rawCalls) assertCompound(call, [1]);
     assert.equal(f.rawWrites.length, 0);
+  });
+  await test('one compound GET reviews all 100 actual-operation targets with zero ACL calls', async () => {
+    const f = await fixture({ discovery: 'ready' });
+    const operations = Array.from({ length: 100 }, (_, index) => ({ target: index + 1, action: 'update' }));
+    await f.sense.assertOperations(operations);
+    assert.equal(f.rawCalls.length, 1);
+    assertCompound(f.rawCalls[0], operations.map(operation => operation.target));
+    assert.equal(f.aclCalls.length, 0); assert.equal(f.childTypeCalls.length, 0); assert.equal(f.rawWrites.length, 0);
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
+  });
+  await test('concurrent display checks coalesce 32 concrete targets into one compound GET', async () => {
+    const f = await fixture({ discovery: 'ready' });
+    const targets = Array.from({ length: 32 }, (_, index) => index + 1);
+    assert.deepEqual(await Promise.all(targets.map(target => f.sense.canDisplayOperations([{ target, action: 'update' }]))), targets.map(() => true));
+    assert.equal(f.rawCalls.length, 1);
+    assertCompound(f.rawCalls[0], targets);
+    assert.equal(f.aclCalls.length, 0); assert.equal(f.childTypeCalls.length, 0); assert.equal(f.rawWrites.length, 0);
+  });
+  await test('a cached display allow cannot authorize a write after fresh server denial', async () => {
+    const f = await fixture({ discovery: 'ready' });
+    await f.load();
+    assert.equal(await f.sense.canDisplayOperations([{ target: 1, action: 'update' }]), true);
+    assert.equal(f.rawCalls.length, 1, 'The real content Actions expansion supplies the display hint');
+    f.permissionState.writeAllowed = false;
+    assert.equal(await f.sense.canDisplayOperations([{ target: 1, action: 'update' }]), true, 'The existing UI hint remains cached for this assertion');
+    await assert.rejects(f.sense.repository.patch({ idOrPath: 1, content: { Description: 'Denied after revocation' } }), /Permission denied/);
+    assert.equal(f.rawCalls.length, 2);
+    assertCompound(f.rawCalls[1], [1]);
+    assert.equal(f.aclCalls.length, 0); assert.equal(f.rawWrites.length, 0);
+    assert.ok(!f.nativeCalls.some(call => /\/plans(?:\/|$)/.test(call.path)));
+  });
+  await test('an identity change during the compound response invalidates every actual-operation result', async () => {
+    const f = await fixture({ discovery: 'ready' }), gate = deferred();
+    f.permissionState.beforeBatch = () => gate.promise;
+    const pending = assert.rejects(f.sense.assertOperations([{ target: 1, action: 'update' }, { target: 2, action: 'delete' }]), /context changed|Identity or permissions changed/i);
+    await tick(); assert.equal(f.rawCalls.length, 1);
+    f.sense.setRepositoryAccessToken('next-identity'); gate.resolve(); await pending;
+    assert.equal(f.rawWrites.length, 0); assert.equal(f.aclCalls.length, 0);
+  });
+  await test('Add requires the exact allowed child type in the same fresh response', async () => {
+    const f = await fixture({ discovery: 'ready', actions: [{ Name: 'Add', Forbidden: false }], childTypes: [{ Name: 'MediaItem' }] });
+    assert.equal(await f.sense.canOperations([{ target: 1, action: 'create', contentType: 'MediaItem' }]), true);
+    for (const contentType of ['Timeline', 'mediaitem', '']) {
+      const operation = { target: 1, action: 'create', contentType };
+      assert.equal(await f.sense.canOperations([operation]), false);
+      await assert.rejects(f.sense.assertOperations([operation]), /Permission denied/);
+      await assert.rejects(f.sense.repository.post({ parentPath: 1, contentType: contentType || 'Timeline', content: {} }));
+    }
+    f.permissionState.childTypes = undefined;
+    assert.equal(await f.sense.canOperations([{ target: 1, action: 'create', contentType: 'MediaItem' }]), false);
+    assert.equal(f.rawWrites.length, 0); assert.equal(f.aclCalls.length, 0); assert.equal(f.childTypeCalls.length, 0);
+  });
+  for (const action of ['update', 'upload', 'delete', 'create']) await test('Forbidden=true ' + action + ' blocks the actual SDK dispatch', async () => {
+    const f = await fixture({ discovery: 'ready', actions: ['Edit', 'Delete', 'Add'].map(Name => ({ Name, Forbidden: true })) });
+    const operation = { target: 1, action, ...(action === 'create' ? { contentType: 'MediaItem' } : {}) };
+    assert.equal(await f.sense.canOperations([operation]), false);
+    const dispatch = {
+      update: () => f.sense.repository.patch({ idOrPath: 1, content: { Description: 'Denied' } }),
+      upload: () => f.sense.uploadBinary(1, f.environment.repositoryUrl + '/odata.svc/content(5)/upload', new FormData()),
+      delete: () => f.sense.repository.delete({ idOrPath: 1 }),
+      create: () => f.sense.repository.post({ parentPath: 1, contentType: 'MediaItem', content: {} }),
+    };
+    await assert.rejects(dispatch[action](), /Permission denied/);
+    assert.equal(f.rawCalls.length, 2); f.rawCalls.forEach(call => assertCompound(call, [1]));
+    assert.equal(f.rawWrites.length, 0); assert.equal(f.aclCalls.length, 0);
+    assert.ok(!f.nativeCalls.some(call => /\/plans(?:\/|$)/.test(call.path)));
+  });
+  for (const actions of [null, [], {}, [{ Name: 'Edit' }], [{ Name: 'Edit', Forbidden: 'false' }], [{ Name: 'Edit', Forbidden: true }]]) await test('missing or malformed Actions fail closed: ' + JSON.stringify(actions), async () => {
+    const f = await fixture({ discovery: 'ready', actions });
+    assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), false);
+    await assert.rejects(f.sense.repository.patch({ idOrPath: 1, content: { Description: 'Denied' } }), /Permission denied/);
+    assert.equal(f.rawWrites.length, 0); assert.equal(f.aclCalls.length, 0);
+  });
+  for (const permissionRows of [[], rows => rows.map(({ Actions, ...row }) => ({ ...row, __metadata: { actions: Actions } })), rows => rows.map(row => ({ ...row, Id: row.Id + 100, Path: row.Path + '-other' }))]) await test('missing target or metadata-only actions cannot substitute for a caller-filtered descriptor', async () => {
+    const f = await fixture({ discovery: 'ready', permissionRows });
+    assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), false);
+    assert.equal(f.rawCalls.length, 1); assert.equal(f.aclCalls.length, 0); assert.equal(f.rawWrites.length, 0);
+  });
+  for (const code of ['permission_denied', 'grant_revoked', 'unknown_role']) await test(code + ' native readiness failure blocks the actual write before any permission review', async () => {
+    const f = await fixture({ discovery: 'ready', lookupError: { status: 403, code } });
+    assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), false);
+    await assert.rejects(f.sense.repository.patch({ idOrPath: 1, content: { Description: 'Denied native readiness' } }), error => error.code === code);
+    assert.equal(f.rawCalls.length, 0); assert.equal(f.aclCalls.length, 0); assert.equal(f.rawWrites.length, 0);
+  });
+  await test('an unchecked SDK POST and raw fetch PATCH cannot reach either write transport', async () => {
+    const f = await fixture({ discovery: 'ready' });
+    await assert.rejects(f.sense.repository.post({ parentPath: 1, contentType: 'User', content: { DisplayName: 'Unsupported type' } }), /Unsupported mutation endpoint/);
+    await assert.rejects(f.sense.repository.fetch(f.environment.repositoryUrl + '/odata.svc/content(1)', { method: 'PATCH', body: '{}' }), /checked domain operation/);
+    assert.equal(f.rawCalls.length, 0); assert.equal(f.rawWrites.length, 0); assert.equal(f.nativeCalls.length, 0); assert.equal(f.aclCalls.length, 0);
   });
   for (const discovery of ['html', '404', 'unavailable']) await test('ordinary reads remain available for confirmed ' + discovery + ' gateway absence', async () => {
     const f = await fixture({ discovery }); assert.equal((await f.load()).d.Title, 'Raw permitted title');
     assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), false);
     await assert.rejects(f.sense.repository.patch({ idOrPath: 1, content: { Title: 'No write' } }));
     assert.ok(f.rawCalls.every(call => call.method === 'GET' && call.token === 'fixture-backend-jwt'));
-    assert.ok(f.aclCalls.every(call => call.permissions.includes('Open')));
+    assert.equal(f.aclCalls.length, 0);
   });
   await test('collection reads preserve raw permitted content when gateway is absent', async () => {
     const f = await fixture(); const data = await f.sense.repository.loadCollection({ path: '/Root/Content/timelines/MediaLibrary' });
@@ -221,7 +366,7 @@ async function main() {
   await test('confirmed gateway outage preserves ordinary reads and disables writes', async () => {
     const f = await fixture({ discovery: 'ready', lookupError: { status: 503, code: 'native_gateway_unavailable' } });
     assert.equal((await f.load()).d.Title, 'Raw permitted title'); assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), false);
-    assert.ok(f.aclCalls.every(call => call.permissions.includes('Open')));
+    assert.equal(f.aclCalls.length, 0);
   });
   await test('a backend capability error is not evidence of an absent application gateway', async () => {
     const f = await fixture({ discovery: 'ready', lookupError: { status: 503, code: 'backend_capability_unavailable' } });
@@ -238,7 +383,8 @@ async function main() {
     const f = await fixture({ discovery: 'ready' }); const data = await f.load();
     assert.equal(data.d.Title, 'Native title'); assert.equal(data.d.revision, 'gw:fixture-hash:4');
     assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), true);
-    assert.ok(f.aclCalls.some(call => call.permissions.includes('Save')));
+    assert.equal(f.aclCalls.length, 0);
+    assertCompound(f.rawCalls.at(-1), [1]);
   });
   await test('quoted exact SDK reads with default top retain their pre-read revision baseline', async () => {
     const f = await fixture({ discovery: 'ready' });
@@ -248,9 +394,10 @@ async function main() {
     assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
     assert.ok(!f.nativeCalls.some(call => call.path.endsWith('/snapshots')));
   });
-  await test('read-only gateway rejects Save before the backend Save ACL probe', async () => {
+  await test('read-only gateway rejects writes before the compound permission review', async () => {
     const f = await fixture({ discovery: 'ready', readOnly: true }); assert.equal(await f.sense.canOperations([{ target: 1, action: 'update' }]), false);
     assert.equal(f.aclCalls.length, 0);
+    assert.equal(f.rawCalls.length, 0);
   });
   await test('discovery is cached across concurrent reads and invalidated on identity change', async () => {
     const f = await fixture(); await Promise.all([f.load(), f.load()]);
@@ -260,19 +407,21 @@ async function main() {
     f.sense.setRepositoryAccessToken(''); await f.load();
     assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/capabilities')).length, 3);
   });
-  await test('six concurrent write checks share readiness while preserving every exact-target ACL probe', async () => {
+  await test('six concurrent explicit guards share readiness and each reviews its own concrete target freshly', async () => {
     const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, gate = deferred();
     globalThis.fetch = async (url, init) => { const result = await original(url, init); if (new URL(url).pathname.endsWith('/lookup')) await gate.promise; return result; };
     const targets = [1, 1, 2, 2, 3, 4], checks = targets.map(target => f.sense.canOperations([{ target, action: 'update' }]));
     await tick();
     assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/capabilities')).length, 1);
     assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
-    assert.equal(f.aclCalls.length, 0, 'ACL checks must wait for readiness');
+    assert.equal(f.rawCalls.length, 0, 'Permission reviews must wait for readiness');
     gate.resolve(); assert.deepEqual(await Promise.all(checks), targets.map(() => true));
-    assert.deepEqual(f.aclCalls.map(call => call.target).sort(), [...targets].sort());
-    assert.ok(f.aclCalls.every(call => call.permissions.length === 1 && call.permissions[0] === 'Save'));
+    assert.equal(f.rawCalls.length, 6);
+    f.rawCalls.forEach((call, index) => assertCompound(call, [targets[index]]));
+    assert.equal(f.aclCalls.length, 0);
     await f.sense.assertOperations([{ target: 5, action: 'update' }]);
-    assert.equal(f.aclCalls.length, 7, 'The existing global readiness cache must not cache target permissions');
+    assert.equal(f.rawCalls.length, 7, 'Global readiness must not cache actual-operation permissions');
+    assertCompound(f.rawCalls.at(-1), [5]);
     assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
     assert.equal(f.rawWrites.length, 0);
   });
@@ -375,8 +524,9 @@ async function main() {
       });
     }
   });
-  await test('an absent gateway never bypasses the real read ACL', async () => {
-    const f = await fixture({ readAllowed: false }); await assert.rejects(f.load(), /Permission denied/); assert.equal(f.rawCalls.length, 0);
+  await test('an absent gateway never bypasses the actual repository read denial', async () => {
+    const f = await fixture({ readAllowed: false }); await assert.rejects(f.load(), /Permission denied/); assert.equal(f.rawCalls.length, 1);
+    assert.equal(f.aclCalls.length, 0);
   });
   await test('cache refresh cannot replace an explicit editor revision', async () => {
     const f = await fixture({ discovery: 'ready', mode: 'm0-local' });

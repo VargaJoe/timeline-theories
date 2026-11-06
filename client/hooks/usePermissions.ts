@@ -1,7 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSharedAuth } from '../context/useSharedAuth';
 import { repositoryUrl } from '../configuration';
-import { canOperations, subscribePermissions, type Operation } from '../services/sensenet';
+import { canDisplayOperations, subscribePermissions, type Operation } from '../services/sensenet';
+
+const refreshListeners = new Set<(since: number) => void>();
+let stopRefresh: (() => void) | undefined;
+/** A single event/timer fans out synchronously, so the transport can batch all targets. */
+function subscribeRefresh(listener: (since: number) => void): () => void {
+  refreshListeners.add(listener);
+  if (!stopRefresh) {
+    const refreshAll = () => { const since = Date.now(); for (const refresh of refreshListeners) refresh(since); };
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshAll(); };
+    window.addEventListener('focus', refreshAll);
+    document.addEventListener('visibilitychange', onVisible);
+    const interval = window.setInterval(refreshAll, 30_000);
+    stopRefresh = () => { window.clearInterval(interval); window.removeEventListener('focus', refreshAll); document.removeEventListener('visibilitychange', onVisible); };
+  }
+  return () => {
+    refreshListeners.delete(listener);
+    if (!refreshListeners.size) { stopRefresh?.(); stopRefresh = undefined; }
+  };
+}
 
 /** Permission results are bound to the current identity and never authorize a write. */
 export function usePermissionState(operations: Operation[]): 'checking' | 'allowed' | 'denied' {
@@ -16,31 +35,24 @@ export function usePermissionState(operations: Operation[]): 'checking' | 'allow
   useEffect(() => {
     let cancelled = false;
     let request = 0;
-    const refresh = async () => {
+    const refresh = async (refreshSince?: number) => {
       const currentRequest = ++request;
       setResult(previous => previous.key === key ? previous : { key, allowed: false, resolved: false });
       if (auth.isLoading) return;
       if (stableOperations.length === 0) { setResult({ key, allowed: false, resolved: true }); return; }
       let allowed = false;
       try {
-        allowed = await canOperations(stableOperations);
+        allowed = await canDisplayOperations(stableOperations, { refreshSince });
       } catch {
         // Unknown or unavailable permission metadata fails closed.
       }
       if (!cancelled && currentRequest === request) setResult({ key, allowed, resolved: true });
     };
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
-    };
     void refresh();
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', onVisible);
-    const interval = window.setInterval(refresh, 30_000);
+    const unsubscribeRefresh = subscribeRefresh(since => { void refresh(since); });
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', onVisible);
+      unsubscribeRefresh();
     };
   }, [key, stableOperations, auth.isLoading]);
 
