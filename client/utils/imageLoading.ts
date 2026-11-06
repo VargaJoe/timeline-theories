@@ -57,7 +57,7 @@ export function nativeImagePresentationTarget(source: string, generationId?: str
   return { path: `/content/${match[1]}/image-presentation`, generationId: match[2] };
 }
 
-/** Metadata only: every visible-generation refresh rechecks current source access without image bytes. */
+/** Metadata only: every visible-generation refresh rechecks the owner presentation without image bytes. */
 export async function readNativeImagePresentation(path: string, { signal, assertContext = () => {} }: ImageFetchOptions): Promise<ImageDescriptor> {
   if (!/^\/content\/[1-9][0-9]*\/image-presentation$/.test(path)) throw new Error('Invalid image presentation target.');
   const check = () => { if (signal.aborted) throw abortError(); assertContext(); };

@@ -88,8 +88,8 @@ test('clearing a generated presentation is an explicit owner-only plan and does 
   assert.equal(step.payload.setId, null); assert.equal(Object.hasOwn(step.payload, 'fields'), false); assert.equal(Object.hasOwn(step.payload, 'bytesBase64'), false);
 });
 
-test('inactive image generations block owner deletion before a plan is saved', async () => {
-  const f = fixture(); f.repo.ownerImageReferences = async () => ({ hasReferences: true, readableReferences: [{ id: 30 }] });
-  await assert.rejects(preview(f.context, { commands: [{ action: 'delete', targetId: 10, expectedRevision: f.rev }] }, f.store), error => error.code === 'image_reference_conflict');
+test('managed image deletion preflight denies unsupported descendants before saving a plan', async () => {
+  const f = fixture(); f.repo.managedChildren = async () => { const error = new Error('Foreign image subtree'); error.code='unexpected_children'; throw error; };
+  await assert.rejects(preview(f.context, { commands: [{ action: 'delete', targetId: 10, expectedRevision: f.rev }] }, f.store), error => error.code === 'unexpected_children');
   assert.equal(f.state.saved, 0); assert.equal(f.state.writes, 0);
 });

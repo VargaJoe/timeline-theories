@@ -37,7 +37,7 @@ async function setup(t, extra = {}) {
   const content = { Id: 10, ParentId: 2, Name: 'media', DisplayName: 'Fixture media', Path: projectRoot + '/MediaLibrary/media', Type: 'MediaItem', Title: 'Before', CreationDate: '2026-10-01T00:00:00Z', CreatedById: 42, ModificationDate: '2026-10-01T00:00:00Z', ModifiedById: 42, Version: 'V1.0', VersionId: 1 };
   const contents = new Map([[content.Id, content]]);
   const send = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ d: value })); };
-  const imageFixture = imageProtocolFixture(projectRoot, contents, send); state.images = imageFixture.state;
+  const imageFixture = imageProtocolFixture(projectRoot, contents, send, state); state.images = imageFixture.state;
   const server = https.createServer(tls, async (req, res) => {
     try {
       const url = new URL(req.url, 'https://localhost'), credential = req.headers.apikey || req.headers.authorization?.replace(/^Bearer /, '');
@@ -54,7 +54,7 @@ async function setup(t, extra = {}) {
         const names = ['Id','ParentId','Name','Path','Type','CreationDate','CreatedById','ModificationDate','ModifiedById','Version','VersionId', ...(FIELDS[type] || []), 'CoverImageBin'];
         return send(res, 200, [{ ContentTypeName: type, FieldSettings: [...new Set(names)].map(Name => ({ Name, ReadOnly: false })) }]);
       }
-      if (url.pathname.endsWith('/AllowedChildTypes') || url.pathname.endsWith('/EffectiveAllowedChildTypes')) return send(res, 200, { results: [{ Name: 'ImageVariant' }] });
+      if (url.pathname.endsWith('/AllowedChildTypes') || url.pathname.endsWith('/EffectiveAllowedChildTypes')) return send(res, 200, { results: [{ Name: 'File' }, {Name:'Folder'}] });
       if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0' });
       const target = url.pathname.match(/^\/OData.svc\/content\((\d+)\)$/);
       if (target) {
@@ -484,7 +484,7 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   state.images.enabled = true;
   content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'preserved-original-stamp' } };
   contents.set(11, { ...content, Id: 11, Name: 'second-media', Path: config.projectRoot + '/MediaLibrary/second-media' });
-  const owner = { ...content, Id: 20, Type: 'Timeline', Name: 'timeline', Path: config.projectRoot + '/Timelines/timeline', CoverImageSet: [], CoverImageBin: null };
+  const owner = { ...content, Id: 20, Type: 'Timeline', Name: 'timeline', Path: config.projectRoot + '/Timelines/timeline', CoverImageBin: null };
   contents.set(owner.Id, owner);
   const originalHash = createHash('sha256').update(state.images.original).digest('hex');
   const get = async route => { const response = await app.handleRequest(request(route)); assert.equal(response.status, 200, await response.clone().text()); return response.json(); };
@@ -492,26 +492,26 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   const before = (await get('content/20')).data;
   assert.equal((await get('images/capabilities')).data.available, true);
   const source = (await get('content/10/image-presentation')).data;
-  const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: config.projectRoot, ownerId: 20, generationId, sourceIds: [11, 10], sourceStamps: [{ id: 11, stamp: source.imageStamp }, { id: 10, stamp: source.imageStamp }], recipe: { template: 'poster-strip-v1', sourceIds: [11, 10], seed: 42 }, variants: [] };
+  const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: config.projectRoot, ownerId: 20, generationId, sourceIds: [11, 10], sourceStamps: [{ id: 11, stamp: state.images.stamp }, { id: 10, stamp: state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [11, 10], seed: 42 }, variants: [] };
   const prepared = (await post('images/drafts', { ownerId: 20, generationId, expectedRevision: before.revision, manifest }, 'prepare-image-1', 201)).data;
   assert.deepEqual(prepared.manifest.recipe.sourceIds, [11, 10]);
-  assert.deepEqual(state.images.sets.get(prepared.setId).SourceContents, [10, 11]);
-  const imageBytes = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), Buffer.from('controlled generated-image transport fixture, not a native raster decoder proof')]);
+  assert.deepEqual(JSON.parse(state.images.sets.get(prepared.setId).Description).manifest.sourceIds, [11, 10]);
+  const imageBytes = rasterFixture.png(400,200);
   const variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: imageBytes.length, sha256: createHash('sha256').update(imageBytes).digest('hex') };
   const uploadBody = { ownerId: 20, variant, bytesBase64: imageBytes.toString('base64') };
   state.images.interruptUploadOnce = true;
-  const uploadRequestStart = state.requests.length;
+  const uploadRequestStart = state.requests.length, originalReadsBeforeUpload = state.images.binaryReads.filter(row=>row.property==='CoverImageBin').length;
   const interrupted = await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1', 502);
   const uploadRequests = state.requests.slice(uploadRequestStart);
-  for (const id of [10, 11]) assert.equal(uploadRequests.filter(row => row.path.startsWith(`/OData.svc/content(${id})`)).length, 3, 'Each source has one compact Open/MIME/stamp check, not five full snapshot cycles.');
-  assert.equal(uploadRequests.some(row => /\/(AllowedChildTypes|EffectiveAllowedChildTypes)$/.test(row.path)), false);
+  assert.equal(state.images.binaryReads.filter(row=>row.property==='CoverImageBin').length,originalReadsBeforeUpload,'variant upload never redownloads originals');
+  assert.equal(uploadRequests.some(row=>/ImageAsset|GetImagePresentation/.test(row.path)),false);
   assert.ok(uploadRequests.some(row => row.permissions === 'AddNew'));
   assert.equal(interrupted.error.details.uncertain, true); assert.equal((await app.store.pendingMutations()).length, 1);
   const uploaded = (await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1')).data;
   assert.equal((await app.store.pendingMutations()).length, 0); assert.equal(state.images.uploads, 1);
   await post(`images/drafts/${prepared.setId}/seal`, { ownerId: 20, variants: [uploaded] }, 'seal-image-1');
   assert.equal(state.images.activations, 0);
-  const planJob = await enqueue('plans', { commands: [{ action: 'cover-presentation', targetId: 20, expectedRevision: before.revision, setId: prepared.setId }] }); await runNext();
+  const planJob = await enqueue('plans', { commands: [{ action: 'cover-presentation', targetId: 20, expectedRevision: prepared.ownerRevision, setId: prepared.setId }] }); await runNext();
   const plan = await get(`jobs/${planJob}`);
   assert.equal(plan.repositoryWrites, 0); assert.equal(state.images.activations, 0);
   const savedPlan = await app.store.plan(plan.id, (await app.store.read(`plans/${plan.id}`)).data.principal);
@@ -531,32 +531,27 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   // Replays use immutable journal receipts and never resend the image upload.
   await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1'); assert.equal(state.images.uploads, 1);
   assert.equal((await get('content/20/image-sets')).data[0].deletable, false);
-  state.images.stamp = 'e'.repeat(64);
-  assert.equal((await get('content/20')).data.image.state, 'stale');
-  const staleEditor = (await get('content/20/image-presentation/editor')).data;
-  assert.deepEqual(staleEditor.recipe, manifest.recipe); assert.equal(Object.hasOwn(staleEditor, 'variants'), false);
-  const staleVisitorResponse = await app.handleRequest(request('content/20/image-presentation', { token: null }));
-  const staleVisitor = (await staleVisitorResponse.json()).data;
-  assert.equal(staleVisitor.state, 'stale'); assert.equal(Object.hasOwn(staleVisitor, 'recipe'), false); assert.equal(Object.hasOwn(staleVisitor, 'variants'), false);
-  const staleResponse = await app.handleRequest(request(snapshot.image.variants[0].url.slice('/api/v1/'.length), { token: null })); assert.equal(staleResponse.status, 404);
-  assert.deepEqual(state.images.binaryReads, [{ id: uploaded.id, property: 'Binary' }]);
+  assert.equal(createHash('sha256').update(state.images.original).digest('hex'), originalHash);
+  // Published copies depend on owner/file ACL, not later source changes.
+  state.images.original = rasterFixture.png(4,6,99);
   state.images.sourceReadable = false; state.deniedIds.add(10);
-  assert.equal((await get('content/20')).data.image.state, 'blocked');
-  assert.equal(Object.hasOwn((await get('content/20/image-presentation/editor')).data, 'recipe'), false);
+  assert.equal((await get('content/20')).data.image.state, 'active');
+  assert.equal((await get('content/20/image-presentation/editor')).data.recipe.template, 'poster-strip-v1');
+  const staticResponse = await app.handleRequest(request(snapshot.image.variants[0].url.slice('/api/v1/'.length), {token:null}));
+  assert.equal(staticResponse.status,200);
   const current = (await get('content/20')).data;
   const clearJob = await enqueue('plans', { commands: [{ action: 'cover-presentation', targetId: 20, expectedRevision: current.revision, setId: null }] }); await runNext();
   const clearPlan = await get(`jobs/${clearJob}`), clearApply = await enqueue(`plans/${clearPlan.id}/apply`, {}, { headers: { 'Idempotency-Key': 'clear-image-1' } }); await runNext();
   assert.equal((await get(`jobs/${clearApply}`)).ok, true);
   assert.equal((await get('content/20')).data.image.state, 'legacy');
   const management = (await get('content/20/image-sets')).data[0];
-  assert.equal(management.state, 'blocked'); assert.equal(management.deletable, true); assert.equal(Object.hasOwn(management, 'generationId'), false);
+  assert.equal(management.state, 'inactive'); assert.equal(management.deletable, true); assert.equal(management.generationId, generationId);
   state.images.interruptDeleteOnce = true;
   const deleteInterrupted = await post(`images/drafts/${prepared.setId}/delete`, { ownerId: 20 }, 'delete-image-1', 502);
   assert.equal(deleteInterrupted.error.details.uncertain, true);
   await post(`images/drafts/${prepared.setId}/delete`, { ownerId: 20 }, 'delete-image-1');
   await post(`images/drafts/${prepared.setId}/delete`, { ownerId: 20 }, 'delete-image-1'); assert.equal(state.images.deletions, 1);
   assert.equal(state.images.sets.size, 0);
-  assert.equal(createHash('sha256').update(state.images.original).digest('hex'), originalHash);
   const blobRows = await app.store.blobs.list({ prefix: app.store.prefix });
   assert.equal(blobRows.blobs.some(row => row.key.includes('/transfers/')), false);
   for (const row of blobRows.blobs) {
@@ -579,8 +574,8 @@ async function preparedImageUpload(t, extra = {}) {
   f.contents.set(20, { ...f.content, Id: 20, Type: 'Timeline', CoverImageBin: null, Name: 'owner', Path: f.config.projectRoot + '/Timelines/owner' });
   const current = (await (await f.app.handleRequest(f.request('content/20'))).json()).data;
   const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: f.config.projectRoot, ownerId: 20, generationId, sourceIds: [10], sourceStamps: [{ id: 10, stamp: f.state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [10] }, variants: [] };
-  const draftResponse = await f.app.handleRequest(f.request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'deadline-draft-key' } })); assert.equal(draftResponse.status, 201);
-  const draft = (await draftResponse.json()).data, bytes = Buffer.from('controlled committed image bytes'), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  const draftResponse = await f.app.handleRequest(f.request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'deadline-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
+  const draft = (await draftResponse.json()).data, bytes = rasterFixture.png(400,200), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
   return { ...f, route: `images/drafts/${draft.setId}/variants/w400`, upload: { method: 'POST', body: { ownerId: 20, variant, bytesBase64: bytes.toString('base64') }, headers: { 'Idempotency-Key': 'deadline-upload-key' } } };
 }
 
@@ -621,16 +616,26 @@ test('deadline before actual native dispatch is a terminal no-write failure and 
   assert.equal((await f.app.store.pendingMutations()).length, 0); assert.equal((await f.app.coordinator.inspect()).state, 'released');
 });
 
-test('native source ACL revocation after cached preflight still blocks the actual image upload', async t => {
+test('current stock draft AddNew denial blocks image upload without writing bytes', async t => {
   const { app, request, state, content, contents, config } = await setup(t); state.images.enabled = true;
   content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'stored-original' } };
   contents.set(20, { ...content, Id: 20, Type: 'Timeline', CoverImageBin: null, Name: 'owner', Path: config.projectRoot + '/Timelines/owner' });
   const currentResponse = await app.handleRequest(request('content/20')), current = (await currentResponse.json()).data;
   const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: config.projectRoot, ownerId: 20, generationId, sourceIds: [10], sourceStamps: [{ id: 10, stamp: state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [10] }, variants: [] };
-  const draftResponse = await app.handleRequest(request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'acl-draft-key' } })); assert.equal(draftResponse.status, 201);
-  const draft = (await draftResponse.json()).data, bytes = Buffer.from('controlled test image upload bytes'), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  const draftResponse = await app.handleRequest(request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'acl-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
+  const draft = (await draftResponse.json()).data, bytes = rasterFixture.png(400,200), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
   state.images.revokeAtUpload = true;
   const response = await app.handleRequest(request(`images/drafts/${draft.setId}/variants/w400`, { method: 'POST', body: { ownerId: 20, variant, bytesBase64: bytes.toString('base64') }, headers: { 'Idempotency-Key': 'acl-upload-key' } }));
-  assert.equal(response.status, 403); assert.equal((await response.json()).error.code, 'backend_denied');
+  assert.equal(response.status, 403); assert.equal((await response.json()).error.code, 'permission_denied');
   assert.equal(state.images.uploads, 0); assert.equal(state.images.files.size, 0); assert.equal(state.images.activations, 0);
+});
+
+test('metadata GET failure before upload dispatch is a durable terminal failure and never redispatches', async t => {
+  const f=await preparedImageUpload(t),original=StockRepository.prototype.request;
+  StockRepository.prototype.request=async function(url,options){const parsed=new URL(url);if((!options?.method||options.method==='GET')&&parsed.searchParams.get('query')?.startsWith('+ParentId:')){const error=new Error('Controlled stock metadata failure');error.status=502;error.code='backend_failure';throw error;}return original.call(this,url,options);};
+  t.after(()=>{StockRepository.prototype.request=original;});
+  const failed=await f.app.handleRequest(f.request(f.route,f.upload));assert.equal(failed.status,502);assert.equal((await failed.json()).error.details.uncertain,false);
+  assert.equal(f.state.images.uploads,0);assert.equal((await f.app.store.pendingMutations()).length,0);assert.equal((await f.app.coordinator.inspect()).state,'released');
+  StockRepository.prototype.request=original;
+  const retry=await f.app.handleRequest(f.request(f.route,f.upload));assert.equal(retry.status,502);assert.equal((await retry.json()).error.details.uncertain,false);assert.equal(f.state.images.uploads,0,'terminal key never replays the failed write');
 });

@@ -1,8 +1,0 @@
-<ContentType name="ImageVariant" parentType="Image" handler="Timeline.Theories.M0.Security.ImageVariantSecurityHandler" xmlns="http://schemas.sensenet.com/SenseNet/ContentRepository/ContentTypeDefinition">
-  <DisplayName>Image Variant</DisplayName>
-  <Description>Bounded fully decoded WebP, JPEG or PNG output belonging to one immutable image generation. Not a media-library entry.</Description>
-  <Icon>Image</Icon>
-  <AllowIncrementalNaming>false</AllowIncrementalNaming>
-  <AllowedChildTypes></AllowedChildTypes>
-  <Fields />
-</ContentType>

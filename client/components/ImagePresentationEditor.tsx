@@ -94,7 +94,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
     } catch (caught) { if (!abort.signal.aborted) {
       const uncertain = caught instanceof NativeApiError && caught.details && typeof caught.details === 'object' && 'uncertain' in caught.details && caught.details.uncertain === true;
       const confirmed = caught instanceof NativeApiError && [400, 403, 409].includes(caught.status) && !uncertain && !caught.transportFailure &&
-        ['revision_conflict', 'image_source_changed', 'image_stale', 'image_draft_changed', 'permission_denied', 'backend_denied', 'image_integrity', 'invalid_image_asset', 'function_deadline'].includes(caught.code) && !caught.applyResult?.retrySamePlan && !caught.applyResult?.uncertainTargets?.length;
+        ['revision_conflict', 'image_source_changed', 'image_source_not_public', 'image_owner_privacy_conflict', 'image_storage_collision', 'image_set_state', 'image_stale', 'image_draft_changed', 'permission_denied', 'backend_denied', 'image_integrity', 'invalid_image_asset', 'function_deadline'].includes(caught.code) && !caught.applyResult?.retrySamePlan && !caught.applyResult?.uncertainTargets?.length;
       setTerminal(confirmed); setError((caught instanceof Error ? caught.message : 'Publication could not finish.') + (confirmed ? ' Prepare a new preview with the current images.' : ' Retry continues this same image set.')); setStatus('');
     } }
     finally { if (!abort.signal.aborted) setBusy(false); }
@@ -138,6 +138,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
     <header><div><h3>{media ? 'Image sizes' : 'List cover'}</h3><p>{media ? 'Prepare smaller copies for cards and detail views. Your original stays intact.' : 'Choose up to four posters in display order, then preview and publish one compact list image.'}</p></div><span className="image-editor-state">{current?.state === 'active' ? 'Published' : current?.state === 'stale' ? 'Regeneration needed' : 'Original presentation'}</span></header>
     {!ready && !error && <p role="status">Loading image tools…</p>}
     {ready && <>
+      <p>Published images use this item's access permissions. Regenerate after changing the original artwork.</p>
       {!media && <>
         <div className="image-editor-toolbar"><button type="button" disabled={busy || !!intent.current || !pool.length} onClick={randomize}>Random selection</button><span>From the first {pool.length} available images. Selection is saved when published.</span></div>
         <div className="image-editor-candidates">{pool.slice(page * 10, (page + 1) * 10).map(candidate => {

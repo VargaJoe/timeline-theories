@@ -14,16 +14,13 @@ namespace Timeline.Theories.M0.Security;
 /// </summary>
 internal sealed class DeletionPathScope
 {
-    private readonly Action<Node> _assertOpen;
-    public DeletionPathScope(Action<Node>? assertOpen = null) =>
-        _assertOpen = assertOpen ?? DomainReadPolicy.AssertOpen;
     // This holder belongs to one concrete handler instance. AsyncLocal also
     // prevents parallel requests sharing that instance from adopting its scope.
     private readonly AsyncLocal<Authorization?> _current = new();
 
     public IDisposable Begin(Node node, Func<string> readPath)
     {
-        _assertOpen(node);
+        DomainReadPolicy.AssertOpen(node);
         var caller = AccessProvider.Current.GetOriginalUser();
         if (!Providers.Instance.SecurityHandler.HasPermission(caller, node.Id,
                 PermissionType.Delete))
@@ -37,11 +34,9 @@ internal sealed class DeletionPathScope
 
     public string ReadPath(Node node, string rawPath)
     {
-        if (TryGetDeletedPath(node, out var deletedPath))
-            return deletedPath;
         try
         {
-            _assertOpen(node);
+            DomainReadPolicy.AssertOpen(node);
         }
         catch (EntityNotFoundException) when (TryGetDeletedPath(node, out var capturedPath))
         {

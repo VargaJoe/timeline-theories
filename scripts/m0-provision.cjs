@@ -6,7 +6,7 @@ const local = require('./m0-local-api.cjs');
 async function installSchemas() {
   const account = local.readAccounts().admin;
   const result = [];
-  for(const [type,parent] of [['ImageVariant','GenericContent/File/Image'],['ImageVariantSet','GenericContent/Folder'],['MediaItem','GenericContent'],['BookMediaItem','GenericContent/MediaItem'],['TimelineEntry','GenericContent'],['Timeline','GenericContent/Folder'],['ApiKeyStore','GenericContent']]) {
+  for(const [type,parent] of [['MediaItem','GenericContent'],['BookMediaItem','GenericContent/MediaItem'],['TimelineEntry','GenericContent'],['Timeline','GenericContent/Folder'],['ApiKeyStore','GenericContent']]) {
     const file = path.resolve(__dirname, `../deployment/contenttypes/${type}.xml`);
     await local.upload('/Root/System/Schema/ContentTypes/'+parent, {name:type,bytes:fs.readFileSync(file),contentType:'ContentType',mime:'text/xml',account});
     result.push({type,sha256:crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')});

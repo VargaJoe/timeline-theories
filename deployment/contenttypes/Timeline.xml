@@ -74,14 +74,6 @@
       <DisplayName>Cover Image (Binary)</DisplayName>
       <Description>Binary cover image (optional)</Description>
     </Field>
-    <Field name="CoverImageSet" type="Reference">
-      <DisplayName>Cover Image Set</DisplayName>
-      <Description>Optional active, sealed SenseNet image generation. Original cover fields remain unchanged.</Description>
-      <Configuration>
-        <AllowMultiple>false</AllowMultiple>
-        <AllowedTypes><Type>ImageVariantSet</Type></AllowedTypes>
-      </Configuration>
-    </Field>
     <Field name="Tags" type="LongText">
       <DisplayName>Tags</DisplayName>
       <Description>Comma-separated tags</Description>

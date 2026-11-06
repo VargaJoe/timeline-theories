@@ -2,7 +2,7 @@ import https from 'node:https';
 import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from './repository.mjs';
 import { DomainError, TYPES, FIELDS, assertId, assertMembership, safeName, validateFields } from '../domain/content.mjs';
-import { ImageAssets, isImageMutation, classifyNativeImageFailure } from './image-assets.mjs';
+import { ImageAssets, isImageMutation } from './image-assets.mjs';
 import { storedCoverMime } from './covers.mjs';
 
 const HEADERS = ['Id', 'ParentId', 'Name', 'Path', 'Type'];
@@ -53,9 +53,7 @@ export class StockRepository extends Repository {
             // with an explicit SenseNetSecurityException exceptiontype.
             if ([400, 500].includes(res.statusCode) && (/^(?:SenseNetSecurityException|AccessDeniedException)$/.test(exceptionType) || /AccessDenied|PermissionDenied|permission.*denied/i.test(backend))) status = 403;
             if (res.statusCode === 400 && /NodeIsOutOfDate|ContentNameAlreadyExists|NameAlreadyExists|already exists/i.test(backend)) status = 409;
-            const imageFailure = [400, 500].includes(res.statusCode) ? classifyNativeImageFailure(exceptionType, backendMessage) : null;
-            if (imageFailure) status = imageFailure.status;
-            const code = imageFailure?.code ?? (status === 401 ? 'backend_credential_rejected' : status === 403 ? 'backend_denied' : status === 404 ? 'target_unavailable' : status === 409 ? 'revision_conflict' : 'backend_failure');
+            const code = status === 401 ? 'backend_credential_rejected' : status === 403 ? 'backend_denied' : status === 404 ? 'target_unavailable' : status === 409 ? 'revision_conflict' : 'backend_failure';
             reject(new DomainError(code, 'The repository rejected the request.', status)); return;
           }
           resolve({ value: json?.d ?? json, bytes, contentType: res.headers['content-type'], headers: res.headers, status: res.statusCode });
@@ -63,7 +61,7 @@ export class StockRepository extends Repository {
       });
       req.setTimeout(30000, () => req.destroy(new DomainError('repository_timeout', 'Repository request timed out.', 502)));
       req.on('error', error => reject(error instanceof DomainError ? error : new DomainError('repository_transport', 'Repository transport failed.', 502)));
-      if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method.toUpperCase())) onDispatch?.();
+      if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method.toUpperCase())) { this.mutationDispatched = true; onDispatch?.(); }
       req.end(body);
     });
   }
@@ -112,15 +110,23 @@ export class StockRepository extends Repository {
     // real schema in writableFields; no privileged schema credential is used.
     const query = domain ? { metadata: 'no' } : { '$select': [...HEADERS, ...STAMPS].join(','), metadata: 'no' };
     if (header.Type === 'TimelineEntry') query['$expand'] = 'MediaItem';
+    if (COVER_TYPES.has(header.Type)) query['$expand'] = 'AllowedChildTypes';
     const data = await this.api(header.Id, null, { query }); this.scope(data, options);
     if (data.Type !== header.Type || data.Id !== header.Id) fail('revision_conflict', 'Target changed during the snapshot.');
-    const select = [...HEADERS, ...STAMPS, ...(domain ? FIELDS[header.Type].filter(name => !OPTIONAL_FIELDS.has(name) || Object.hasOwn(data, name)) : []), ...(COVER_TYPES.has(header.Type) ? ['CoverImageBin', ...(Object.hasOwn(data, 'CoverImageSet') ? ['CoverImageSet'] : [])] : [])];
+    const select = [...HEADERS, ...STAMPS, ...(domain ? FIELDS[header.Type].filter(name => !OPTIONAL_FIELDS.has(name) || Object.hasOwn(data, name)) : []), ...(COVER_TYPES.has(header.Type) ? ['CoverImageBin'] : [])];
     const snapshot = Object.fromEntries([...new Set(select)].map(field => [field, data[field] ?? null]));
     if (header.Type === 'TimelineEntry') snapshot.MediaItem = referenceId(data.MediaItem);
     if (!data.ModificationDate || typeof data.Version !== 'string') fail('backend_revision_unavailable', 'Repository snapshot version metadata is unavailable.', 503);
-    // The binary URL contains SenseNet's binary timestamp from this same content snapshot.
+    // Stock media_src is a download address, not a reliable image-change stamp.
     const binaryToken = data.CoverImageBin?.__mediaresource ?? null;
     if (COVER_TYPES.has(header.Type)) snapshot.CoverImageBin = binaryToken ? { __mediaresource: { ...binaryToken }, ContentType: binaryToken.content_type ?? null, ETag: binaryToken.media_etag ?? null, SnapshotToken: binaryToken.media_src ?? null } : null;
+    if (COVER_TYPES.has(header.Type)) {
+      const names = (Array.isArray(data.AllowedChildTypes) ? data.AllowedChildTypes : data.AllowedChildTypes?.results || []).map(type => typeof type === 'string' ? type : type.Name);
+      // Empty expanded references may mean a legacy owner OR CTD references
+      // filtered by this caller. Resolve that ambiguity with one bounded root
+      // lookup; a positively absent field retains the old-schema fast path.
+      snapshot.ImageStorageEnabled = names.includes('Folder') && names.includes('File') ? true : Object.hasOwn(data, 'AllowedChildTypes') && names.length === 0 ? null : false;
+    }
     const revisionBase = structuredClone(snapshot);
     if (binaryToken?.content_type) {
       const response = await this.request(this.binaryUrl(snapshot.Id), { method: 'HEAD', maxBytes: 0 });
@@ -130,16 +136,11 @@ export class StockRepository extends Repository {
       snapshot.CoverImageBin.Size = Number.isSafeInteger(size) && size >= 0 ? size : null;
     } else if (snapshot.CoverImageBin) snapshot.CoverImageBin.Size = 0;
     if (COVER_TYPES.has(header.Type)) {
-      const { ownerGuard, ...image } = await this.images.presentation(snapshot, { guardOnly: options.image === false });
-      if (ownerGuard) {
-        // The canonical DB token is part of the application revision. Bracket
-        // it with stock metadata reads so a concurrent save cannot combine
-        // one snapshot's fields with another snapshot's native write guard.
-        const after = await this.api(snapshot.Id, null, { query: { '$select': ['Id', ...STAMPS].join(','), metadata: 'no' } });
-        if (after.Id !== snapshot.Id || after.Version !== data.Version || after.VersionId !== data.VersionId || after.ModificationDate !== data.ModificationDate || ownerGuard.versionId !== undefined && ownerGuard.versionId !== data.VersionId || Date.parse(data.ModificationDate) !== Date.parse(ownerGuard.modificationDate)) fail('revision_conflict', 'Owner changed while its native image revision guard was read.');
-        snapshot.ImageOwnerGuard = ownerGuard; revisionBase.ImageOwnerGuard = ownerGuard;
-      }
-      if (options.image !== false) snapshot.image = image;
+      const selection = await this.images.selection(snapshot);
+      if (snapshot.ImageStorageEnabled === null) snapshot.ImageStorageEnabled = !!selection.root || selection.blocked === true;
+      revisionBase.ImageStorageEnabled = snapshot.ImageStorageEnabled;
+      revisionBase.ImageSelectionStamp = selection.stamp;
+      if (options.image !== false) snapshot.image = selection.blocked ? { state: 'blocked' } : await this.images.presentation(snapshot);
     }
     snapshot.revision = snapshotRevision(revisionBase);
     return snapshot;
@@ -152,8 +153,15 @@ export class StockRepository extends Repository {
     const binary = data.CoverImageBin?.__mediaresource;
     return { Id: data.Id, Type: data.Type, Path: data.Path, CoverImageBin: binary ? { ContentType: binary.content_type ?? null } : null };
   }
-  async coverBytes(id) {
-    const target = await this.read(assertId(id));
+  async anonymousRead(id, { binary = false } = {}) {
+    const visitor = new StockRepository(this.config, null);
+    const row = await visitor.api(assertId(id), null, { query: { '$select': 'Id,Description', metadata: 'no' } });
+    if (row?.Id !== id) fail('permission_denied', 'Anonymous native Open is unavailable.', 403);
+    if (binary) await visitor.request(visitor.binaryUrl(id), { method: 'HEAD', maxBytes: 0 });
+    return row;
+  }
+  async coverBytes(id, options = {}) {
+    const target = await this.read(assertId(id), { ...options, image: false });
     if (!COVER_TYPES.has(target.Type)) fail('invalid_cover_target', 'This content does not support covers.', 400);
     await this.assert([{ target: target.Id, action: 'read' }]);
     const response = await this.request(this.binaryUrl(target.Id), { maxBytes: 10 * 1024 * 1024 });
@@ -234,10 +242,11 @@ export class StockRepository extends Repository {
     if (!['order', 'delete'].includes(purpose)) fail('invalid_operation', 'Invalid complete child purpose.', 400);
     const rows = await this.inventoryRows('+InTree:' + JSON.stringify(timeline.Path) + ' -Id:' + timeline.Id);
     try {
-      if (rows.some(row => row.Type !== 'TimelineEntry' || row.ParentId !== timeline.Id)) fail('permission_denied', 'Complete child access is denied.', 403);
-      await this.assert(rows.flatMap(row => [{ target: row.Id, action: 'read' }, { target: row.Id, action: purpose === 'order' ? 'update' : 'delete' }]));
+      await this.images.managedTree(timeline, rows.filter(row => row.Type !== 'TimelineEntry' || row.ParentId !== timeline.Id), { deleting: purpose === 'delete' });
+      const entries = rows.filter(row => row.Type === 'TimelineEntry' && row.ParentId === timeline.Id);
+      await this.assert(entries.flatMap(row => [{ target: row.Id, action: 'read' }, { target: row.Id, action: purpose === 'order' ? 'update' : 'delete' }]));
       const children = [];
-      for (const row of rows) {
+      for (const row of entries) {
         const child = await this.read(row.Id, { expectedType: 'TimelineEntry' });
         if (child.ParentId !== timeline.Id) fail('permission_denied', 'Complete child access is denied.', 403);
         children.push(child);
@@ -259,33 +268,19 @@ export class StockRepository extends Repository {
         readableReferences.push({ id: row.Id, parentId: row.ParentId });
       } catch (error) { if (![403, 404].includes(error.status)) throw error; }
     }
-    const imageRows = (await this.images.capabilities()).supported ? await this.inventoryRows('+TypeIs:ImageVariantSet +SourceContents:' + media.Id) : [];
-    for (const row of imageRows) {
-      try {
-        // Inventory supplies only existence. The caller's own set read decides
-        // which details can appear in a conflict response.
-        const set = await this.api(row.Id, null, { query: { '$select': 'Id,Type', metadata: 'no' } });
-        if (set.Id === row.Id && set.Type === 'ImageVariantSet') readableReferences.push({ id: row.Id, kind: 'image-source' });
-      } catch (error) { if (![403, 404].includes(error.status)) throw error; }
-    }
-    return { hasReferences: rows.length > 0 || imageRows.length > 0, readableReferences, completeness: 'configured-read-all-project' };
+    return { hasReferences: rows.length > 0, readableReferences, completeness: 'configured-read-all-project' };
   }
-  async ownerImageReferences(id) {
-    const target = await this.read(assertId(id), { image: false });
-    if (!COVER_TYPES.has(target.Type) || !(await this.images.capabilities()).supported) return { hasReferences: false, readableReferences: [] };
-    const rows = await this.inventoryRows('+TypeIs:ImageVariantSet +OwnerContent:' + target.Id), readableReferences = [];
-    for (const row of rows) {
-      try {
-        const set = await this.api(row.Id, null, { query: { '$select': 'Id,Type', metadata: 'no' } });
-        if (set.Id === row.Id && set.Type === 'ImageVariantSet') readableReferences.push({ id: row.Id, kind: 'image-owner' });
-      } catch (error) { if (![403, 404].includes(error.status)) throw error; }
-    }
-    return { hasReferences: rows.length > 0, readableReferences };
+  async managedChildren(owner) {
+    const rows = await this.inventoryRows('+InTree:' + JSON.stringify(owner.Path) + ' -Id:' + owner.Id);
+    const extra = rows.filter(row => !(owner.Type === 'Timeline' && row.Type === 'TimelineEntry' && row.ParentId === owner.Id));
+    return this.images.managedTree(owner, extra, { deleting: true });
   }
   async assertLeaf(id) {
     const target = await this.read(assertId(id));
     if (!['TimelineEntry', 'MediaItem', 'BookMediaItem'].includes(target.Type)) fail('invalid_type', 'Leaf deletion applies only to media and occurrences.', 400);
-    if ((await this.inventoryRows('+ParentId:' + target.Id)).length) fail('unexpected_children', 'The target has unsupported children; deletion is unavailable.');
+    const rows = await this.inventoryRows('+InTree:' + JSON.stringify(target.Path) + ' -Id:' + target.Id);
+    if (target.Type === 'TimelineEntry' && rows.length) fail('unexpected_children', 'The occurrence has unsupported children; deletion is unavailable.');
+    if (target.Type !== 'TimelineEntry') await this.images.managedTree(target, rows, { deleting: true });
   }
   async assertWritableTarget(target) {
     if(target.Type==='TimelineEntry') {
@@ -310,6 +305,7 @@ export class StockRepository extends Repository {
   revisionMatches(content, expected) { if (content.revision !== expected) fail('revision_conflict', 'The target changed since preview.'); }
   async mutation(payload) { return this.write(payload); }
   async write(payload, transient) {
+    this.mutationDispatched = false;
     if (isImageMutation(payload)) return this.images.write(payload, transient);
     if (!payload || !['create', 'update', 'delete', 'cover', 'order', 'cover-presentation'].includes(payload.action) || !TYPES.includes(payload.type)) fail('invalid_operation', 'Invalid application mutation.', 400);
     if (payload.action === 'order') return this.writeOrder(payload);
@@ -323,15 +319,15 @@ export class StockRepository extends Repository {
       const guard = await this.images.preflight(target, payload.setId);
       if (snapshotRevision(guard) !== snapshotRevision(payload.presentation)) fail('image_draft_changed', 'The approved image set changed since preview.');
       return this.executeSingle(async () => {
-        await this.api(target.Id, 'ActivateImageAsset', { method: 'POST', body: { setId: payload.setId, ...this.images.guard(target) } });
+        await this.images.activate(target, payload.setId);
         const after = await this.read(target.Id), current = after.image;
         if ((current?.setId ?? null) !== payload.setId || payload.setId !== null && current?.state !== 'active') fail('image_activation_conflict', 'The image presentation did not match its approved activation.');
         return { id: after.Id, revision: after.revision, setId: payload.setId, image: current };
       }, target.Id);
     }
     if (payload.action === 'delete') {
-      const imageReferences = await this.ownerImageReferences(target.Id);
-      if (imageReferences.hasReferences) fail('image_reference_conflict', 'Delete inactive image sets before deleting their owner.');
+      const managed = await this.managedChildren(target);
+      if (snapshotRevision(managed) !== snapshotRevision(payload.managed || [])) fail('membership_conflict', 'Managed image descendants changed since deletion preview.');
       if (target.Type === 'Timeline') {
         const children = await this.children(target.Id, 'delete'), entries = payload.entries ?? [];
         if (!sameIds(children.map(row => row.Id), entries.map(row => row.id))) fail('membership_conflict', 'Timeline membership changed since preview.');

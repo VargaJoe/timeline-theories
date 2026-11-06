@@ -6,7 +6,7 @@ import ts from '../client/node_modules/typescript/lib/typescript.js';
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const native = moduleUrl(`export const nativeRequest=(...args)=>globalThis.imagePublicationFixture.request(...args);
 export const nativeResponse=()=>{throw new Error('unexpected original download during publication')};
-export const nativeSnapshot=async()=>globalThis.imagePublicationFixture.owner;
+export const nativeSnapshot=async(...args)=>{globalThis.imagePublicationFixture.snapshots?.push(args);return globalThis.imagePublicationFixture.owner};
 export const nativeCoverPayload=async(file,fileName)=>({bytesBase64:Buffer.from(await file.arrayBuffer()).toString('base64'),mimeType:file.type,fileName});
 export const applyNativeCommands=async commands=>globalThis.imagePublicationFixture.apply(commands);
 export const acknowledgeNativeCommands=()=>{};`);
@@ -17,10 +17,11 @@ for (const [from, to] of [['../configuration', config], ['./nativeApi', native],
 const { ImagePublication, OriginalImageUpload, imageCapabilities, imagePresentation, sourceForGeneration } = await import(moduleUrl(source));
 
 test('a stored generic MIME original reaches guarded byte decoding without changing original metadata', async () => {
-  const owner = { Id: 8, CoverImageBin: { ContentType: 'application/octet-stream' } }, calls = [];
-  globalThis.imagePublicationFixture = { owner, async request(path) { calls.push(path); return { state: 'legacy', imageStamp: 'a'.repeat(64) }; } };
-  assert.deepEqual(await sourceForGeneration(8, new AbortController().signal), { id: 8, url: '/api/v1/content/8/cover', stamp: 'a'.repeat(64) });
-  assert.equal(owner.CoverImageBin.ContentType, 'application/octet-stream'); assert.deepEqual(calls, ['/content/8/image-presentation']);
+  const owner = { Id: 8, CoverImageBin: { ContentType: 'application/octet-stream' } }, calls = [], snapshots = [];
+  globalThis.imagePublicationFixture = { owner, snapshots, async request(path) { calls.push(path); throw Error('Source preparation must not request a presentation or a native image operation.'); } };
+  assert.deepEqual(await sourceForGeneration(8, new AbortController().signal), { id: 8, url: '/api/v1/content/8/cover' });
+  assert.equal(owner.CoverImageBin.ContentType, 'application/octet-stream'); assert.deepEqual(calls, []);
+  assert.deepEqual(snapshots, [[8, { refresh: true }]], 'Source preparation must inspect a fresh stored-original snapshot.');
   for (const contentType of ['', 'application/pdf', 'image/svg+xml', 'text/plain']) {
     globalThis.imagePublicationFixture.owner = { Id: 8, CoverImageBin: { ContentType: contentType } };
     await assert.rejects(sourceForGeneration(8, new AbortController().signal), /Upload an original/);
@@ -41,7 +42,7 @@ test('image publisher retries exact draft/upload/seal keys without staging binar
     else seen.set(key, body);
     const phase = path === '/images/drafts' ? 'draft' : path.endsWith('/seal') ? 'seal' : 'variant';
     if (faults.delete(phase)) throw new TypeError('lost response after commit');
-    if (phase === 'draft') return { setId: 90 };
+    if (phase === 'draft') return { setId: 90, ownerRevision: 'sha256:' + 'c'.repeat(64) };
     if (phase === 'variant') return { ...body.variant, id: 91 };
     return { setId: 90, sealed: true };
   }, async apply(value) { commands.push(value); return { ok: true }; } };
@@ -56,7 +57,8 @@ test('image publisher retries exact draft/upload/seal keys without staging binar
   assert.equal(seen.size, 3, 'one idempotency key per logical SenseNet mutation');
   assert.equal(requests.filter(item => item.path.endsWith('/variants/w400')).length, 2);
   assert.equal(commands.length, 1);
-  assert.deepEqual(commands[0], [{ action: 'cover-presentation', targetId: 7, expectedRevision: owner.revision, setId: 90 }]);
+  assert.deepEqual(commands[0], [{ action: 'cover-presentation', targetId: 7, expectedRevision: 'sha256:' + 'c'.repeat(64), setId: 90 }]);
+  assert.equal(owner.revision, 'sha256:original-owner', 'Acknowledged setup revision belongs only to the retained publication intent.');
   assert.ok(!JSON.stringify(commands).includes('YWJj'), 'plan/journal command never contains the output bytes');
 });
 
@@ -73,7 +75,7 @@ test('leaving the editor after sealing prevents a new activation dispatch', asyn
   const controller = new AbortController(), owner = { Id: 7, revision: 'before' };
   let applied = false;
   globalThis.imagePublicationFixture = { owner, async request(path) {
-    if (path === '/images/drafts') return { setId: 90 };
+    if (path === '/images/drafts') return { setId: 90, ownerRevision: 'sha256:' + 'c'.repeat(64) };
     if (path.endsWith('/seal')) { controller.abort(); return { sealed: true }; }
     throw new Error('unexpected request');
   }, async apply() { applied = true; } };
@@ -99,4 +101,38 @@ test('original upload preserves selected bytes and its exact command across a lo
   assert.deepEqual(commands[0], commands[1], 'the original owner revision and payload are stable on retry');
   assert.equal(commands[0][0].action, 'cover', 'use the existing original-cover writer');
   assert.deepEqual(Buffer.from(commands[0][0].bytesBase64, 'base64'), Buffer.from(bytes), 'no canvas resize or re-encoding of originals');
+});
+
+test('lost draft acknowledgement retains its exact revision and later external edits remain activation conflicts', async () => {
+  const originalRevision = 'sha256:' + 'a'.repeat(64), setupRevision = 'sha256:' + 'b'.repeat(64), externalRevision = 'sha256:' + 'c'.repeat(64);
+  const owner = { Id: 7, revision: originalRevision }, requests = [], snapshots = []; let lost = true;
+  globalThis.imagePublicationFixture = { owner, snapshots, async request(path, init) {
+    const body = JSON.parse(init.body); requests.push({ path, body, key: init.headers['Idempotency-Key'] });
+    if (path === '/images/drafts') {
+      assert.equal(body.expectedRevision, originalRevision);
+      if (lost) { lost = false; globalThis.imagePublicationFixture.owner = { ...owner, revision: externalRevision }; throw Error('lost draft acknowledgement'); }
+      return { setId: 90, ownerRevision: setupRevision };
+    }
+    assert(path.endsWith('/seal')); return { sealed: true };
+  }, async apply(commands) {
+    assert.equal(commands[0].expectedRevision, setupRevision, 'The API-recorded setup revision must not adopt a later external owner edit.');
+    assert.notEqual(commands[0].expectedRevision, globalThis.imagePublicationFixture.owner.revision);
+    throw Error('revision_conflict');
+  } };
+  const intent = new ImagePublication(7, { sources: [{ id: 8, stamp: 'd'.repeat(64) }], variants: [], recipe: { template: 'poster-strip-v1', sourceIds: [8] } }, 'timeline-composite', owner);
+  await assert.rejects(intent.publish(new AbortController().signal, () => {}), /lost draft/);
+  await assert.rejects(intent.publish(new AbortController().signal, () => {}), /revision_conflict/);
+  assert.deepEqual(requests[0], requests[1], 'The draft recovery request is byte-for-byte equivalent at the JSON contract.');
+  assert.deepEqual(snapshots, [], 'Retry must not refresh away the owner revision guard.');
+  assert.equal(owner.revision, originalRevision);
+});
+
+test('invalid post-setup owner revisions cannot advance a draft to seal or activation', async () => {
+  for (const ownerRevision of [undefined, '', 'newest', 'sha256:' + 'x'.repeat(64)]) {
+    const requests = [];
+    globalThis.imagePublicationFixture = { async request(path) { requests.push(path); return { setId: 90, ownerRevision }; }, async apply() { throw Error('must not activate'); } };
+    const intent = new ImagePublication(7, { sources: [], variants: [], recipe: { sourceIds: [] } }, 'timeline-composite', { Id: 7, revision: 'sha256:' + 'a'.repeat(64) });
+    await assert.rejects(intent.publish(new AbortController().signal, () => {}), /invalid draft/);
+    assert.deepEqual(requests, ['/images/drafts']);
+  }
 });

@@ -14,6 +14,7 @@ const chromiumParts = ['ms-playwright', 'chromium-1234', 'chrome-win64', 'chrome
 const localChromium = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), ...chromiumParts);
 const chromium = process.env.M0_CHROMIUM_EXECUTABLE_PATH || (fs.existsSync(localChromium) ? localChromium : path.join(os.homedir(), 'AppData', 'Local', ...chromiumParts));
 const FRONTEND = 'https://localhost:8080', ROOT = '/Root/Content/timelines';
+const IMAGE_PROTOCOL = 'timeline-image-assets-v1', STORAGE = 'stock-owner-images-v1';
 const VISITOR = '/Root/IMS/BuiltIn/Portal/Visitor';
 const keepDemo = process.argv.includes('--keep-demo');
 const resumeIndex = process.argv.indexOf('--resume');
@@ -29,20 +30,42 @@ async function smoke() {
     const evidenceRoot = fs.realpathSync(path.join(local.ROOT, 'image-ui-smoke')) + path.sep;
     assert(previousPath.toLowerCase().startsWith(evidenceRoot.toLowerCase()) && path.basename(previousPath) === 'report.json', 'Resume must use project-local UI proof.');
     previousReport = JSON.parse(fs.readFileSync(previousPath, 'utf8'));
+    assert.equal(previousReport.storage, STORAGE, 'Do not resume extension-backed proof against ordinary Folder/File storage.');
     assert(/^q-m0-image-ui-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(previousReport.fixturePrefix));
     assert(previousReport.preservedForRecovery && Array.isArray(previousReport.fixtureOwners), 'Resume needs the preserved owned fixture inventory.');
   }
   const accounts = local.readAccounts(), id = previousReport ? previousReport.fixturePrefix.slice('q-m0-image-ui-'.length) : crypto.randomUUID(), prefix = 'q-m0-image-ui-' + id;
   const output = previousReport ? path.join(local.ROOT, 'image-ui-smoke', id, 'continuations', crypto.randomUUID()) : path.join(local.ROOT, 'image-ui-smoke', id);
   fs.mkdirSync(output, { recursive: true });
-  const report = { version: 1, ranAt: new Date().toISOString(), fixturePrefix: prefix, frontend: FRONTEND, checks: [], passed: false, keepDemo, ...(previousPath ? { resumeOf: previousPath } : {}) };
+  const report = { version: 2, storage: STORAGE, ranAt: new Date().toISOString(), fixturePrefix: prefix, frontend: FRONTEND, checks: [], passed: false, keepDemo, ...(previousPath ? { resumeOf: previousPath } : {}) };
   if (previousReport?.controlledLostResponse?.passed) report.controlledLostResponse = { ...previousReport.controlledLostResponse, carriedFrom: previousPath };
   const secrets = Object.values(accounts).flatMap(account => [account.password, account.apiKey, account.token]).filter(value => typeof value === 'string' && value.length > 7);
   const redact = value => secrets.reduce((result, secret) => result.replaceAll(secret, '[redacted]'), String(value))
     .replace(/([?&](?:code|state|session_state|access_token|refresh_token|id_token)=)[^&"\s]+/gi, '$1[redacted]');
   const fixtures = [], owners = [], originals = [], sessions = [];
+  const checkpoint = () => {
+    report.wire = sessions.map(session => session.wire); report.nativeResponses = sessions.map(session => session.responses);
+    report.generatedUploads = sessions.flatMap(session => session.uploads);
+    fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
+  };
+  const repositoryCount = async () => {
+    const response = await local.request(local.REPOSITORY + '/OData.svc/Root/Content?' + new URLSearchParams({ query: '+InTree:' + ROOT + ' .AUTOFILTERS:OFF .LIFESPAN:OFF', $top: '1', $inlinecount: 'allpages', $select: 'Id', metadata: 'no' }), { account: accounts.admin });
+    assert.equal(response.status, 200); return Number(response.value.d.__count);
+  };
+  report.initialCount = await repositoryCount(); checkpoint();
   let browser, editor, visitor, timeline, media;
-  const selected = target => local.api(target, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type,CoverImageSet', metadata: 'no' } });
+  const selected = target => local.api(target, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type,Description', metadata: 'no' } });
+  const children = async parent => {
+    const parentPath = typeof parent === 'string' ? parent : (await selected(parent)).Path;
+    assert(parentPath.startsWith(ROOT + '/'));
+    const url = new URL(local.REPOSITORY); url.pathname = '/OData.svc' + parentPath.split('/').map(encodeURIComponent).join('/');
+    url.search = new URLSearchParams({ $select: 'Id,Name,Path,Type,Description', $top: '100', metadata: 'no' }).toString();
+    const response = await local.request(url.href, { account: accounts.admin });
+    assert.equal(response.status, 200); assert(Array.isArray(response.value.d.results)); assert(response.value.d.results.length < 100, 'Never clean an unenumerated managed tree.');
+    return response.value.d.results;
+  };
+  const safeMetadata = value => Array.isArray(value) ? value.map(safeMetadata) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).filter(([key]) => !/^(?:bytesBase64|authorization|cookie|access_token|refresh_token|id_token|credential)$/i.test(key)).map(([key, item]) => [key, safeMetadata(item)])) : value;
   const checked = async (name, action) => {
     const accepted = previousReport?.checks.find(check => check.name === name && check.passed);
     if (accepted && !name.startsWith('Real editor OIDC') && !name.startsWith('Reuse preserved')) {
@@ -111,7 +134,7 @@ async function smoke() {
   async function session(viewport = { width: 1440, height: 1050 }, dpr = 1) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport, deviceScaleFactor: dpr });
     const page = await context.newPage(); page.setDefaultTimeout(90000);
-    const state = { page, context, requests: [], responses: [], uploads: [], requestTimes: new WeakMap(), pendingWrites: new Set(), uncertainWrite: false, rawMutations: [], external: [], errors: [] }; sessions.push(state);
+    const state = { page, context, requests: [], responses: [], wire: [], wireRequests: new WeakMap(), uploads: [], requestTimes: new WeakMap(), pendingWrites: new Set(), uncertainWrite: false, rawMutations: [], external: [], errors: [] }; sessions.push(state);
     const mutating = request => request.method() === 'POST' && /^\/api\/v1\/(?:images\/drafts(?:\/|$)|plans\/[^/]+\/apply$)/.test(new URL(request.url()).pathname);
     await context.route('**/*', route => {
       const target = new URL(route.request().url());
@@ -122,6 +145,11 @@ async function smoke() {
       const target = new URL(request.url());
       state.requestTimes.set(request, Date.now());
       if (target.origin === FRONTEND && mutating(request)) state.pendingWrites.add(request);
+      if (target.origin === FRONTEND && request.method() === 'POST' && /^\/api\/v1\/(?:images\/drafts|plans)(?:\/|$)/.test(target.pathname)) {
+        const raw = request.postData() || ''; let body; try { body = JSON.parse(raw); } catch {}
+        const wire = { method: request.method(), path: target.pathname, key: request.headers()['idempotency-key'] || null, bodySha256: sha256(Buffer.from(raw)), ...(body ? { body: safeMetadata(body) } : {}) };
+        state.wire.push(wire); state.wireRequests.set(request, wire); checkpoint();
+      }
       if ([FRONTEND, local.REPOSITORY].includes(target.origin)) state.requests.push({ method: request.method(), origin: target.origin, path: target.pathname, query: target.search });
       if (target.origin === local.REPOSITORY && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) state.rawMutations.push({ method: request.method(), path: target.pathname });
       const variantRoute = target.origin === FRONTEND && target.pathname.match(/^\/api\/v1\/images\/drafts\/(\d+)\/variants\/(w[1-9][0-9]{0,3})$/);
@@ -157,6 +185,9 @@ async function smoke() {
         ...(sample ? { bodySample: sample } : {}), ...(value?.job?.id ? { jobId: value.job.id } : {}),
         ...(value?.error ? { error: { code: value.error.code, message: redact(value.error.message || value.error) } } : {}) };
       state.responses.push(detail);
+      const wire = state.wireRequests.get(response.request());
+      if (wire) Object.assign(wire, detail, value ? { response: safeMetadata(value) } : {});
+      checkpoint();
       if (response.status() >= 400 && /\/api\/v1\/(images\/drafts|plans\/|jobs\/)/.test(target.pathname)) console.log(JSON.stringify({ apiFailure: detail }));
     });
     return state;
@@ -219,7 +250,7 @@ async function smoke() {
     const lost = { aborted: false, retried: false };
     const fileSnapshot = async filePath => {
       const file = await local.api(filePath, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type,Version,ModificationDate,Binary', metadata: 'no' } });
-      assert.equal(file.Type, 'ImageVariant'); assert.equal(file.Path, filePath);
+      assert.equal(file.Type, 'File'); assert.equal(file.Path, filePath);
       return { id: file.Id, path: file.Path, version: file.Version, modificationDate: file.ModificationDate,
         binaryToken: file.Binary?.__mediaresource?.media_etag ?? file.Binary?.__mediaresource?.media_src };
     };
@@ -230,8 +261,10 @@ async function smoke() {
         try {
           const result = await response.json(), setId = Number(new URL(request.url()).pathname.match(/drafts\/(\d+)/)[1]);
           const set = await local.api(setId, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type', metadata: 'no' } });
-          assert.equal(set.Type, 'ImageVariantSet'); assert(set.Path.startsWith(`${ROOT}/ImageAssets/${ownerId}/`));
-          lost.file = await fileSnapshot(set.Path + '/w400'); assert.equal(lost.file.id, result.data.id);
+          const owner = owners.find(item => item.Id === ownerId);
+          assert.equal(set.Type, 'Folder'); assert(set.Path.startsWith(owner.Path + '/_images/'));
+          const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[payload.variant.mimeType];
+          lost.file = await fileSnapshot(set.Path + '/w400.' + extension); assert.equal(lost.file.id, result.data.id);
           lost.url = request.url(); lost.requestHash = sha256(Buffer.from(request.postData()));
           lost.keyHash = sha256(Buffer.from(request.headers()['idempotency-key']));
           lost.aborted = true;
@@ -269,10 +302,10 @@ async function smoke() {
   try {
     browser = await playwright.chromium.launch({ headless: true, executablePath: chromium });
     editor = await session();
-    await checked('Real editor OIDC login and guarded local image capability', async () => {
+    await checked('Real editor OIDC login and standard local image capability', async () => {
       await login(editor.page);
       const capability = await nativeRead(editor.page, '/images/capabilities');
-      assert.equal(capability.available, true, 'Restart/provision the local guarded backend before running this proof.');
+      assert.equal(capability.available, true, 'The existing app API must support ordinary Folder/File images before running this proof.');
       assert.equal(editor.rawMutations.length, 0);
       return { protocol: capability.protocol };
     });
@@ -324,6 +357,29 @@ async function smoke() {
       assert.equal(remaining.length, 1); assert.equal(remaining[0].state, 'active'); assert.equal(remaining[0].deletable, false);
       const after = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`); assert.equal(after.generationId, before.generationId);
       return { deletedInactiveSets: sets.length - remaining.length, activeSetKept: true };
+    });
+    await checked('An _images Folder sibling is excluded from direct timeline entry occurrences', async () => {
+      const direct = await children(timeline.Id), entries = direct.filter(item => item.Type === 'TimelineEntry');
+      assert.equal(entries.length, 4); assert.deepEqual(entries.map(item => item.Id).sort((a, b) => a - b), fixtures.filter(item => item.Type === 'TimelineEntry').map(item => item.Id).sort((a, b) => a - b));
+      const imageRoot = direct.find(item => item.Name === '_images'); assert.equal(imageRoot?.Type, 'Folder'); assert.equal(imageRoot.Path, timeline.Path + '/_images');
+      const pointer = JSON.parse(imageRoot.Description); assert.equal(pointer.protocol, IMAGE_PROTOCOL); assert.equal(pointer.ownerId, timeline.Id); assert.equal(pointer.projectPath, ROOT);
+      const current = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`); assert.equal(pointer.activeSetId, current.setId);
+      await goto(editor.page, '/timelines/' + timeline.Name); await editor.page.locator('.entry-card').nth(3).waitFor(); assert.equal(await editor.page.locator('.entry-card').count(), 4);
+      return { entryOccurrences: 4, excludedFolderId: imageRoot.Id, activeSetId: current.setId };
+    });
+    await checked('Actual editor blocks public publication from a currently private source', async () => {
+      const before = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`);
+      await permissions(media[0].Id, [{ identity: VISITOR, Open: 'deny', OpenMinor: 'deny' }]);
+      try {
+        panel = await openTimelineEditor();
+        const boxes = panel.locator('input[type="checkbox"]'); for (let index = 0; index < 4; index++) await boxes.nth(index).setChecked(index === 0);
+        await panel.getByRole('button', { name: 'Generate preview', exact: true }).click(); await panel.getByRole('img', { name: 'Generated image preview', exact: true }).waitFor();
+        const denied = editor.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/images/drafts' && response.request().method() === 'POST');
+        await panel.getByRole('button', { name: 'Publish', exact: true }).click(); const response = await denied;
+        assert.equal(response.status(), 403); assert.equal((await response.json()).error.code, 'image_source_not_public'); await panel.getByRole('alert').waitFor();
+        const after = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`); assert.equal(after.setId, before.setId); assert.equal(after.generationId, before.generationId);
+      } finally { await permissions(media[0].Id, [{ identity: VISITOR, ...READ_PERMISSIONS }]); }
+      return { privateSourcePublicationDenied: true, previousStaticCopyKept: true };
     });
     await checked('Actual media detail editor prepares and publishes 160/320/640 sizes', async () => {
       await goto(editor.page, '/media-library/' + media[0].Name);
@@ -419,7 +475,7 @@ async function smoke() {
       await visitor.page.screenshot({ path: path.join(output, 'visitor-timeline-mobile.png') });
       return { viewport: 390, slotWidth: box.width, objectFit: 'contain' };
     });
-    await checked('Loaded Visitor composite refreshes source ACL on focus without downloading unchanged image bytes', async () => {
+    await checked('Published static copy survives source ACL changes while owner revocation masks loaded bytes', async () => {
       const card = visitor.page.locator(`a[href="/timelines/${timeline.Name}"]`), image = card.locator('[data-image-state]');
       await image.scrollIntoViewIfNeeded(); await card.locator('[data-image-state="loaded"]').waitFor();
       const byteRequests = () => visitor.requests.filter(request => request.path.startsWith(`/api/v1/images/${timeline.Id}/`)).length;
@@ -429,14 +485,26 @@ async function smoke() {
       await card.locator('[data-image-state="loaded"]').waitFor(); assert.equal(byteRequests(), before);
       await permissions(media[0].Id, [{ identity: VISITOR, Open: 'deny', OpenMinor: 'deny' }]);
       try {
-        await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus')));
-        await card.locator('[data-image-state="blocked"]').waitFor(); assert.equal(await image.locator('img').count(), 0);
-        assert.equal(byteRequests(), before, 'Source denial must revoke the loaded Blob without downloading an original or another variant.');
-        await visitor.page.screenshot({ path: path.join(output, 'visitor-source-revoked.png') });
+        const unchangedSource = visitor.page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/content/${timeline.Id}/image-presentation`);
+        await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus'))); assert.equal((await unchangedSource).status(), 200);
+        await card.locator('[data-image-state="loaded"]').waitFor(); assert.equal(byteRequests(), before, 'Static publication follows owner visibility, without source re-fetches.');
+        await goto(visitor.page, '/timelines?filter=q'); await image.scrollIntoViewIfNeeded(); await card.locator('[data-image-state="loaded"]').waitFor();
+        await visitor.page.screenshot({ path: path.join(output, 'visitor-static-copy-source-private.png') });
       } finally { await permissions(media[0].Id, [{ identity: VISITOR, ...READ_PERMISSIONS }]); }
+      const pointer = JSON.parse((await selected(timeline.Path + '/_images')).Description), generation = JSON.parse((await selected(pointer.activeSetId)).Description);
+      const fileId = generation.manifest.variants.find(variant => variant.name === 'w400').id;
+      const beforeOwnerDenial = byteRequests(); await permissions(timeline.Id, [{ identity: VISITOR, Open: 'deny', OpenMinor: 'deny' }]);
+      try {
+        await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await visitor.page.waitForFunction(selector => !document.querySelector(selector) || document.querySelector(selector)?.dataset.imageState === 'blocked', `a[href="/timelines/${timeline.Name}"] [data-image-state]`);
+        assert.equal(await card.locator('img').count(), 0); assert.equal(byteRequests(), beforeOwnerDenial);
+        const binary = await local.request(local.REPOSITORY + '/binaryhandler.ashx?' + new URLSearchParams({ nodeid: String(fileId), propertyname: 'Binary' }));
+        assert([403, 404].includes(binary.status), 'Standard File bytes must inherit current owner denial for Visitor.');
+        await visitor.page.screenshot({ path: path.join(output, 'visitor-owner-revoked.png') });
+      } finally { await permissions(timeline.Id, [{ identity: VISITOR, ...READ_PERMISSIONS }]); }
       await goto(visitor.page, '/timelines?filter=q');
       await image.scrollIntoViewIfNeeded(); await card.locator('[data-image-state="loaded"]').waitFor();
-      return { unchangedGenerationAdditionalBytes: 0, revokedSourceHidden: true, restoredByFreshView: true };
+      return { unchangedGenerationAdditionalBytes: 0, sourcePrivateStaticCopyVisible: true, revokedOwnerHidden: true, restoredByFreshView: true };
     });
     await checked('Use original presentation restores the legacy reference through the editor without modifying the original', async () => {
       await goto(editor.page, '/media-library/' + media[0].Name);
@@ -472,16 +540,17 @@ async function smoke() {
       report.recoveryReason = preserveUncertain ? 'An exact application write has an uncertain outcome. Preserve its UUID fixtures until its saved journal request has been durably reconciled; do not replay it with a new key.' : 'Focused continuation stopped. Preserve the verified owned fixtures and prior proof for the next reviewed continuation.';
     } else if (!keepDemo) {
       try {
-        for (const owner of owners) await local.api(owner.Id, { account: accounts.admin, method: 'PATCH', body: { CoverImageSet: [] } });
         for (const owner of owners) {
-          const folderPath = ROOT + '/ImageAssets/' + owner.Id;
+          const folderPath = owner.Path + '/_images';
           let folder;
           try { folder = await selected(folderPath); } catch (error) { if (error.status === 404) continue; throw error; }
-          assert.equal(folder.Path, folderPath); assert.equal(folder.Name, String(owner.Id));
-          const response = await local.request(local.REPOSITORY + '/OData.svc' + folderPath + '?' + new URLSearchParams({ $select: 'Id,Name,Path,Type', metadata: 'no' }), { account: accounts.admin });
-          assert.equal(response.status, 200);
-          for (const set of response.value.d.results) {
-            assert.equal(set.Type, 'ImageVariantSet'); assert(set.Path.startsWith(folderPath + '/') && /^[0-9a-f-]{36}$/.test(set.Name));
+          assert.equal(folder.Path, folderPath); assert.equal(folder.Name, '_images'); assert.equal(folder.Type, 'Folder');
+          const pointer = JSON.parse(folder.Description); assert.equal(pointer.protocol, IMAGE_PROTOCOL); assert.equal(pointer.ownerId, owner.Id); assert.equal(pointer.projectPath, ROOT);
+          await local.api(folder.Id, { account: accounts.admin, method: 'PATCH', query: { $select: 'Id', metadata: 'no' }, body: { Description: JSON.stringify({ ...pointer, activeSetId: null, generationId: null, selectionRevision: crypto.randomUUID() }) } });
+          for (const set of await children(folder.Id)) {
+            assert.equal(set.Type, 'Folder'); assert.equal(set.Path, folderPath + '/' + set.Name); assert(/^[0-9a-f-]{36}$/.test(set.Name));
+            const generation = JSON.parse(set.Description); assert.equal(generation.protocol, IMAGE_PROTOCOL); assert.equal(generation.manifest.ownerId, owner.Id); assert.equal(generation.manifest.projectPath, ROOT); assert.equal(generation.manifest.generationId, set.Name);
+            for (const file of await children(set.Id)) { assert.equal(file.Type, 'File'); assert.equal(file.Path, set.Path + '/' + file.Name); assert(/^w[1-9][0-9]{0,3}\.(?:png|jpg|webp)$/.test(file.Name)); }
             await local.api(set.Id, { account: accounts.admin, method: 'DELETE', query: { permanent: 'true' } }); report.cleanup.push(set.Id);
           }
           await local.api(folder.Id, { account: accounts.admin, method: 'DELETE', query: { permanent: 'true' } }); report.cleanup.push(folder.Id);
@@ -495,7 +564,10 @@ async function smoke() {
     } else report.demoUrls = timeline ? { timeline: FRONTEND + '/timelines/' + timeline.Name, media: media?.map(item => FRONTEND + '/media-library/' + item.Name) } : {};
     report.browserErrors = sessions.map(session => session.errors);
     report.nativeResponses = sessions.map(session => session.responses);
+    report.wire = sessions.map(session => session.wire);
     report.generatedUploads = sessions.flatMap(session => session.uploads);
+    report.finalCount = await repositoryCount();
+    if (!keepDemo && report.cleanupPassed && report.finalCount !== report.initialCount) { report.passed = false; report.cleanupPassed = false; report.cleanupError = `Own fixture cleanup changed repository count ${report.initialCount}→${report.finalCount}.`; }
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
     fs.writeFileSync(path.join(local.ROOT, 'image-ui-smoke.json'), JSON.stringify(report, null, 2));
   }

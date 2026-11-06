@@ -153,7 +153,7 @@ test('a DPR increase upgrades the same CSS slot and a DPR decrease keeps the lar
   } finally { ui.unmount(); state.restore(); }
 });
 
-test('loaded composite rechecks source access on focus: unchanged generation reuses bytes, blocked source revokes the Blob', async () => {
+test('loaded image rechecks its owner presentation on focus: unchanged generation reuses bytes, blocked descriptor revokes the Blob', async () => {
   const state = fixture(), ui = host(() => LazyImage({ image: descriptor, src: 'private-original' }), state.target);
   try {
     ui.flush(); state.visible(); await settle(ui);

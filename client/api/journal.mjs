@@ -91,8 +91,8 @@ export class MutationJournal {
       else if(!result.uncertain)await this.fail(payload,result);
       return result;
     } catch(error) {
-      if([400,401,403,404,409].includes(error.status)&&!error.details?.uncertain) {
-        await this.fail(payload,{ok:false,code:error.code,message:error.message,status:error.status,completed:error.details?.completed??[]});
+      if(([400,401,403,404,409].includes(error.status)||this.repo.mutationDispatched===false)&&!error.details?.uncertain) {
+        await this.fail(payload,{ok:false,code:error.code,message:error.message,status:error.status??500,completed:error.details?.completed??[]});
       }
       throw error;
     }

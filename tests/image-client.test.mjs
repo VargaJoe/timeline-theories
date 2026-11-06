@@ -146,18 +146,23 @@ function generatorEnvironment({ mime = 'image/webp', size = 0, onDecode } = {}) 
   return { closed, canvases, restore() { for (const [key, value] of Object.entries(previous)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true }); } };
 }
 
-test('full generator enforces two source workers, ordered deterministic outputs, hashes and cleanup', async () => {
+test('full generator enforces two source workers, ordered deterministic outputs, hashes and cleanup', { timeout: 5000 }, async () => {
   const env = generatorEnvironment(), releases = [], started = [], sources = Array.from({ length: 4 }, (_, index) => ({ id: index + 1, url: `/source/${index}`, stamp: `stamp-${index}` }));
+  const originalSources = structuredClone(sources);
+  const entered = sources.map(() => deferred());
   const options = { kind: 'timeline-composite', sources, seed: 42, fetchSource: async source => {
-    started.push(source.id); const wait = deferred(); releases.push(wait.resolve); await wait.promise;
+    started.push(source.id); entered[source.id - 1].resolve(); const wait = deferred(); releases.push(wait.resolve); await wait.promise;
     return new Blob([fixtures.png(360, 480, source.id)], { type: 'image/png' });
   } };
   try {
-    const pending = generateImageVariants(options); await tick(); assert.deepEqual(started, [1, 2]);
-    releases.shift()(); await tick(); assert.deepEqual(started, [1, 2, 3]);
-    releases.shift()(); await tick(); assert.deepEqual(started, [1, 2, 3, 4]);
+    const pending = generateImageVariants(options); await Promise.all([entered[0].promise, entered[1].promise]); assert.deepEqual(started, [1, 2]);
+    releases.shift()(); await entered[2].promise; assert.deepEqual(started, [1, 2, 3]);
+    releases.shift()(); await entered[3].promise; assert.deepEqual(started, [1, 2, 3, 4]);
     releases.forEach(release => release()); const result = await pending;
     assert.deepEqual(result.recipe, { template: 'poster-strip-v1', sourceIds: [1, 2, 3, 4], seed: 42 });
+    assert.deepEqual(sources, originalSources, 'Preparing a preview must not mutate the caller source objects.');
+    assert.deepEqual(result.sources.map(source => source.stamp), sources.map(source => createHash('sha256').update(fixtures.png(360, 480, source.id)).digest('hex')), 'Source stamps must hash the actual downloaded originals, not supplied metadata.');
+    assert(result.sources.every((source, index) => source !== sources[index]));
     assert.deepEqual(result.variants.map(variant => variant.width), [400, 800, 1200]);
     for (const variant of result.variants) {
       assert.equal(variant.sha256, createHash('sha256').update(Buffer.from(await variant.blob.arrayBuffer())).digest('hex'));
@@ -169,13 +174,15 @@ test('full generator enforces two source workers, ordered deterministic outputs,
   } finally { env.restore(); }
 });
 
-test('generator accepts PNG encoder fallback but rejects oversized output, stale contexts and cancellation', async () => {
-  const source = { id: 1, url: '/original', stamp: 'current' }, blob = new Blob([fixtures.png(80, 120)], { type: 'image/png' });
+test('generator accepts unstamped originals and PNG fallback but rejects oversized output, stale contexts and cancellation', async () => {
+  const source = { id: 1, url: '/original' }, blob = new Blob([fixtures.png(80, 120)], { type: 'image/png' });
   let env = generatorEnvironment({ mime: 'image/png' });
   try {
     const generated = await generateImageVariants({ kind: 'media-sizes', sources: [source], seed: 0, fetchSource: async () => blob });
     assert.equal(generated.variants[0].mimeType, 'image/png'); assert.equal(generated.variants[0].width, 80);
     assert.equal(generated.recipe.seed, 0);
+    assert.equal(generated.sources[0].stamp, createHash('sha256').update(fixtures.png(80, 120)).digest('hex'));
+    assert.deepEqual(source, { id: 1, url: '/original' });
   } finally { env.restore(); }
   env = generatorEnvironment({ size: 1024 * 1024 + 1 });
   try { await assert.rejects(generateImageVariants({ kind: 'media-sizes', sources: [source], fetchSource: async () => blob }), /1 MiB/); assert.equal(env.closed.length, 1); }

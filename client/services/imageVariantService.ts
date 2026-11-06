@@ -4,7 +4,7 @@ import { assertOperations, captureOperationContext } from './sensenet';
 import type { GeneratedImageSet, ImageGenerationSource } from '../utils/imageGenerator';
 import type { ImageDescriptor } from '../utils/imageVariants';
 
-export interface ImagePresentation extends ImageDescriptor { imageStamp?: string; setId?: number; recipe?: GeneratedImageSet['recipe']; }
+export interface ImagePresentation extends ImageDescriptor { setId?: number; recipe?: GeneratedImageSet['recipe']; }
 export interface ImageCapabilities { available: boolean; protocol?: string; }
 export const imageCapabilities = async (signal?: AbortSignal) =>
   nativeRequest<ImageCapabilities>('/images/capabilities', { signal });
@@ -20,9 +20,7 @@ export async function sourceForGeneration(id: number, signal: AbortSignal): Prom
   signal.throwIfAborted();
   const binary = source.CoverImageBin as { ContentType?: string } | undefined;
   if (!binary || !['image/png', 'image/jpeg', 'image/webp', 'application/octet-stream'].includes(binary.ContentType || '')) throw new Error('Upload an original cover in the media editor before preparing image sizes.');
-  const image = await imagePresentation(id, signal);
-  if (!image.imageStamp) throw new Error('This image cannot be prepared yet. Reload the media item and try again.');
-  return { id, url: `/api/v1/content/${id}/cover`, stamp: image.imageStamp };
+  return { id, url: `/api/v1/content/${id}/cover` };
 }
 export async function originalImageBlob(source: ImageGenerationSource, signal: AbortSignal): Promise<Blob> {
   const response = await nativeResponse(`/content/${source.id}/cover`, { signal });
@@ -67,9 +65,10 @@ export class ImagePublication {
       const manifest = { schemaVersion: 1, kind: this.kind, projectPath: environment.projectRoot,
         ownerId: this.ownerId, generationId: this.generationId, sourceIds: this.generated.sources.map(source => source.id),
         recipe: this.generated.recipe, sourceStamps: this.generated.sources.map(source => ({ id: source.id, stamp: source.stamp })), variants: [] };
-      const draft = await post<{ setId: number }>('/images/drafts', { ownerId: this.ownerId, generationId: this.generationId, expectedRevision: this.owner.revision, manifest }, `${this.generationId}:draft`, signal);
-      if (!Number.isSafeInteger(draft.setId) || draft.setId < 1) throw new Error('The image service returned an invalid draft. Retry this same publication.');
+      const draft = await post<{ setId: number; ownerRevision: string }>('/images/drafts', { ownerId: this.ownerId, generationId: this.generationId, expectedRevision: this.owner.revision, manifest }, `${this.generationId}:draft`, signal);
+      if (!Number.isSafeInteger(draft.setId) || draft.setId < 1 || typeof draft.ownerRevision !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(draft.ownerRevision)) throw new Error('The image service returned an invalid draft. Retry this same publication.');
       this.setId = draft.setId;
+      this.owner = { ...this.owner, revision: draft.ownerRevision };
     }
     for (let index = this.uploaded.length; index < this.generated.variants.length; index++) {
       check();

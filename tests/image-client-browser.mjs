@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fixtures from '../scripts/helpers/image-variant-fixture.cjs';
 
 const require = createRequire(import.meta.url);
@@ -40,7 +41,7 @@ try {
       const cornerAlpha = rendering.getImageData(0, 0, 1, 1).data[3], centerAlpha = rendering.getImageData(Math.floor(firstSlot.x + firstSlot.width / 2), 100, 1, 1).data[3];
       const preview = document.createElement('div'); preview.className = 'preview'; preview.innerHTML = `<span>${count} selected poster${count > 1 ? 's' : ''}</span>`;
       const image = document.createElement('img'); image.src = URL.createObjectURL(small.blob); preview.appendChild(image); document.body.appendChild(preview);
-      sets.push({ count, cornerAlpha, centerAlpha, deterministic: generated.variants.every((variant, index) => variant.sha256 === repeated.variants[index].sha256), variants: await Promise.all(generated.variants.map(async ({ blob, ...variant }) => ({ ...variant, base64: await toBase64(blob) }))) });
+      sets.push({ count, cornerAlpha, centerAlpha, sources: generated.sources, inputUnchanged: options.sources.every(source => source.stamp === 'fixed'), deterministic: generated.variants.every((variant, index) => variant.sha256 === repeated.variants[index].sha256), variants: await Promise.all(generated.variants.map(async ({ blob, ...variant }) => ({ ...variant, base64: await toBase64(blob) }))) });
     }
     const style = document.createElement('style'); style.textContent = 'body{margin:20px;display:grid;grid-template-columns:repeat(2,400px);gap:20px;font:15px sans-serif;background:#eef2f8}.preview{height:245px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(135deg,#3e72b5,#243963);color:white}.preview span{height:25px}.preview img{width:400px;height:200px;object-fit:contain}'; document.head.appendChild(style);
     await Promise.all(Array.from(document.images, image => image.decode()));
@@ -64,6 +65,8 @@ try {
   }, inputs);
   for (const set of result.sets) {
     assert(set.deterministic, 'Repeated generation must have the same hashes in this browser.');
+    assert(set.inputUnchanged, 'Generating a preview must not mutate source descriptors.');
+    assert.deepEqual(set.sources.map(source => source.stamp), inputs.slice(0, set.count).map(input => createHash('sha256').update(Buffer.from(input.base64, 'base64')).digest('hex')));
     assert.equal(set.cornerAlpha, 0, 'Composition must preserve transparent outer space.');
     assert.equal(set.centerAlpha, 255, 'Poster strip must remain visible.');
     assert.deepEqual(set.variants.map(variant => variant.width), [400, 800, 1200]);

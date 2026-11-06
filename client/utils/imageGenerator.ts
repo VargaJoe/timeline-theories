@@ -1,6 +1,7 @@
 import { imageRequestQueue } from './imageLoading';
 
-export interface ImageGenerationSource { id: number; url: string; stamp: string; }
+export interface ImageGenerationSource { id: number; url: string; stamp?: string; }
+export interface GeneratedImageSource extends ImageGenerationSource { stamp: string; }
 export interface GeneratedImageVariant {
   name: string;
   width: number;
@@ -12,7 +13,7 @@ export interface GeneratedImageVariant {
 }
 export interface GeneratedImageSet {
   recipe: { template: 'poster-strip-v1' | 'media-sizes-v1'; sourceIds: number[]; seed?: number };
-  sources: ImageGenerationSource[];
+  sources: GeneratedImageSource[];
   variants: GeneratedImageVariant[];
 }
 export interface GenerateImageVariantsOptions {
@@ -34,7 +35,7 @@ const pngCrcTable = Array.from({ length: 256 }, (_, byte) => {
   return byte >>> 0;
 });
 
-/** Normalize our own canvas fallback, never originals, to the backend's strict RGBA/RGB PNG subset. */
+/** Normalize our own canvas fallback, never originals, to non-interlaced RGB/RGBA PNG. */
 export async function normalizeGeneratedPng(blob: Blob): Promise<Blob> {
   if (!blob.size || blob.size > MAX_VARIANT_BYTES || blob.type !== 'image/png') throw new Error('Generated PNG exceeds the 1 MiB limit.');
   const bytes = new Uint8Array(await blob.arrayBuffer()), view = new DataView(bytes.buffer);
@@ -225,7 +226,7 @@ export async function generateImageVariants(options: GenerateImageVariantsOption
   if (seed !== undefined && (!Number.isSafeInteger(seed) || seed < 0 || seed > 2147483647)) throw new Error('Image selection seed must be an integer between 0 and 2147483647.');
   const sources = options.sources.map(source => ({ ...source }));
   if (!['timeline-composite', 'media-sizes'].includes(kind) || !sources.length || sources.length > (kind === 'media-sizes' ? 1 : 4) ||
-    new Set(sources.map(source => source.id)).size !== sources.length || sources.some(source => !Number.isSafeInteger(source.id) || source.id <= 0 || !source.url || typeof source.stamp !== 'string' || !source.stamp)) throw new Error('Select valid, distinct image sources with current stamps.');
+    new Set(sources.map(source => source.id)).size !== sources.length || sources.some(source => !Number.isSafeInteger(source.id) || source.id <= 0 || !source.url)) throw new Error('Select valid, distinct image sources.');
   const controller = new AbortController(), abort = () => controller.abort();
   options.signal?.addEventListener('abort', abort, { once: true });
   if (options.signal?.aborted) controller.abort();
@@ -235,11 +236,15 @@ export async function generateImageVariants(options: GenerateImageVariantsOption
     check();
     const pending = sources.map(source => imageRequestQueue.run(async () => {
       check(); const blob = await fetchSource(source, controller.signal); check();
-      const image = await decodeImage(blob, check, controller.signal); decoded.push(image); return image;
+      const image = await decodeImage(blob, check, controller.signal); decoded.push(image);
+      const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()); check();
+      const stamp = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+      return { image, source: { ...source, stamp } };
     }, controller.signal));
-    let images: DecodedImage[];
-    try { images = await Promise.all(pending); }
+    let prepared: { image: DecodedImage; source: GeneratedImageSource }[];
+    try { prepared = await Promise.all(pending); }
     catch (error) { controller.abort(); await Promise.allSettled(pending); throw error; }
+    const images = prepared.map(item => item.image);
     const variants: GeneratedImageVariant[] = [];
     for (const size of imageOutputSizes(kind, images)) {
       check();
@@ -253,7 +258,7 @@ export async function generateImageVariants(options: GenerateImageVariantsOption
       } finally { canvas.width = 0; canvas.height = 0; }
     }
     if (variants.reduce((total, variant) => total + variant.byteLength, 0) > MAX_SET_BYTES) throw new Error('Generated image set exceeds the 3 MiB limit.');
-    return { recipe: { template: kind === 'timeline-composite' ? 'poster-strip-v1' : 'media-sizes-v1', sourceIds: sources.map(source => source.id), ...(seed !== undefined ? { seed } : {}) }, sources, variants };
+    return { recipe: { template: kind === 'timeline-composite' ? 'poster-strip-v1' : 'media-sizes-v1', sourceIds: sources.map(source => source.id), ...(seed !== undefined ? { seed } : {}) }, sources: prepared.map(item => item.source), variants };
   } finally {
     controller.abort(); options.signal?.removeEventListener('abort', abort);
     decoded.forEach(image => image.close());
