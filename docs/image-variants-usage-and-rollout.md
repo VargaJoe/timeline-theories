@@ -55,11 +55,10 @@ Bizonytalan mentésnél ugyanaz a kéréskulcs ellenőrzi a korábbi eredményt.
 
 ```powershell
 & deployment/scripts/m0-runtime.ps1 start
-node scripts/m0-local-api.cjs
-npm run dev:m0
+docker compose -f compose.local.yaml up -d --build
 ```
 
-App: **https://localhost:8080**, profil `m0-local`, repository `https://localhost:41016`. A meglévő helyi accountok az ignored `deployment/.local/accounts.json` fájlban vannak; új account vagy éles belépés nem kell.
+App: **https://localhost:8080**, profil `m0-local`, repository `https://localhost:41016`. A teljes app a `timeline-local` / `app` Docker-konténerben fut; újraindítás: `docker compose -f compose.local.yaml restart app`. A beállításokat a gyökér ignored `.env` adja, az egyszer másolandó `.env.example` kizárólag a projekt saját localhost mintáját tartalmazza. Részletek: [helyi Docker-indítás](local-docker.md). A meglévő helyi accountok az ignored `deployment/.local/accounts.json` fájlban vannak; új account vagy éles belépés nem kell.
 
 A megtartott, valódi poszteres helyi példa: [Local Conan demo](https://localhost:8080/timelines/local-conan-demo-833b49e7-0cf7-4359-8c4a-cdc84ba967e0). A timeline `9146`, három bejegyzése a meglévő `3007/3009/3011` médiákra hivatkozik. Alatta `_images` Folder `9150`, generáció Folder `9151`, három standard File `9152–9154` található. A demó pontosan kilenc új, helyi rekord; a 2998 eredeti rekord megmaradt. Részletes fa, receptek és bizonyíték: ignored `deployment/.local/image-variants-demo.json`; a kis előnézet `deployment/.local/image-variants-demo-preview.png`.
 
@@ -79,7 +78,7 @@ Sikeres friss ellenőrzések:
 - Standard HTTPS API: Timeline/MediaItem/BookMediaItem alatti Folder/File, eredetifeltöltés, lezárás, aktiválás és törlés; elveszett válasz helyreállítása ugyanazzal a kulccsal, natív írás megismétlése nélkül.
 - 19/19 friss valós editor/Visitor ellenőrzés: 1–4 poszter, WebP/PNG, sorrend/Random, helyreállítás, médiaméretek/picker, inaktív takarítás, mobil, lusta betöltés, tényleges owner ACL-visszavonás és változatlan eredeti byte-ok. A teszt saját tartalmait kitakarította, 2998→2998 rekord.
 - A Conan-példa valódi látogatói kártyája 400×200-as, 16 844 byte-os WebP-t töltött le: egy kérés, nulla eredeti/entry-pool kérés asztali és mobilnézetben is. Ez konkrét helyi minta, nem általánosított sebességígéret.
-- A korábbi képbővítés helyi eltávolítása után 133 meglévő backendregresszió és a 2998 eredeti rekord/1503 eredeti binary megőrzési ellenőrzése sikeres. A PR-nak nincs `deployment` vagy `scripts/m0-provision.cjs` eltérése a develophoz képest.
+- A korábbi képbővítés helyi eltávolítása után 133 meglévő backendregresszió és a 2998 eredeti rekord/1503 eredeti binary megőrzési ellenőrzése sikeres. A SenseNet runtime/contenttype/extension/provisioning fájlok a develophoz képest változatlanok; az új `deployment/docker` kizárólag a kliens/app helyi konténerét írja le.
 
 Megismételhető kódellenőrzés:
 
