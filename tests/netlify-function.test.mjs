@@ -6,7 +6,7 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import forge from '../client/node_modules/node-forge/lib/index.js';
 import { startBlobFixture } from './helpers/netlify-blobs-fixture.mjs';
-import { createFunctionApp, invocationTimeoutMs } from '../client/api/function.mjs';
+import { createFunctionApp, invocationTimeoutMs, handleRequest as handleFunctionRequest } from '../client/api/function.mjs';
 import { FIELDS } from '../client/domain/content.mjs';
 import { hash } from '../client/api/store.mjs';
 import { loadConfig } from '../client/api/config.mjs';
@@ -561,11 +561,34 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   }
 });
 
-test('dedicated image writes abort with cleanup headroom before the local synchronous platform kill', () => {
-  for (const path of ['/api/v1/images/drafts', '/api/v1/images/drafts/30/variants/w400', '/.netlify/functions/native-api/v1/images/drafts/30/seal', '/.netlify/functions/native-api/images/drafts/30/delete']) assert.equal(invocationTimeoutMs(new Request('https://app.fixture.invalid' + path, { method: 'POST' })), 25000);
-  assert.equal(invocationTimeoutMs(new Request('https://app.fixture.invalid/api/v1/content/10')), 55000);
-  assert.equal(invocationTimeoutMs(new Request('https://app.fixture.invalid/api/v1/plans', { method: 'POST' })), 55000);
-  assert.equal(invocationTimeoutMs(new Request('https://app.fixture.invalid/.netlify/functions/native-api-background', { method: 'POST' }), true), 895000);
+test('dedicated image writes keep their existing deadline in deployed and local runtimes', () => {
+  for (const devRuntime of [false, true]) for (const path of ['/api/v1/images/drafts', '/api/v1/images/drafts/30/variants/w400', '/.netlify/functions/native-api/v1/images/drafts/30/seal', '/.netlify/functions/native-api/images/drafts/30/delete']) assert.equal(invocationTimeoutMs(new Request('https://app.fixture.invalid' + path, { method: 'POST' }), false, devRuntime), 25000);
+});
+
+test('local synchronous reads and plans leave cleanup headroom while deployed and background deadlines remain unchanged', () => {
+  for (const [method, path] of [['GET', '/api/v1/capabilities'], ['POST', '/api/v1/lookup'], ['GET', '/api/v1/content/10'], ['POST', '/api/v1/plans'], ['GET', '/.netlify/functions/native-api/v1/capabilities'], ['POST', '/.netlify/functions/native-api/lookup']]) {
+    const request = new Request('https://app.fixture.invalid' + path, { method });
+    assert.equal(invocationTimeoutMs(request, false, true), 25000);
+    assert.equal(invocationTimeoutMs(request), 55000);
+    assert.equal(invocationTimeoutMs(request, false, false), 55000);
+  }
+  const background = new Request('https://app.fixture.invalid/.netlify/functions/native-api-background', { method: 'POST' });
+  for (const devRuntime of [false, true]) assert.equal(invocationTimeoutMs(background, true, devRuntime), 895000);
+});
+
+test('the function entrypoint chooses its local deadline from the exact runtime flag before configuration', async t => {
+  const names = ['TIMELINE_NETLIFY_DEV', 'TIMELINE_APP_DEV_CA_FILE', 'TIMELINE_READ_ONLY'], saved = new Map(names.map(name => [name, process.env[name]]));
+  t.after(() => { for (const [name, value] of saved) if (value === undefined) delete process.env[name]; else process.env[name] = value; });
+  // Configuration deliberately fails before any backend or storage access.
+  process.env.TIMELINE_APP_DEV_CA_FILE = 'relative-test-only.pem'; process.env.TIMELINE_READ_ONLY = 'invalid-test-only';
+  const delays = [], originalTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => { delays.push(delay); return originalTimeout(callback, delay, ...args); });
+  for (const flag of [undefined, 'false', 'true']) {
+    if (flag === undefined) delete process.env.TIMELINE_NETLIFY_DEV; else process.env.TIMELINE_NETLIFY_DEV = flag;
+    const response = await handleFunctionRequest(new Request('https://app.fixture.invalid/api/v1/lookup', { method: 'POST', body: '{}' }));
+    assert.equal(response.status, 503); assert.equal((await response.json()).error.code, 'invalid_configuration');
+  }
+  assert.deepEqual(delays, [55000, 55000, 25000]);
 });
 
 async function preparedImageUpload(t, extra = {}) {

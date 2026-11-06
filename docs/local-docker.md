@@ -40,6 +40,10 @@ A böngésző és az OIDC callback címei localhost HTTPS címek maradnak. A kon
 
 A helyi Node-folyamatok `--dns-result-order=ipv4first` beállítással futnak: ez a Netlify CLI Function-streamet fogadó és hívó workerének localhost-címfeloldását egyezteti Linuxon. Nem TLS-kivétel és nem production változtatás.
 
+A helyi Netlify CLI szinkron Functions-limitje 30 másodperc; az app helyi, 25 másodperces belső kerete a CLI kényszerleállítása előtt hagy időt a kezelhető hibára. A production időkerete ettől nem változik. Az ismert Lambda-időtúllépést a kliens felismeri és érthetően jelzi. Az átfedő readiness-ellenőrzések egy folyamatban lévő kérést osztanak meg; az adott cél jogosultsági ellenőrzése és az írás előtti friss backend-ellenőrzés megmarad.
+
+A bizonytalan képpublikálás megőrzött előnézetét a **Retry publication** az eredeti generációval és kulcsokkal folytatja; ne próbáld oldalfrissítéssel vagy új kép indításával megkerülni. Hiányzó journal mellett is csak az eredeti szereplőhöz/kulcshoz/művelethez kötött metaadat-helyreállítás engedhető, a pontos eredeti kérés futtatójának igazolt leállítása után. A timeout vagy az eltelt idő nem elég; ez a helyreállítás nem ismétel SenseNet-írást. A szokásos restart/rebuild parancs önmagában nem old fel bizonytalan műveletet. A szerkesztői lépések: [képméretek és publikálás](image-variants-usage-and-rollout.md#szerkesztői-folyamat).
+
 Már inicializált helyi repónál csak ellenőrizd/indítsd a meglévő backendet, majd az appot:
 
 ```powershell
@@ -67,3 +71,5 @@ A helyi adatpillanatkép és helyreállítás külön folyamat: [M0 helyi adatok
 3. `restart app` után a kép és a mentett kiválasztás továbbra is látható; a helyi app-állapot és a repository adatai megmaradnak.
 
 2026-11-06, Windows/Docker Desktop: a végleges image buildje és healthcheckje sikeres. A teljes tesztkör 269/269; a 13 új launcher-teszt valódi bináris TCP-továbbítást, takarítást, környezeti célkötést és readonly-határt is ellenőriz. A hat valós böngészőpróba (API/cél, látogatói generált kártya, Media Library, OIDC-belépés, mentett editor-kiválasztás, mobil) az újraindítás előtt és után is sikeres, alkalmazás-/oldalhiba és tartalmi írás nélkül. A repository 3007→3007 rekord; az app 8436 fájljának / 165 732 829 byte-jának összesített SHA-256 lenyomata újralétrehozás és újraindítás után is egyezik. Az image-ben `.env`, privát profil, tanúsítvány, helyi adat és `.git` nincs; nem root felhasználóval fut. Részletes helyi bizonyíték: ignored `deployment/.local/local-compose-2026-11-06/`.
+
+A későbbi publikálási regresszió javításának friss kódellenőrzése 281 unit/contract teszt, 66 parity-ellenőrzés, lint és build: sikeres. Valódi helyi editorral, ugyanazon megnyitott panelen a timeline és a média is kétszer egymás után publikálható volt. A kiválasztás/új előnézet mindkét mentés után használható, mindkét owner alatt két lezárt generáció igazolt; az eredeti SHA-k változatlanok. Saját teszttartalmak kitakarítva, 3009→3009 rekord. Az eredeti hibás kérés írózárát a pontos régi konténer igazolt megszűnése után, nulla SenseNet-írással oldottuk fel; a felhasználó félkész készlete és korábbi aktív borítója megmaradt. Bizonyíték: ignored `deployment/.local/image-editor-regression-2026-11-06/`.

@@ -10,7 +10,7 @@ export const nativeSnapshot=async(...args)=>{globalThis.imagePublicationFixture.
 export const nativeCoverPayload=async(file,fileName)=>({bytesBase64:Buffer.from(await file.arrayBuffer()).toString('base64'),mimeType:file.type,fileName});
 export const applyNativeCommands=async commands=>globalThis.imagePublicationFixture.apply(commands);
 export const acknowledgeNativeCommands=()=>{};`);
-const context = moduleUrl(`export const captureOperationContext=()=>()=>{if(globalThis.imagePublicationFixture.changed)throw new Error('context changed')};export const assertOperations=async()=>{};`);
+const context = moduleUrl(`export const captureOperationContext=()=>()=>{if(globalThis.imagePublicationFixture.changed)throw new Error('context changed')};export const assertOperations=async()=>{await globalThis.imagePublicationFixture.preflight?.()};`);
 const config = moduleUrl(`export const environment={projectRoot:'/Root/Fixture'};`);
 let source = ts.transpileModule(fs.readFileSync(new URL('../client/services/imageVariantService.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 for (const [from, to] of [['../configuration', config], ['./nativeApi', native], ['./sensenet', context]]) source = source.replaceAll(`'${from}'`, JSON.stringify(to));
@@ -135,4 +135,73 @@ test('invalid post-setup owner revisions cannot advance a draft to seal or activ
     await assert.rejects(intent.publish(new AbortController().signal, () => {}), /invalid draft/);
     assert.deepEqual(requests, ['/images/drafts']);
   }
+});
+
+test('preflight failure does not lock a publication that has sent no image mutation', async () => {
+  let unavailable = true, writes = 0;
+  globalThis.imagePublicationFixture = { owner: { Id: 7, revision: 'before' },
+    preflight: async () => { if (unavailable) throw Error('gateway timed out before dispatch'); },
+    request: async path => { writes++; return path === '/images/drafts' ? { setId: 90, ownerRevision: 'sha256:' + 'a'.repeat(64) } : {}; },
+    apply: async () => {},
+  };
+  const intent = new ImagePublication(7, { sources: [], variants: [], recipe: { sourceIds: [] } }, 'timeline-composite', { Id: 7, revision: 'before' });
+  await assert.rejects(intent.publish(new AbortController().signal, () => {}), /before dispatch/);
+  assert.equal(intent.hasStartedMutation, false);
+  assert.equal(writes, 0);
+  unavailable = false;
+  await intent.publish(new AbortController().signal, () => {});
+  assert.equal(intent.hasStartedMutation, true);
+  assert.equal(writes, 2, 'Only draft and seal are needed for this empty test set.');
+});
+
+test('timeout on a later variant keeps the exact generation, bytes and keys until success', async () => {
+  const calls = [], activations = [];
+  let timeout = true;
+  const owner = { Id: 7, revision: 'before' };
+  const variants = [400, 800].map(width => ({ name: 'w' + width, width, height: width / 2, mimeType: 'image/webp', byteLength: 3, sha256: 'b'.repeat(64), blob: new Blob([width === 400 ? 'abc' : 'def']) }));
+  const generated = { sources: [{ id: 8, stamp: 'a'.repeat(64) }], recipe: { sourceIds: [8] }, variants };
+  globalThis.imagePublicationFixture = { owner, async request(path, init) {
+    calls.push({ path, body: JSON.parse(init.body), key: init.headers['Idempotency-Key'] });
+    if (path === '/images/drafts') return { setId: 90, ownerRevision: 'sha256:' + 'c'.repeat(64) };
+    if (path.endsWith('/w800') && timeout) { timeout = false; const error = new Error('The request timed out.'); error.code = 'native_gateway_timeout'; error.details = { uncertain: true }; throw error; }
+    return path.includes('/variants/') ? { ...JSON.parse(init.body).variant, id: path.endsWith('/w400') ? 91 : 92 } : {};
+  }, async apply(commands) { activations.push(commands); } };
+  const intent = new ImagePublication(7, generated, 'timeline-composite', owner);
+  await assert.rejects(intent.publish(new AbortController().signal, () => {}), /timed out/);
+  assert.equal(intent.hasStartedMutation, true, 'The selection must remain bound to the uncertain request.');
+  const generation = intent.generationId;
+  await intent.publish(new AbortController().signal, () => {});
+  const writesAtSuccess = calls.length;
+  await intent.publish(new AbortController().signal, () => {});
+  assert.equal(intent.generationId, generation);
+  assert.equal(calls.length, writesAtSuccess);
+  assert.equal(calls.filter(c => c.path === '/images/drafts').length, 1);
+  assert.equal(calls.filter(c => c.path.endsWith('/w400')).length, 1);
+  const retried = calls.filter(c => c.path.endsWith('/w800'));
+  assert.equal(retried.length, 2);
+  assert.deepEqual(retried[0], retried[1]);
+  assert.equal(activations.length, 1);
+  const next = new ImagePublication(7, generated, 'timeline-composite', owner);
+  assert.notEqual(next.generationId, generation, 'After success a new edit starts an independent publication.');
+  assert.equal(next.hasStartedMutation, false);
+});
+
+test('retry after a completed publication and failed presentation refresh performs no second activation', async () => {
+  let writes = 0, activations = 0, refreshes = 0;
+  const owner = { Id: 7, revision: 'before' };
+  globalThis.imagePublicationFixture = { owner, async request(path) {
+    if (path.endsWith('/image-presentation/editor')) {
+      if (++refreshes === 1) throw Error('lost display refresh');
+      return { state: 'active', setId: 90 };
+    }
+    writes++;
+    return path === '/images/drafts' ? { setId: 90, ownerRevision: 'sha256:' + 'a'.repeat(64) } : {};
+  }, async apply() { activations++; } };
+  const intent = new ImagePublication(7, { sources: [], variants: [], recipe: { sourceIds: [] } }, 'timeline-composite', owner);
+  await intent.publish(new AbortController().signal, () => {});
+  await assert.rejects(imagePresentation(7, undefined, true), /lost display/);
+  await intent.publish(new AbortController().signal, () => {});
+  assert.equal((await imagePresentation(7, undefined, true)).state, 'active');
+  assert.equal(writes, 2);
+  assert.equal(activations, 1);
 });

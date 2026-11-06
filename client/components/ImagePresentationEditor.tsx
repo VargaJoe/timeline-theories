@@ -92,10 +92,15 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
       if (abort.signal.aborted) return;
       await onSaved(owner); setCurrent(image); intent.current = undefined; setGenerated(undefined); setStatus('Published. The original images are preserved.'); invalidatePermissions();
     } catch (caught) { if (!abort.signal.aborted) {
+      const beforeDispatch = !intent.current?.hasStartedMutation;
       const uncertain = caught instanceof NativeApiError && caught.details && typeof caught.details === 'object' && 'uncertain' in caught.details && caught.details.uncertain === true;
       const confirmed = caught instanceof NativeApiError && [400, 403, 409].includes(caught.status) && !uncertain && !caught.transportFailure &&
         ['revision_conflict', 'image_source_changed', 'image_source_not_public', 'image_owner_privacy_conflict', 'image_storage_collision', 'image_set_state', 'image_stale', 'image_draft_changed', 'permission_denied', 'backend_denied', 'image_integrity', 'invalid_image_asset', 'function_deadline'].includes(caught.code) && !caught.applyResult?.retrySamePlan && !caught.applyResult?.uncertainTargets?.length;
-      setTerminal(confirmed); setError((caught instanceof Error ? caught.message : 'Publication could not finish.') + (confirmed ? ' Prepare a new preview with the current images.' : ' Retry continues this same image set.')); setStatus('');
+      if (beforeDispatch) intent.current = undefined;
+      const next = beforeDispatch ? ' No image changes were sent. You can retry or change the selection.'
+        : confirmed ? ' Prepare a new preview with the current images.'
+        : ' Retry publication checks and continues this same image set. Selection stays locked until the saved outcome is resolved.';
+      setTerminal(confirmed); setError((caught instanceof Error ? caught.message : 'Publication could not finish.') + next); setStatus('');
     } }
     finally { if (!abort.signal.aborted) setBusy(false); }
   }
@@ -135,7 +140,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
   }
   if (unavailable) return <section className="image-editor"><h3>{media ? 'Image sizes' : 'List cover'}</h3><p>Image optimization is not available in this repository yet.</p></section>;
   return <section className="image-editor" aria-busy={busy}>
-    <header><div><h3>{media ? 'Image sizes' : 'List cover'}</h3><p>{media ? 'Prepare smaller copies for cards and detail views. Your original stays intact.' : 'Choose up to four posters in display order, then preview and publish one compact list image.'}</p></div><span className="image-editor-state">{current?.state === 'active' ? 'Published' : current?.state === 'stale' ? 'Regeneration needed' : 'Original presentation'}</span></header>
+    <header><div><h3>{media ? 'Image sizes' : 'List cover'}</h3><p>{media ? 'Prepare smaller copies for cards and detail views. Your original stays intact.' : 'Choose up to four posters in display order, then preview and publish one compact list image.'}</p></div><span className="image-editor-state">{intent.current ? busy ? 'Publishing…' : 'Publication paused' : current?.state === 'active' ? 'Published' : current?.state === 'stale' ? 'Regeneration needed' : 'Original presentation'}</span></header>
     {!ready && !error && <p role="status">Loading image tools…</p>}
     {ready && <>
       <p>Published images use this item's access permissions. Regenerate after changing the original artwork.</p>

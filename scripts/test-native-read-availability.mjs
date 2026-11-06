@@ -7,6 +7,8 @@ const read = path => fs.readFileSync(new URL(path, root), 'utf8');
 const compile = source => 'data:text/javascript;base64,' + Buffer.from(ts.transpileModule(source,
   { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText).toString('base64');
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+const tick = () => new Promise(resolve => setImmediate(resolve));
+const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 let fixtureCount = 0;
 async function fixture({ mode = 'production', discovery = 'html', lookupError, readOnly = false, readAllowed = true, writeAllowed = true, token = 'fixture-backend-jwt', coverRows } = {}) {
   const environment = { mode, repositoryUrl: 'https://repo.test', authority: 'https://auth.test', projectRoot: '/Root/Content/timelines', writable: true };
@@ -257,6 +259,121 @@ async function main() {
     assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/capabilities')).length, 2);
     f.sense.setRepositoryAccessToken(''); await f.load();
     assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/capabilities')).length, 3);
+  });
+  await test('six concurrent write checks share readiness while preserving every exact-target ACL probe', async () => {
+    const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, gate = deferred();
+    globalThis.fetch = async (url, init) => { const result = await original(url, init); if (new URL(url).pathname.endsWith('/lookup')) await gate.promise; return result; };
+    const targets = [1, 1, 2, 2, 3, 4], checks = targets.map(target => f.sense.canOperations([{ target, action: 'update' }]));
+    await tick();
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/capabilities')).length, 1);
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
+    assert.equal(f.aclCalls.length, 0, 'ACL checks must wait for readiness');
+    gate.resolve(); assert.deepEqual(await Promise.all(checks), targets.map(() => true));
+    assert.deepEqual(f.aclCalls.map(call => call.target).sort(), [...targets].sort());
+    assert.ok(f.aclCalls.every(call => call.permissions.length === 1 && call.permissions[0] === 'Save'));
+    await f.sense.assertOperations([{ target: 5, action: 'update' }]);
+    assert.equal(f.aclCalls.length, 7, 'The existing global readiness cache must not cache target permissions');
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  await test('failed shared readiness clears so six retries perform one new lookup', async () => {
+    const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, gate = deferred(); let fail = true;
+    globalThis.fetch = async (url, init) => {
+      const result = await original(url, init);
+      if (new URL(url).pathname.endsWith('/lookup') && fail) { fail = false; await gate.promise; return response({ errorType: 'LambdaTimeoutError', errorMessage: 'Task timed out after 30.00 seconds' }, 500); }
+      return result;
+    };
+    const checks = Promise.allSettled([1, 1, 2, 2, 3, 4].map(target => f.native.requireNativeWriteReadiness(target)));
+    await tick(); assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
+    gate.resolve();
+    for (const result of await checks) { assert.equal(result.status, 'rejected'); assert.equal(result.reason.code, 'native_gateway_timeout'); }
+    assert.equal(f.native.cachedNativeSnapshot(1), undefined);
+    await Promise.all([1, 1, 2, 2, 3, 4].map(target => f.native.requireNativeWriteReadiness(target)));
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 2);
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/capabilities')).length, 1);
+  });
+  await test('identity switch starts separate readiness and old completion cannot clear or populate it', async () => {
+    const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, gates = [];
+    let token = 'fixture-backend-jwt'; f.native.configureNativeAuth(() => token);
+    globalThis.fetch = async (url, init) => {
+      const result = await original(url, init);
+      if (new URL(url).pathname.endsWith('/lookup')) { const gate = deferred(); gates.push(gate); await gate.promise; }
+      return result;
+    };
+    const old = f.native.requireNativeWriteReadiness(1), rejected = assert.rejects(old, error => error.code === 'identity_changed');
+    await tick(); token = 'fixture-next-jwt';
+    const next = f.native.requireNativeWriteReadiness(2);
+    await tick(); assert.equal(gates.length, 2);
+    gates[0].resolve(); await rejected;
+    assert.equal(f.native.cachedNativeSnapshot(1), undefined);
+    let joinedResolved = false;
+    const joined = f.native.requireNativeWriteReadiness(3).then(() => { joinedResolved = true; });
+    await tick(); assert.equal(gates.length, 2); assert.equal(joinedResolved, false, 'An old identity must not populate the new readiness cache');
+    gates[1].resolve(); await Promise.all([next, joined]);
+    assert.equal(f.native.cachedNativeSnapshot(1), undefined);
+    assert.equal(f.native.cachedNativeSnapshot(2).Id, 2);
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/capabilities')).length, 2);
+    assert.deepEqual(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).map(call => new Headers(call.init.headers).get('Authorization')), ['Bearer fixture-backend-jwt', 'Bearer fixture-next-jwt']);
+  });
+  for (const outage of [false, true]) await test((outage ? 'marking the gateway unavailable' : 'explicit invalidation') + ' discards in-flight readiness even for the same identity', async () => {
+    const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, gate = deferred(); let held = true;
+    globalThis.fetch = async (url, init) => {
+      const result = await original(url, init);
+      if (new URL(url).pathname.endsWith('/lookup') && held) { held = false; await gate.promise; }
+      return result;
+    };
+    const pending = f.native.requireNativeWriteReadiness(1), rejected = assert.rejects(pending, error => error.code === 'native_readiness_changed');
+    await tick();
+    if (outage) f.native.markNativeGatewayUnavailable(new f.native.NativeApiError('Gateway stopped', 503, 'native_gateway_unavailable'));
+    else f.native.invalidateNativeSnapshots();
+    gate.resolve(); await rejected;
+    assert.equal(f.native.cachedNativeSnapshot(1), undefined, 'A discarded readiness response must not repopulate snapshots');
+    if (outage) {
+      await assert.rejects(f.native.requireNativeWriteReadiness(2), error => error.code === 'native_gateway_unavailable');
+      assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 1);
+      f.native.invalidateNativeSnapshots();
+    }
+    await Promise.all([2, 2, 3, 3, 4, 5].map(target => f.native.requireNativeWriteReadiness(target)));
+    assert.equal(f.nativeCalls.filter(call => call.path.endsWith('/lookup')).length, 2);
+  });
+  for (const errorType of ['TimeoutError', 'LambdaTimeoutError']) await test(errorType + ' preserves an uncertain apply and its exact plan/key for retry', async () => {
+    const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, plans = [], applies = [];
+    globalThis.fetch = async (url, init) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/v1/plans') { plans.push(JSON.parse(init.body)); return response({ id: 'saved-timeout-plan' }); }
+      if (path === '/api/v1/plans/saved-timeout-plan/apply') {
+        applies.push({ path, body: init.body, key: new Headers(init.headers).get('Idempotency-Key') });
+        return applies.length === 1 ? response({ errorType, errorMessage: 'Task timed out after 30.00 seconds', details: { uncertain: false } }, 500) : response({ ok: true, completed: [] });
+      }
+      return original(url, init);
+    };
+    const commands = [{ action: 'cover-presentation', targetId: 1, expectedRevision: 'saved-owner-revision', setId: 90 }];
+    await assert.rejects(f.native.applyNativeCommands(commands), error => {
+      assert.equal(error.code, 'native_gateway_timeout'); assert.equal(error.status, 500);
+      assert.equal(error.message, 'The request timed out before its outcome could be confirmed.');
+      assert.equal(error.details.uncertain, true); assert.equal(error.recoverable, true);
+      assert.equal(error.planId, 'saved-timeout-plan'); assert.equal(error.idempotencyKey, applies[0].key);
+      assert.equal(f.native.canUseLegacyRead(error), false); return true;
+    });
+    await f.native.applyNativeCommands(commands);
+    assert.equal(plans.length, 1); assert.equal(applies.length, 2); assert.deepEqual(applies[0], applies[1]);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  await test('normal native errors retain their domain code, message and details', async () => {
+    const f = await fixture({ discovery: 'ready' });
+    const cases = [
+      [{ error: { code: 'permission_denied', message: 'Exact target denied', details: { uncertain: false } } }, 403, 'permission_denied', 'Exact target denied'],
+      [{ errorType: 'TimeoutError', errorMessage: 'Task timed out', code: 'revision_conflict', message: 'The owner changed', details: { uncertain: false } }, 409, 'revision_conflict', 'The owner changed'],
+      [{ error: 'Explicit gateway error' }, 502, 'native_request_failed', 'Explicit gateway error'],
+      [{ errorType: 'OtherRuntimeError', errorMessage: 'Private runtime details' }, 500, 'native_request_failed', 'The native gateway rejected the request.'],
+    ];
+    for (const [payload, status, code, message] of cases) {
+      globalThis.fetch = async () => response(payload, status);
+      await assert.rejects(f.native.nativeRequest('/lookup', { method: 'POST', body: '{}' }), error => {
+        assert.equal(error.code, code); assert.equal(error.status, status); assert.equal(error.message, message);
+        assert.deepEqual(error.details, payload.error?.details ?? payload.details); return true;
+      });
+    }
   });
   await test('an absent gateway never bypasses the real read ACL', async () => {
     const f = await fixture({ readAllowed: false }); await assert.rejects(f.load(), /Permission denied/); assert.equal(f.rawCalls.length, 0);

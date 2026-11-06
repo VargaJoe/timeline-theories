@@ -48,6 +48,8 @@ export class ImagePublication {
   private uploaded: Record<string, unknown>[] = [];
   private sealed = false;
   private completed?: NativeSnapshot;
+  private mutationStarted = false;
+  get hasStartedMutation(): boolean { return this.mutationStarted; }
   private readonly checkContext = captureOperationContext();
   constructor(ownerId: number, generated: GeneratedImageSet, kind: 'timeline-composite' | 'media-sizes', owner: NativeSnapshot) {
     this.ownerId = ownerId; this.generated = generated; this.kind = kind; this.owner = owner;
@@ -65,6 +67,9 @@ export class ImagePublication {
       const manifest = { schemaVersion: 1, kind: this.kind, projectPath: environment.projectRoot,
         ownerId: this.ownerId, generationId: this.generationId, sourceIds: this.generated.sources.map(source => source.id),
         recipe: this.generated.recipe, sourceStamps: this.generated.sources.map(source => ({ id: source.id, stamp: source.stamp })), variants: [] };
+      // From this point a lost response may follow committed repository work.
+      // Preflight failures above it do not need to lock the source selection.
+      this.mutationStarted = true;
       const draft = await post<{ setId: number; ownerRevision: string }>('/images/drafts', { ownerId: this.ownerId, generationId: this.generationId, expectedRevision: this.owner.revision, manifest }, `${this.generationId}:draft`, signal);
       if (!Number.isSafeInteger(draft.setId) || draft.setId < 1 || typeof draft.ownerRevision !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(draft.ownerRevision)) throw new Error('The image service returned an invalid draft. Retry this same publication.');
       this.setId = draft.setId;

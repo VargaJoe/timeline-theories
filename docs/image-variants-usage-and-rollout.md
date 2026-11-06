@@ -41,6 +41,10 @@ Médiánál **Image sizes → Prepare sizes → Publish**. URL-only tartalomnál
 
 A **Use original presentation** visszavált az eredeti megjelenésre. A **Delete unused copies** külön megerősítéssel csak az inaktív generációkat törli. Az eredetiket egyik művelet sem cseréli le.
 
+Ha a publikálás kimenetele bizonytalan, a panel megtartja az adott generációt, előnézetet és kéréskulcsokat. Amíg ez a függő publikálás megvan, a képválasztás, sorrend és Random módosítása szünetel; a **Retry publication** ugyanazt a generációt és ugyanazokat a kulcsokat folytatja. Elveszett válasz vagy időtúllépés miatt ne készíts helyette új képet, és ne használd az oldalfrissítést helyreállításként. A helyi Functions-időtúllépés külön felismerhető hibaüzenetet kap, nem általános gateway-elutasításként jelenik meg.
+
+A képművelet előtti gateway-/jogosultsági előellenőrzés hibája nem tart meg függő publikálást, ezért ilyenkor a kijelölés szerkeszthető marad. Sikeres publikálás után is újra szerkeszthető a panel: módosítsd a kijelölést vagy sorrendet, készíts új **Generate preview** előnézetet, majd publikáld azt.
+
 ## Jogosultságok és adatmegőrzés
 
 A képmappa és fájljai az őket tartalmazó elem standard SenseNet-jogosultságait öröklik. Minden művelet az aktuális felhasználó hitelesítésével fut; nincs admin vagy inventory identitással végzett képbyte-olvasás és nincs új jogosultság kiosztása. A mentéshez tényleges Save/AddNew, a takarításhoz Delete kell. A standard Upload saját AddNew-ellenőrzése is érvényes.
@@ -50,6 +54,8 @@ A publikált borító **önálló, statikus másolat**, a tartalmazó elem tény
 Az alkalmazás saját API-ja védi a teljes készletre váltást, a név/owner/projekt-kötést, a méret-/MIME-/hash-korlátokat és a megismételt kéréseket. A standard fájlokat megfelelő jogosultsággal más SenseNet-kliens is szerkesztheti. Nincs natív módosíthatatlansági vagy több tartalomra kiterjedő atomikus CAS-ígéret. A gateway a saját íróit koordinálja; külső szerkesztőkkel szemben friss ellenőrzést és visszaolvasást használ.
 
 Bizonytalan mentésnél ugyanaz a kéréskulcs ellenőrzi a korábbi eredményt. Nem indítunk új generációt pusztán elveszett válasz miatt. A helyreállítás meglévő app-journal/recovery folyamata nem ismétel vakon natív írást.
+
+Ha az író már foglalt, de a megszakadás miatt még journal-bejegyzése sincs, a helyreállítás kizárólag metaadatot egyeztet az eredeti szereplőhöz, kéréskulcshoz és műveletazonosítóhoz kötve. Az operátornak előbb igazolnia kell a pontos eredeti kérés futtatójának tényleges leállását; eltelt idő vagy egy timeout önmagában nem ilyen bizonyíték. Ez az ág nem küld új SenseNet-írást és nem játssza újra a feltöltést.
 
 ## Helyi indítás és kézi próba
 
@@ -73,12 +79,14 @@ Kézi próba:
 
 Sikeres friss ellenőrzések:
 
-- 256 unit/contract teszt, 58 parity-ellenőrzés, lint és TypeScript/production build.
+- 281 unit/contract teszt, 66 parity-ellenőrzés, lint és TypeScript/production build.
 - Valódi Canvas-dekódolás/generálás: négy összeállítás, 12 kimenet.
 - Standard HTTPS API: Timeline/MediaItem/BookMediaItem alatti Folder/File, eredetifeltöltés, lezárás, aktiválás és törlés; elveszett válasz helyreállítása ugyanazzal a kulccsal, natív írás megismétlése nélkül.
 - 19/19 friss valós editor/Visitor ellenőrzés: 1–4 poszter, WebP/PNG, sorrend/Random, helyreállítás, médiaméretek/picker, inaktív takarítás, mobil, lusta betöltés, tényleges owner ACL-visszavonás és változatlan eredeti byte-ok. A teszt saját tartalmait kitakarította, 2998→2998 rekord.
 - A Conan-példa valódi látogatói kártyája 400×200-as, 16 844 byte-os WebP-t töltött le: egy kérés, nulla eredeti/entry-pool kérés asztali és mobilnézetben is. Ez konkrét helyi minta, nem általánosított sebességígéret.
 - A korábbi képbővítés helyi eltávolítása után 133 meglévő backendregresszió és a 2998 eredeti rekord/1503 eredeti binary megőrzési ellenőrzése sikeres. A SenseNet runtime/contenttype/extension/provisioning fájlok a develophoz képest változatlanok; az új `deployment/docker` kizárólag a kliens/app helyi konténerét írja le.
+
+A publikálási regresszió vizsgálata és a javítás célzott bizonyítékai: ignored `deployment/.local/image-editor-regression-2026-11-06/`. A friss kódellenőrzések és a valódi editorból indított két-két egymást követő timeline-/médiapublikálás sikeres. Az első mentés után ténylegesen módosítható volt a kiválasztás, a második után is használható maradt a generáló gomb; mindkét owner két lezárt készletét külön standard API-val is ellenőriztük. Eredeti SHA-k változatlanok; saját teszttartalmak kitakarítva, 3009→3009 rekord. A **Publish** új előnézet készítéséig szürke marad: sikeres mentés után a kiválasztás és a **Generate preview / Prepare sizes** használható újra.
 
 Megismételhető kódellenőrzés:
 

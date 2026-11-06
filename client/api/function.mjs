@@ -263,15 +263,16 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
   }
   return {handleRequest:request=>handle(request),handleBackgroundRequest:request=>handle(request,true),store,coordinator,jobs,transfers};
 }
-export function invocationTimeoutMs(request, background = false) {
+export function invocationTimeoutMs(request, background = false, devRuntime = false) {
   if (background) return 895000;
+  if (devRuntime) return 25000;
   const path = new URL(request.url).pathname;
   // Leave five seconds for durable uncertainty and owned-writer release before
   // the verified offline Netlify synchronous worker's hard 30-second limit.
   return request.method === 'POST' && /\/(?:api\/v1|native-api\/(?:v1\/)?)(?:\/)?images\/drafts(?:\/|$)/.test(path) ? 25000 : 55000;
 }
 async function invoke(request, background, runtimeContext) {
-  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),invocationTimeoutMs(request,background));
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),invocationTimeoutMs(request,background,process.env.TIMELINE_NETLIFY_DEV==='true'));
   try { const config={...loadConfig({runtimeContext,requestUrl:request.url}),signal:controller.signal};const app=createFunctionApp(config);return await (background?app.handleBackgroundRequest(request):app.handleRequest(request)); }
   catch(error){const result=failure(error,randomUUID());return new Response(result.body,{status:result.status,headers:result.headers});}
   finally { clearTimeout(timeout); }
