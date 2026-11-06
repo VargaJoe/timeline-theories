@@ -535,7 +535,10 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   const applied = await get(`jobs/${applyJob}`); assert.equal(applied.ok, true); assert.equal(state.images.activations, 1);
   const snapshotResponse = await app.handleRequest(request('content/20', { token: null })); assert.equal(snapshotResponse.status, 200);
   const snapshot = (await snapshotResponse.json()).data; assert.equal(snapshot.image.state, 'active'); assert.equal(snapshot.image.variants.length, 1);
+  assert.deepEqual(snapshot.image.layout, { template: 'poster-strip-v1', count: 2 });
   assert.equal(Object.hasOwn(snapshot.image, 'recipe'), false);
+  assert.equal(Object.hasOwn(snapshot.image, 'sourceIds'), false);
+  assert.equal(Object.hasOwn(snapshot.image, 'sourceStamps'), false);
   assert.deepEqual((await get('content/20/image-presentation/editor')).data.recipe, manifest.recipe);
   state.images.binaryReads.length = 0;
   const imageResponse = await app.handleRequest(request(snapshot.image.variants[0].url.slice('/api/v1/'.length), { token: null }));

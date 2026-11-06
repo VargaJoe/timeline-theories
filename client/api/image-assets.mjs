@@ -134,6 +134,7 @@ export class ImageAssets {
       if ((await this.storage(owner, { fresh: true }))?.Description !== root.Description) fail('image_unavailable', 'Image selection changed while reading its descriptor.', 409);
       return { state: 'active', setId: set.Id, generationId: set.GenerationId,
         variants: set.manifest.variants.map(({ name, width, height, mimeType, byteLength }) => ({ name, width, height, mimeType, byteLength, url: `/api/v1/images/${owner.Id}/${set.GenerationId}/${name}` })),
+        ...(set.manifest.kind === 'timeline-composite' ? { layout: { template: 'poster-strip-v1', count: set.manifest.sourceIds.length } } : {}),
         ...(recipe ? { recipe: set.manifest.recipe, sourceStamps: set.manifest.sourceStamps } : {}) };
     } catch (error) { if ([400, 403, 404, 409].includes(error.status)) return { state: error.status === 403 ? 'blocked' : 'missing', setId: root.value.activeSetId }; throw error; }
   }

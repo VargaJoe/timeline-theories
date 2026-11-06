@@ -6,7 +6,7 @@ import type { Timeline } from '../services/timelineService';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { MediaCoverMontage } from '../components/MediaCoverMontage';
-import { LazyImage } from '../components/LazyImage';
+import { TimelineCover } from '../components/TimelineCover';
 import { CollectionPlaceholder } from '../components/CollectionPlaceholder';
 import { captureOperationContext, loadBackgroundImage, subscribePermissions } from '../services/sensenet';
 import { createTimelineCoverLoader } from '../services/timelineCoverLoader';
@@ -415,11 +415,11 @@ export const TimelineListPage: React.FC = () => {
                         flexDirection: 'column',
                         height: '100%'
                       }}
-                      onMouseOver={(e) => {
+                      onMouseEnter={(e) => {
                         e.currentTarget.parentElement!.style.transform = 'translateY(-2px)';
                         e.currentTarget.parentElement!.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)';
                       }}
-                      onMouseOut={(e) => {
+                      onMouseLeave={(e) => {
                         e.currentTarget.parentElement!.style.transform = 'translateY(0)';
                         e.currentTarget.parentElement!.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
                       }}
@@ -456,7 +456,7 @@ export const TimelineListPage: React.FC = () => {
                         justifyContent: 'center',
                         position: 'relative'
                       }}>
-                        {timeline.image && timeline.image.state !== 'legacy' && <LazyImage src="" image={timeline.image} alt={`${timeline.displayName} cover`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
+                        {timeline.image && timeline.image.state !== 'legacy' && <TimelineCover image={timeline.image} label={`${timeline.displayName} cover`} />}
                         {(!timeline.image || timeline.image.state === 'legacy') && !timeline.coverImageUrl && (
                           <MediaCoverMontage 
                             coverUrls={mediaCovers[timeline.id] || []}

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LazyImage } from './LazyImage';
+import { TimelineCover } from './TimelineCover';
+import { PosterFan } from './PosterFan';
 import { imageCapabilities, imagePresentation, imageSets, deleteImageSet, sourceForGeneration, originalImageBlob, ImagePublication, OriginalImageUpload, restoreOriginalPresentation, type ImagePresentation, type ImageSetSummary } from '../services/imageVariantService';
 import { captureOperationContext, invalidatePermissions, subscribePermissions } from '../services/sensenet';
 import { useSharedAuth } from '../context/useSharedAuth';
@@ -26,7 +28,9 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
   const [current, setCurrent] = useState<ImagePresentation>();
   const [sets, setSets] = useState<ImageSetSummary[]>([]);
   const [selected, setSelected] = useState<number[]>([]), [page, setPage] = useState(0);
-  const [generated, setGenerated] = useState<GeneratedImageSet>(), [preview, setPreview] = useState('');
+  const [generated, setGenerated] = useState<GeneratedImageSet>();
+  const [preview, setPreview] = useState<{ set: GeneratedImageSet; url: string }>();
+  const previewUrl = preview?.set === generated ? preview?.url : undefined;
   const [busy, setBusy] = useState(false), [status, setStatus] = useState(''), [error, setError] = useState('');
   const [terminal, setTerminal] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined), intent = useRef<ImagePublication | undefined>(undefined);
@@ -52,8 +56,8 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
   useEffect(() => { if (media) setSelected(poolKey ? [Number(poolKey.split(',')[0])] : []); }, [media, poolKey]);
   useEffect(() => {
     const blob = generated?.variants.at(-1)?.blob;
-    if (!blob) { setPreview(''); return; }
-    const url = URL.createObjectURL(blob); setPreview(url);
+    if (!blob || !generated) { setPreview(undefined); return; }
+    const url = URL.createObjectURL(blob); setPreview({ set: generated, url });
     return () => URL.revokeObjectURL(url);
   }, [generated]);
 
@@ -158,7 +162,13 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
       </>}
       {(!pool.length || media && !originalStored) && <p>Upload a PNG, JPEG or WebP original first. Linked images are preserved, but sizes are generated from originals stored in this repository.</p>}
       {media && !originalStored && <div className="image-editor-toolbar"><label>Upload original <input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy || originalPending} onChange={event => { const file = event.target.files?.[0]; if (file) void uploadOriginal(file); }} /></label><span>The selected original is saved immediately, without resizing.</span>{originalPending && <button type="button" disabled={busy} onClick={() => void uploadOriginal()}>Retry original upload</button>}</div>}
-      <div className={'image-editor-preview ' + (media ? 'media' : 'timeline')}>{preview ? <img src={preview} alt="Generated image preview" /> : current?.state === 'active' ? <LazyImage src="" image={current} alt="Published image" style={{ objectFit: 'contain' }} /> : <span>{current?.state === 'stale' ? 'Source images changed. Prepare a new preview.' : media ? 'Image size preview' : 'List cover preview'}</span>}</div>
+      <div className={'image-editor-preview ' + (media ? 'media' : 'timeline')}>
+        {previewUrl ? media ? <img src={previewUrl} alt="Generated image preview" />
+          : <PosterFan source={previewUrl} count={preview!.set.recipe.sourceIds.length} label="Generated image preview" />
+          : current?.state === 'active' ? media ? <LazyImage src="" image={current} alt="Published image" style={{ objectFit: 'contain' }} />
+            : <TimelineCover image={current} label="Published image" />
+            : <span>{current?.state === 'stale' ? 'Source images changed. Prepare a new preview.' : media ? 'Image size preview' : 'List cover preview'}</span>}
+      </div>
       {generated && <ul className="image-editor-sizes">{generated.variants.map(variant => <li key={variant.name}>{variant.width} × {variant.height} · {variant.mimeType.replace('image/', '')} · {size(variant.byteLength)}</li>)}</ul>}
       <div className="image-editor-actions"><button type="button" disabled={busy || !!intent.current || !selected.length || media && !originalStored} onClick={() => void prepare()}>{media ? 'Prepare sizes' : 'Generate preview'}</button><button type="button" className="primary" disabled={busy || !generated} onClick={() => void publish()}>{intent.current ? 'Retry publication' : 'Publish'}</button>{current?.state !== 'legacy' && current?.state !== undefined && <button type="button" disabled={busy || !!intent.current} onClick={() => void restore()}>Use original presentation</button>}</div>
       {terminal && <button type="button" disabled={busy} onClick={() => { intent.current = undefined; previewOwner.current = undefined; setGenerated(undefined); setTerminal(false); setError(''); setStatus('Choose the current images and prepare a new preview. Unpublished copies can be removed with Delete unused copies.'); void imageSets(ownerId).then(setSets).catch(() => {}); }}>Start a new preview</button>}

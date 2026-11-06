@@ -127,6 +127,31 @@ test('offscreen images never enqueue; first intersection chooses one DPR variant
   } finally { ui.unmount(); state.restore(); }
 });
 
+test('one authorized decoded Blob feeds the card renderer and reserves hover resolution before interaction', async () => {
+  const state = fixture(), renderImage = source => ({ type: 'CardFan', props: { source } });
+  const ui = host(() => LazyImage({ image: descriptor, alt: 'Timeline cover', resolutionScale: 1.5, renderImage }), state.target);
+  try {
+    ui.flush(); state.visible(); let tree = await settle(ui);
+    assert.equal(state.requests.length, 1); assert.match(state.requests[0].path, /w640$/);
+    assert.equal(find(tree, 'CardFan'), undefined, 'unresolved bytes never reach the renderer');
+    state.requests[0].resolve(new Response('shared-atlas')); tree = await settle(ui);
+    const sentinel = find(tree, 'img');
+    assert.equal(sentinel.props.alt, ''); assert.equal(sentinel.props['aria-hidden'], true);
+    assert.equal(find(tree, 'CardFan'), undefined, 'the raster must decode before visual cards appear');
+    sentinel.props.onLoad({}); tree = ui.flush();
+    assert.equal(find(tree, 'CardFan').props.source, sentinel.props.src);
+    assert.equal(state.created.length, 1);
+    state.focus(); state.poll(); state.documentVisibility('hidden'); state.documentVisibility('visible');
+    await settle(ui); assert.equal(state.requests.length, 1);
+    state.invalidate(); assert.equal(find(ui.render(), 'CardFan'), undefined);
+    ui.flush(); assert.deepEqual(state.revoked, state.created);
+    state.visible(); await settle(ui); assert.equal(state.requests.length, 2);
+    state.requests[1].resolve(new Response('{}', { status: 403 })); tree = await settle(ui);
+    assert.equal(find(tree, 'CardFan'), undefined); assert.equal(state.requests.length, 2);
+    assert.equal(tree.props['data-image-state'], 'error');
+  } finally { ui.unmount(); state.restore(); }
+});
+
 test('identity change aborts old bytes, masks old image synchronously and requires a fresh viewport observation', async () => {
   const state = fixture(), ui = host(() => LazyImage({ image: descriptor }), state.target);
   try {
@@ -239,4 +264,57 @@ test('unmount before a queued image starts removes it from the shared two-worker
     state.requests.forEach(request => request.resolve(new Response('image'))); await settle(images[0]); await settle(images[1]);
     assert.equal(state.requests.length, 2);
   } finally { images.forEach(ui => ui.unmount()); state.restore(); }
+});
+
+test('stale Blob events cannot reveal or hide a replacement fan during a same-key size upgrade', async () => {
+  const state = fixture();
+  window.devicePixelRatio = 1;
+  let loads = 0, errors = 0;
+  const ui = host(() => LazyImage({ image: descriptor,
+    renderImage: source => ({ type: 'CardFan', props: { source } }),
+    onLoad: () => loads++, onError: () => errors++,
+  }), state.target);
+  try {
+    ui.flush(); state.visible(); await settle(ui);
+    assert.equal(state.requests.length, 1); assert.match(state.requests[0].path, /w160$/);
+    state.requests[0].resolve(new Response('small authorized raster'));
+    let tree = await settle(ui);
+    const first = find(tree, 'img');
+    first.props.onLoad({}); tree = ui.flush();
+    assert.equal(find(tree, 'CardFan').props.source, first.props.src);
+    assert.equal(loads, 1);
+
+    state.target.width = 500; state.resizes[0].callback(); await settle(ui);
+    assert.equal(state.requests.length, 2); assert.match(state.requests[1].path, /w640$/);
+    state.requests[1].resolve(new Response('larger authorized raster'));
+    tree = await settle(ui);
+    const replacement = find(tree, 'img');
+    assert.notEqual(replacement.props.src, first.props.src);
+    assert.equal(tree.props['data-image-state'], 'pending');
+    assert.equal(find(tree, 'CardFan'), undefined);
+
+    first.props.onLoad({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'pending');
+    assert.equal(find(tree, 'CardFan'), undefined, 'the replacement must wait for its own decode');
+    assert.equal(loads, 1, 'a released Blob must not invoke the outer load callback');
+
+    replacement.props.onLoad({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'loaded');
+    assert.equal(find(tree, 'CardFan').props.source, replacement.props.src);
+    assert.equal(loads, 2);
+    first.props.onError({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'loaded');
+    assert.equal(find(tree, 'CardFan').props.source, replacement.props.src);
+    assert.equal(errors, 0, 'a released Blob must not invoke the outer error callback');
+
+    replacement.props.onError({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'error');
+    assert.equal(find(tree, 'CardFan'), undefined);
+    assert.equal(errors, 1);
+    replacement.props.onLoad({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'loaded', 'its own successful load clears the error');
+    assert.equal(find(tree, 'CardFan').props.source, replacement.props.src);
+    assert.equal(loads, 3);
+    assert.equal(state.requests.length, 2);
+  } finally { ui.unmount(); state.restore(); }
 });

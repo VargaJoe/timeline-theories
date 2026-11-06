@@ -6,7 +6,7 @@ Döntés frissítve: 2026-11-06. Ág: `feature/sensenet-image-variants`, PR #62,
 
 Joe kifejezett utasítása: **nem bővítjük a SenseNetet; a kliensalkalmazásban kell megoldani.** A korábbi szerveroldali bővítményes tervet ez felülírja. Nincs új DLL, content handler, observer, natív képművelet, dekóder, tartalomtípus vagy mező. A korábbi terv Git-változata [8296b618](https://github.com/VargaJoe/timeline-theories/blob/8296b61875ef7fea4f1040590773e7c6099cf16d/docs/timeline-cover-variants-plan.md) alatt marad történeti anyagként.
 
-Minden eredeti és generált kép a SenseNetben legyen. A meglévő app-journal/koordináció maradhat; új Blobs-képtár nem készül. A jelenlegi, legfeljebb négy vízszintes poszteres kompozíció statikus első lépés. Az elforgatott, egymást fedő és egérrel pörgethető kártyanézet későbbi feladat.
+Minden eredeti és generált kép a SenseNetben legyen. A meglévő app-journal/koordináció maradhat; új Blobs-képtár nem készül. A mentett `poster-strip-v1` kép legfeljebb négy, egymást nem fedő posztert tartalmaz. A 2026-11-07-i megjelenítési lépés ugyanebből az egy fájlból készít elforgatott, átfedő kártyalegyezőt és külön hover-kiemelést; nincs újragenerálás vagy hover-letöltés. Az összes timeline-elem egérrel pörgethető nézete későbbi feladat. [Megjelenítési szerződés](timeline-cover-card-presentation.md).
 
 ## Egyszerű tárolási modell
 

@@ -8,9 +8,12 @@ export interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageEl
   src?: string;
   image?: ImageDescriptor;
   placeholder?: string;
+  renderImage?: (source: string) => React.ReactNode;
+  /** Reserve raster resolution for the largest visual state before interaction. */
+  resolutionScale?: number;
 }
 
-export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descriptor, alt, placeholder, className, style, onLoad, onError, ...restProps }) => {
+export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descriptor, alt, placeholder, renderImage, resolutionScale = 1, className, style, onLoad, onError, ...restProps }) => {
   const { accessToken, user, isLoading } = useSharedAuth();
   const element = useRef<HTMLDivElement>(null);
   const [revision, setRevision] = useState(0);
@@ -18,6 +21,7 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
   const requestKey = JSON.stringify([src, descriptor, accessToken, user?.Id, user?.sub, isLoading, revision]);
   const [slot, setSlot] = useState<{ key: string; width: number; dpr: number; visible: boolean }>();
   const [image, setImage] = useState<{ key: string; source?: string; loaded: boolean; error: boolean }>();
+  const currentSource = useRef<string | undefined>(undefined);
   const current = image?.key === requestKey ? image : undefined;
   const blocked = !!descriptor && !['active', 'legacy'].includes(descriptor.state);
 
@@ -62,7 +66,8 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
     };
   }, [requestKey, isLoading, blocked]);
 
-  const selectedUrl = slot?.key === requestKey ? selectImageUrl(descriptor, src, slot.width, slot.dpr) : undefined;
+  const scale = Number.isFinite(resolutionScale) ? Math.max(1, Math.min(resolutionScale, 2)) : 1;
+  const selectedUrl = slot?.key === requestKey ? selectImageUrl(descriptor, src, slot.width * scale, slot.dpr) : undefined;
   const selectedWidth = descriptor?.state === 'active' ? descriptor.variants?.find(variant => variant.url === selectedUrl)?.width ?? 0 : Infinity;
   // One initial fetch. Growing slots may upgrade an insufficient raster; shrinking never refetches.
   const [selection, setSelection] = useState<{ key: string; url: string; width: number }>();
@@ -75,7 +80,13 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
     if (!selection || selection.key !== requestKey || isLoading || blocked) return;
     const controller = new AbortController(), checkContext = captureOperationContext();
     let objectUrl: string | undefined;
-    const release = () => { controller.abort(); if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = undefined; } };
+    const release = () => {
+      controller.abort();
+      if (objectUrl) {
+        if (currentSource.current === objectUrl) currentSource.current = undefined;
+        URL.revokeObjectURL(objectUrl); objectUrl = undefined;
+      }
+    };
     const active = () => {
       if (controller.signal.aborted) return false;
       try { checkContext(); return true; } catch { return false; }
@@ -84,6 +95,7 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
       const blob = await fetchImageBlob(selection.url, { signal: controller.signal, accessToken, assertContext: checkContext });
       if (!active()) return;
       objectUrl = URL.createObjectURL(blob);
+      currentSource.current = objectUrl;
       setImage({ key: requestKey, source: objectUrl, loaded: false, error: false });
     }, controller.signal).catch(() => {
       if (active()) setImage({ key: requestKey, loaded: false, error: true });
@@ -93,13 +105,24 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
 
   const isLoaded = current?.loaded === true;
   const imageStyle: React.CSSProperties = { display: 'block', width: '100%', height: '100%', objectFit: style?.objectFit ?? 'cover', transition: 'opacity 0.3s ease-in-out', opacity: isLoaded ? 1 : 0 };
-  const wrapperStyle: React.CSSProperties = { width: '100%', height: '100%', overflow: 'hidden', ...style, position: style?.position ?? 'relative' };
+  const wrapperStyle: React.CSSProperties = { width: '100%', height: '100%', overflow: 'hidden', ...style,
+    ...(renderImage ? { display: 'grid', placeItems: 'center' } : {}), position: style?.position ?? 'relative' };
   const placeholderStyle: React.CSSProperties = { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 14, background: style?.background ?? style?.backgroundColor ?? '#f0f0f0' };
   return <div ref={element} style={wrapperStyle} data-image-state={blocked ? descriptor?.state : current?.error ? 'error' : isLoaded ? 'loaded' : 'pending'}>
     {!isLoaded && <div style={placeholderStyle} role="img" aria-label={alt}>{placeholder || '📷'}</div>}
-    {current?.source && <img {...restProps} src={current.source} alt={alt} className={className} style={imageStyle}
-      onLoad={event => { if (current.key === requestKey) setImage(previous => previous?.key === requestKey ? { ...previous, loaded: true } : previous); onLoad?.(event); }}
-      onError={event => { setImage(previous => previous?.key === requestKey ? { ...previous, error: true, loaded: false } : previous); onError?.(event); }} />}
+    {current?.source && <img key={current.source} {...restProps} src={current.source} alt={renderImage ? '' : alt} aria-hidden={renderImage ? true : undefined} className={className}
+      style={renderImage ? { ...imageStyle, position: 'absolute', opacity: 0, pointerEvents: 'none' } : imageStyle}
+      onLoad={event => {
+        if (currentSource.current !== current.source) return;
+        setImage(previous => previous?.key === requestKey && previous.source === current.source ? { ...previous, loaded: true, error: false } : previous);
+        onLoad?.(event);
+      }}
+      onError={event => {
+        if (currentSource.current !== current.source) return;
+        setImage(previous => previous?.key === requestKey && previous.source === current.source ? { ...previous, error: true, loaded: false } : previous);
+        onError?.(event);
+      }} />}
+    {isLoaded && current?.source && renderImage?.(current.source)}
   </div>;
 };
 

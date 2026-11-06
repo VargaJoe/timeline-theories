@@ -12,6 +12,14 @@ export interface ImageDescriptor {
   state: 'active' | 'stale' | 'blocked' | 'missing' | 'legacy';
   generationId?: string;
   variants?: ImageVariant[];
+  layout?: { template: 'poster-strip-v1'; count: number };
+}
+
+/** Public layout hints contain no source identities or editor reconstruction metadata. */
+export function posterStripCount(image: ImageDescriptor | undefined): number | undefined {
+  const layout = image?.state === 'active' ? image.layout : undefined;
+  return layout?.template === 'poster-strip-v1' && Number.isSafeInteger(layout.count) && layout.count >= 1 && layout.count <= 4
+    ? layout.count : undefined;
 }
 
 export function selectImageVariant(variants: readonly ImageVariant[], slotWidth: number, devicePixelRatio = 1): ImageVariant | undefined {

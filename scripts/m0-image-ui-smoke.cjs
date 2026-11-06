@@ -226,7 +226,7 @@ async function smoke() {
   async function waitForPublication(panel, ownerId, previousGeneration) {
     await editor.page.waitForFunction(() => {
       const section = document.querySelector('section.image-editor');
-      return section && (section.querySelector('[role="alert"]') || !section.querySelector('img[alt="Generated image preview"]') && section.querySelector('.image-editor-state')?.textContent === 'Published' && section.getAttribute('aria-busy') !== 'true');
+      return section && (section.querySelector('[role="alert"]') || !section.querySelector('img[alt="Generated image preview"], [data-poster-fan][aria-label="Generated image preview"]') && section.querySelector('.image-editor-state')?.textContent === 'Published' && section.getAttribute('aria-busy') !== 'true');
     }, undefined, { polling: 200, timeout: 180000 });
     if (await panel.getByRole('alert').count()) throw new Error(await panel.getByRole('alert').textContent());
     await panel.locator('.image-editor-state').filter({ hasText: /^Published$/ }).waitFor();
@@ -242,7 +242,7 @@ async function smoke() {
     });
     try {
       await panel.getByRole('button', { name: button, exact: true }).click();
-      await editor.page.waitForFunction(() => document.querySelector('section.image-editor img[alt="Generated image preview"]') || document.querySelector('section.image-editor [role="alert"]'));
+      await editor.page.waitForFunction(() => document.querySelector('section.image-editor img[alt="Generated image preview"], section.image-editor [data-poster-fan][aria-label="Generated image preview"]') || document.querySelector('section.image-editor [role="alert"]'));
       if (await panel.getByRole('alert').count()) throw new Error(await panel.getByRole('alert').textContent());
       await panel.getByRole('img', { name: 'Generated image preview', exact: true }).waitFor();
       console.log(JSON.stringify({ stage: 'preview-ready', ownerId, forcePng }));

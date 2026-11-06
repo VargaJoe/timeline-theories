@@ -1,4 +1,4 @@
-# Statikus borítók és képméretek a kliensalkalmazásban
+# Generált borítók és képméretek a kliensalkalmazásban
 
 Ág: `feature/sensenet-image-variants`, PR #62. A kliens/app megoldás standard SenseNet Folder/File tárolással elkészült; az alábbi helyi ellenőrzések 2026-11-06-án sikeresek. A korábbi, elvetett bővítmény natív képtesztjei nem ennek az elfogadási bizonyítékai.
 
@@ -6,7 +6,7 @@
 
 A böngésző készíti a képeket. A meglévő alkalmazás API-ja a SenseNet standard HTTP-műveleteivel menti és olvassa őket. Nincs új szerveroldali SenseNet-kód, DLL, saját content handler, natív képművelet, Skia-dekóder, új tartalomtípus vagy új mező. A meglévő helyi M0 tesztkörnyezet eredeti beállításai ettől külön maradnak.
 
-A timeline-borító a jelenlegi, legfeljebb négy poszteres statikus kompozíció. A választás, sorrend és Random eredménye elmentődik. A média méretei a kis kártyához és a nagyobb részletnézethez használhatók. Az interaktív kártyanézet későbbi feladat.
+A timeline-borító egyetlen, legfeljebb négy posztert tartalmazó mentett kép. A lista és a szerkesztő előnézete ugyanennek a képnek a kivágásaiból egymást fedő, elforgatott kártyákat jelenít meg; egérre az adott kártya előre kerül és kiegyenesedik, további letöltés nélkül. A választás, sorrend és Random eredménye elmentődik. A meglévő `poster-strip-v1` képeket ehhez nem kell újragenerálni. A média méretei a kis kártyához és a nagyobb részletnézethez használhatók. Az összes timeline-elem bejárható/pörgethető nézete későbbi feladat. Részletek: [egy képből megjelenő kártyák](timeline-cover-card-presentation.md).
 
 ## Tárolás
 

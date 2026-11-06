@@ -18,8 +18,9 @@ const native = moduleUrl('export const nativeResponse=(...args)=>globalThis.__im
 const loadingUrl = compile('utils/imageLoading.ts', { '../configuration': config, '../services/nativeApi': native });
 const { createImageRequestQueue, fetchImageBlob, nativeImagePresentationTarget } = await import(loadingUrl);
 const variantsUrl = compile('utils/imageVariants.ts');
-const { selectImageVariant, selectImageUrl } = await import(variantsUrl);
-const { generateImageVariants, imageOutputSizes, inspectImageSource, normalizeGeneratedPng, posterStripLayout } = await import(compile('utils/imageGenerator.ts', { './imageLoading': loadingUrl }));
+const { selectImageVariant, selectImageUrl, posterStripCount } = await import(variantsUrl);
+const stripUrl = new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href;
+const { generateImageVariants, imageOutputSizes, inspectImageSource, normalizeGeneratedPng, posterStripLayout } = await import(compile('utils/imageGenerator.ts', { './imageLoading': loadingUrl, './posterStripLayout.mjs': stripUrl }));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; }
 
@@ -35,6 +36,14 @@ test('responsive selection uses actual CSS width and capped DPR, with no unsafe 
   for (const state of ['blocked', 'stale', 'missing']) assert.equal(selectImageUrl({ state, variants }, 'private-original', 120, 2), undefined);
   assert.equal(selectImageUrl({ state: 'active', variants: [] }, 'original', 120), undefined);
   assert.equal(selectImageUrl({ state: 'legacy' }, 'original', 120), 'original');
+});
+
+test('fan layout accepts only active bounded strip hints, without requiring private recipe metadata', () => {
+  for (const count of [1, 2, 3, 4]) assert.equal(posterStripCount({ state: 'active', layout: { template: 'poster-strip-v1', count } }), count);
+  for (const image of [undefined, { state: 'active' }, { state: 'legacy', layout: { template: 'poster-strip-v1', count: 3 } },
+    ...['blocked', 'stale', 'missing'].map(state => ({ state, layout: { template: 'poster-strip-v1', count: 3 } })),
+    ...[0, 5, -1, 2.5, '3', null, NaN, Infinity].map(count => ({ state: 'active', layout: { template: 'poster-strip-v1', count } })),
+    { state: 'active', layout: { template: 'unknown', count: 3 } }]) assert.equal(posterStripCount(image), undefined);
 });
 
 test('image queue caps concurrency at two and removes aborted work without starting it', async () => {

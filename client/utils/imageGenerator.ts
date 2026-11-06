@@ -1,4 +1,7 @@
 import { imageRequestQueue } from './imageLoading';
+import { posterStripLayout, type PosterSlot } from './posterStripLayout.mjs';
+export { posterStripLayout } from './posterStripLayout.mjs';
+export type { PosterSlot } from './posterStripLayout.mjs';
 
 export interface ImageGenerationSource { id: number; url: string; stamp?: string; }
 export interface GeneratedImageSource extends ImageGenerationSource { stamp: string; }
@@ -120,14 +123,6 @@ export async function inspectImageSource(blob: Blob): Promise<{ width: number; h
   if (!mimeType || (blob.type && blob.type !== mimeType)) throw new Error('Source must be a PNG, JPEG or WebP image with matching MIME.');
   if (!width || !height || width > 8192 || height > 8192 || width * height > MAX_SOURCE_PIXELS) throw new Error('Source image exceeds the supported pixel dimensions.');
   return { width, height };
-}
-
-export interface PosterSlot { x: number; y: number; width: number; height: number; radius: number; }
-export function posterStripLayout(count: number): PosterSlot[] {
-  if (!Number.isSafeInteger(count) || count < 1 || count > 4) throw new Error('Select one to four distinct source images.');
-  const width = count === 1 ? 120 : Math.min(60 + 140 / count, 90), height = count === 1 ? 160 : 140;
-  const left = (400 - (count * width + (count - 1) * 4)) / 2;
-  return Array.from({ length: count }, (_, index) => ({ x: left + index * (width + 4), y: (200 - height) / 2, width, height, radius: count === 1 ? 8 : 6 }));
 }
 
 export function imageOutputSizes(kind: GenerateImageVariantsOptions['kind'], dimensions: readonly { width: number; height: number }[]): { width: number; height: number }[] {
