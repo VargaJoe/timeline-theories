@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node ../scripts/m1-dev.mjs",
     "dev:netlify": "node ../scripts/m1-dev.mjs",
-    "dev:m0": "node ../scripts/m1-dev.mjs --local",
+    "dev:m0": "npm --prefix .. run local:up",
     "dev:readonly": "node ../scripts/m1-dev.mjs --readonly",
     "dev:app": "vite --port 5173",
     "build": "tsc -b && vite build",

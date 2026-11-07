@@ -24,6 +24,7 @@ export async function receiptTargets(context, plan, result) {
       folders.add(receiptFolder(context.repo, step.payload.type));
     }
     if (item.result?.id && !item.result.deleted) targets.add(item.result.id);
+    if (step?.payload.action === 'cover-presentation') for (const source of step.payload.presentation?.sourceStamps || []) targets.add(source.id);
     for (const entry of item.result?.completed || []) if (entry.id && !entry.deleted) targets.add(entry.id);
   }
   for (const folder of folders) {
@@ -57,8 +58,8 @@ export async function preview(context, input, store) {
   };
   for (const [index, command] of commands.entries()) {
     assertObject(command);
-    if (!['create','update','delete','order','metadata','cover'].includes(command.action)) throw new DomainError('invalid_operation', 'Unsupported application command.');
-    const keys = { create: ['action','type','parentId','fields'], update: ['action','targetId','expectedRevision','fields'], delete: ['action','targetId','expectedRevision'], order: ['action','timelineId','entries'], metadata: ['action','targetId','expectedRevision','proposal','overwrite','cover'], cover: ['action','targetId','expectedRevision','bytesBase64','mimeType','fileName'] }[command.action];
+    if (!['create','update','delete','order','metadata','cover','cover-presentation'].includes(command.action)) throw new DomainError('invalid_operation', 'Unsupported application command.');
+    const keys = { create: ['action','type','parentId','fields'], update: ['action','targetId','expectedRevision','fields'], delete: ['action','targetId','expectedRevision'], order: ['action','timelineId','entries'], metadata: ['action','targetId','expectedRevision','proposal','overwrite','cover'], cover: ['action','targetId','expectedRevision','bytesBase64','mimeType','fileName'], 'cover-presentation': ['action','targetId','expectedRevision','setId'] }[command.action];
     if (Object.keys(command).some(k => !keys.includes(k))) throw new DomainError('invalid_input', 'Unknown command property.');
     const operationId = randomUUID();
     if (command.action === 'create') {
@@ -98,11 +99,13 @@ export async function preview(context, input, store) {
     requireScope(context, scopes[before.Type]);
     if (command.expectedRevision !== revision(before)) throw new DomainError('revision_conflict', 'Target changed; reload and preview again.', 409);
     const action = command.action === 'metadata' ? 'update' : command.action;
-    const ops = [{ target: before.Id, action }], guards = [{ id: before.Id, revision: revision(before) }];
+    const ops = [{ target: before.Id, action: action === 'cover-presentation' ? 'cover' : action }], guards = [{ id: before.Id, revision: revision(before) }];
     const payload = { operationId, action, type: before.Type, targetId: before.Id, expectedRevision: revision(before) };
     let destination;
     targets.push(before.Id);
     if (action === 'delete') {
+      const managed = await repo.managedChildren?.(before) || [];
+      payload.managed = managed;
       const folder=await repo.read(receiptFolder(repo,before.Type),{parent:true});
       ops.push({target:folder.Id,action:'read'});
       if(before.Type!=='Timeline')await repo.assertLeaf(before.Id);
@@ -111,7 +114,17 @@ export async function preview(context, input, store) {
       if (references.hasReferences) throw new DomainError('shared_reference_conflict', 'Media is still referenced. Delete the selected occurrences first.', 409, { references: references.readableReferences });
       for (const e of children) { ops.push({ target: e.Id, action: 'delete' }); guards.push({ id: e.Id, revision: revision(e) }); targets.push(e.Id); }
       payload.entries = children.map(e => ({ id: e.Id, expectedRevision: revision(e) }));
-      effects.push({ command: index, deletes: [before.Id, ...children.map(e => e.Id)], sharedReferences: [] });
+      effects.push({ command: index, deletes: [before.Id, ...children.map(e => e.Id), ...managed.map(e => e.id)], sharedReferences: [] });
+    } else if (action === 'cover-presentation') {
+      if (!['MediaItem','BookMediaItem','Timeline'].includes(before.Type)) throw new DomainError('invalid_cover_target', 'This content does not support image presentations.');
+      requireScope(context, 'covers:write');
+      if (command.setId !== null) assertId(command.setId);
+      const presentation = await repo.images.preflight(before, command.setId);
+      if (command.setId === null ? before.image?.state === 'legacy' : before.image?.setId === command.setId) throw new DomainError('empty_change', 'This image presentation is already selected.');
+      Object.assign(payload, { setId: command.setId, presentation });
+      for (const source of presentation.sourceStamps || []) { ops.push({ target: source.id, action: 'read' }); targets.push(source.id); }
+      diffs.push({ command: index, targetId: before.Id, fields: [{ field: 'Image presentation', before: before.image?.setId ?? null, after: command.setId }] });
+      effects.push({ command: index, image: { ...presentation, originalsPreserved: true } });
     } else if (action === 'cover') {
       if (!['MediaItem','BookMediaItem','Timeline'].includes(before.Type)) throw new DomainError('invalid_cover_target', 'This content does not support covers.');
       requireScope(context, 'covers:write');
@@ -188,6 +201,16 @@ export async function apply(context, id, key, store) {
     if(step.payload.action==='delete'&&step.payload.type!=='Timeline') {
       await context.repo.assertLeaf(step.payload.targetId);
       if(['MediaItem','BookMediaItem'].includes(step.payload.type)&&(await context.repo.references(step.payload.targetId)).hasReferences)throw new DomainError('shared_reference_conflict','Media gained a reference since preview; no writes applied.',409);
+    }
+    if (step.payload.action === 'delete') {
+      const target = await context.repo.read(step.payload.targetId);
+      const managed = await context.repo.managedChildren?.(target) || [];
+      if (hash(managed) !== hash(step.payload.managed || [])) throw new DomainError('membership_conflict', 'Managed image descendants changed since preview.', 409);
+    }
+    if (step.payload.action === 'cover-presentation') {
+      const target = await context.repo.read(step.payload.targetId);
+      const current = await context.repo.images.preflight(target, step.payload.setId);
+      if (hash(current) !== hash(step.payload.presentation)) throw new DomainError('image_draft_changed', 'The approved image set changed since preview.', 409);
     }
     if(step.payload.action==='order'||step.payload.action==='delete'&&step.payload.type==='Timeline') {
       const members=await context.repo.children(step.payload.targetId,step.payload.action==='order'?'order':'delete');

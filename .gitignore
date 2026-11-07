@@ -121,6 +121,8 @@ Thumbs.db
 # Netlify
 .netlify/
 netlify.toml
+# This one public config belongs only to the reproducible local app image.
+!deployment/docker/netlify.toml
 
 # Local development
 *.local

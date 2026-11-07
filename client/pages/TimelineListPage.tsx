@@ -6,7 +6,9 @@ import type { Timeline } from '../services/timelineService';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { MediaCoverMontage } from '../components/MediaCoverMontage';
+import { TimelineCover } from '../components/TimelineCover';
 import { CollectionPlaceholder } from '../components/CollectionPlaceholder';
+import { PermissionUnavailable } from '../components/PermissionUnavailable';
 import { captureOperationContext, loadBackgroundImage, subscribePermissions } from '../services/sensenet';
 import { createTimelineCoverLoader } from '../services/timelineCoverLoader';
 import { siteConfig } from '../configuration';
@@ -81,7 +83,7 @@ export const TimelineListPage: React.FC = () => {
       if (!view.active()) return;
       setLoadedTimelines(previous => [...previous, ...timelines]);
       setHasMore(timelines.length === siteConfig.timelineList.allViewPageSize);
-      view.loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl));
+      view.loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl && (!timeline.image || timeline.image.state === 'legacy')));
     } catch (error) {
       if (view.active()) {
         console.error('Failed to load more timelines:', error);
@@ -116,7 +118,7 @@ export const TimelineListPage: React.FC = () => {
         setMediaCovers({});
         setLoadedTimelines(timelines);
         setHasMore(timelines.length === siteConfig.timelineList.allViewPageSize);
-        loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl));
+        loader.enqueue(timelines.filter(timeline => !timeline.coverImageUrl && (!timeline.image || timeline.image.state === 'legacy')));
       })
       .catch(error => {
         if (active()) {
@@ -334,7 +336,8 @@ export const TimelineListPage: React.FC = () => {
           {error}{visibleTimelines.length > 0 && ' Previously loaded timelines remain below.'}
           <button type="button" onClick={() => setReloadRevision(value => value + 1)} style={{ marginLeft: 16 }}>Try Again</button>
         </div>}
-        {readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
+        {readPermission === 'unavailable' ? <PermissionUnavailable />
+        : readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
         : visibleTimelines.length === 0 && (loading || readPermission === 'checking') ? <CollectionPlaceholder kind="timeline" />
         : visibleTimelines.length === 0 && error ? null
         : visibleTimelines.length === 0 ? (
@@ -414,11 +417,11 @@ export const TimelineListPage: React.FC = () => {
                         flexDirection: 'column',
                         height: '100%'
                       }}
-                      onMouseOver={(e) => {
+                      onMouseEnter={(e) => {
                         e.currentTarget.parentElement!.style.transform = 'translateY(-2px)';
                         e.currentTarget.parentElement!.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)';
                       }}
-                      onMouseOut={(e) => {
+                      onMouseLeave={(e) => {
                         e.currentTarget.parentElement!.style.transform = 'translateY(0)';
                         e.currentTarget.parentElement!.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
                       }}
@@ -442,10 +445,10 @@ export const TimelineListPage: React.FC = () => {
                       </div>
                     )}
                       {/* Cover Image */}
-                      <div aria-busy={!timeline.coverImageUrl && mediaCovers[timeline.id] === undefined} style={{
+                      <div aria-busy={(!timeline.image || timeline.image.state === 'legacy') && !timeline.coverImageUrl && mediaCovers[timeline.id] === undefined} style={{
                         height: 200,
                         flexShrink: 0, // Prevent shrinking
-                        backgroundImage: timeline.coverImageUrl 
+                        backgroundImage: (!timeline.image || timeline.image.state === 'legacy') && timeline.coverImageUrl
                           ? `url(${timeline.coverImageUrl})` 
                           : 'linear-gradient(135deg, #2a4d8f 0%, #1e3b73 100%)',
                         backgroundSize: 'cover',
@@ -455,7 +458,8 @@ export const TimelineListPage: React.FC = () => {
                         justifyContent: 'center',
                         position: 'relative'
                       }}>
-                        {!timeline.coverImageUrl && (
+                        {timeline.image && timeline.image.state !== 'legacy' && <TimelineCover image={timeline.image} label={`${timeline.displayName} cover`} />}
+                        {(!timeline.image || timeline.image.state === 'legacy') && !timeline.coverImageUrl && (
                           <MediaCoverMontage 
                             coverUrls={mediaCovers[timeline.id] || []}
                             timelineName={timeline.displayName}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { siteConfig } from '../configuration';
 import { loadBackgroundImage } from '../services/sensenet';
@@ -7,6 +7,8 @@ import type { MediaItem } from '../services/mediaLibraryService';
 import { MediaLibraryService } from '../services/mediaLibraryService';
 import { LazyImage } from '../components/LazyImage';
 import { PermissionContent } from '../components/PermissionContent';
+
+const ImagePresentationEditor = lazy(() => import('../components/ImagePresentationEditor').then(module => ({ default: module.ImagePresentationEditor })));
 
 export const MediaItemViewPage: React.FC = () => {
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
@@ -247,9 +249,10 @@ export const MediaItemViewPage: React.FC = () => {
             position: 'relative',
             overflow: 'hidden',
           }}>
-            {MediaLibraryService.getCoverImageUrl(mediaItem) ? (
+            {(mediaItem.image && mediaItem.image.state !== 'legacy') || MediaLibraryService.getCoverImageUrl(mediaItem) ? (
               <LazyImage
-                src={MediaLibraryService.getCoverImageUrl(mediaItem)!}
+                src={MediaLibraryService.getCoverImageUrl(mediaItem) || ''}
+                image={mediaItem.image}
                 alt={mediaItem.DisplayName || 'Media cover'}
                 style={{
                   width: '100%',
@@ -396,6 +399,11 @@ export const MediaItemViewPage: React.FC = () => {
                 </div>
               </div>
             )}
+            <PermissionContent operations={[{ target: mediaItem.Id, action: 'update' }]} fallback={null}>
+              <Suspense fallback={<p role="status">Loading image tools…</p>}><ImagePresentationEditor ownerId={mediaItem.Id} kind="media-sizes" originalStored={['image/png', 'image/jpeg', 'image/webp', 'application/octet-stream'].includes(mediaItem.CoverImageBin?.__mediaresource?.content_type || '')} candidates={[{ id: mediaItem.Id, title: mediaItem.DisplayName, url: `/api/v1/content/${mediaItem.Id}/cover`, image: mediaItem.image }]} onSaved={async () => {
+                setMediaItem(await MediaLibraryService.getMediaItem(mediaItem.Id));
+              }} /></Suspense>
+            </PermissionContent>
             {/* Metadata */}
             <div style={{ borderTop: '1px solid #e9ecef', marginTop: 24, paddingTop: 16, fontSize: 14, color: '#6c757d', display: 'flex', gap: 24 }}>
               <div>Created: {formatDate(mediaItem.CreationDate)}</div>

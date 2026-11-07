@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { BulkUpdateDialog } from '../components/BulkUpdateDialog';
@@ -11,14 +11,17 @@ import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
 import { mediaLibraryPath, timelinesPath } from '../projectPaths';
 import { repository, assertOperations, captureOperationContext, patchContentWithRevision, type Operation } from '../services/sensenet';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, usePermissionState } from '../hooks/usePermissions';
 import { PermissionContent } from '../components/PermissionContent';
+import { PermissionUnavailable } from '../components/PermissionUnavailable';
 import { useSharedAuth } from '../context/useSharedAuth';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { loadBackgroundImage } from '../services/sensenet';
 import { siteConfig, repositoryUrl } from '../configuration';
 import type { Timeline } from '../services/timelineService';
 import type { TimelineEntry, MediaItemRef } from '../services/timelineEntryService';
+
+const ImagePresentationEditor = lazy(() => import('../components/ImagePresentationEditor').then(module => ({ default: module.ImagePresentationEditor })));
 
 // Helper function to get cover image URL from MediaItemRef
 function getCoverImageUrl(mediaItem: MediaItemRef): string | null {
@@ -29,7 +32,7 @@ function getCoverImageUrl(mediaItem: MediaItemRef): string | null {
   // }
   
   // Otherwise, check if we have a binary image
-  if (mediaItem.CoverImageBin && mediaItem.CoverImageBin.__mediaresource) {
+  if (mediaItem.CoverImageBin?.__mediaresource && mediaItem.CoverImageBin.__mediaresource.content_type !== '') {
     const relativePath = mediaItem.CoverImageBin.__mediaresource.media_src;
     return `${repositoryUrl}${relativePath}`;
   }
@@ -177,7 +180,8 @@ export const TimelineViewPage: React.FC = () => {
 
   const timelinePath = timelineName ? `${timelinesPath}/${timelineName}` : '';
   const readContext = JSON.stringify([timelinePath, auth.accessToken, auth.user?.Id, auth.user?.sub]);
-  const canRead = usePermissions(timelinePath ? [{ target: timelinePath, action: 'read' }] : []);
+  const readPermission = usePermissionState(timelinePath ? [{ target: timelinePath, action: 'read' }] : []);
+  const canRead = readPermission === 'allowed';
   const canCreateEntry = usePermissions(timelinePath ? [{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }] : []);
   const reorderOperations: Operation[] = entries.map(entry => ({ target: entry.id, action: 'update' }));
   const canReorder = usePermissions(reorderOperations);
@@ -235,6 +239,8 @@ export const TimelineViewPage: React.FC = () => {
           created_at: result.d.CreationDate,
           isVisible: typeof result.d.IsVisible === 'boolean' ? result.d.IsVisible : false,
           timelineType: result.d.TimelineType || 'chronological',
+          coverImageUrl: result.d.CoverImageUrl,
+          image: result.d.image,
         };
         
         setTimeline(timelineData);
@@ -342,6 +348,8 @@ export const TimelineViewPage: React.FC = () => {
     setPendingOrder(newEntries);
   };
 
+  if (readPermission === 'checking') return <div role="status" style={{ padding: 24 }}>Checking access…</div>;
+  if (readPermission === 'unavailable') return <PermissionUnavailable />;
   if (!canRead) return <div role="status" style={{ padding: 24 }}>This timeline is unavailable with your current permissions.</div>;
 
   if (loading || loadedContext !== readContext) {
@@ -788,6 +796,11 @@ export const TimelineViewPage: React.FC = () => {
           </form>
         </PermissionContent>)}
 
+        {editMode && <PermissionContent operations={[{ target: timeline.id, action: 'update' }]} fallback={null}>
+          <Suspense fallback={<p role="status">Loading image tools…</p>}><ImagePresentationEditor ownerId={Number(timeline.id)} kind="timeline-composite" candidates={entries.flatMap(entry => entry.mediaItem && ['image/png', 'image/jpeg', 'image/webp', 'application/octet-stream'].includes(entry.mediaItem.CoverImageBin?.__mediaresource?.content_type || '') ? [{ id: entry.mediaItem.Id, title: entry.mediaItem.DisplayName || entry.displayName, url: `/api/v1/content/${entry.mediaItem.Id}/cover`, image: entry.mediaItem.image }] : [])} onSaved={owner => {
+            setTimeline(previous => previous ? { ...previous, revision: owner.revision, image: owner.image as Timeline['image'] } : previous);
+          }} /></Suspense>
+        </PermissionContent>}
         {/* Timeline Metadata in Header */}
         <div style={{ marginTop: 24, display: 'flex', gap: 24, fontSize: 14, color: 'rgba(255,255,255,0.9)' }}>
           <div>
@@ -1032,14 +1045,15 @@ export const TimelineViewPage: React.FC = () => {
                               position: 'relative',
                               overflow: 'hidden'
                             }}>
-                              {entry.mediaItem && getCoverImageUrl(entry.mediaItem) ? (
+                              {entry.mediaItem && (entry.mediaItem.image && entry.mediaItem.image.state !== 'legacy' || getCoverImageUrl(entry.mediaItem)) ? (
                                 <Link
                                   to={`/media-library/${entry.mediaItem.Name}`}
                                   style={{ display: 'block', width: '100%', height: '100%' }}
                                   title={entry.mediaItem.DisplayName}
                                 >
                                   <LazyImage
-                                    src={getCoverImageUrl(entry.mediaItem)!}
+                                    src={getCoverImageUrl(entry.mediaItem) || ''}
+                                    image={entry.mediaItem.image}
                                     alt={entry.mediaItem.DisplayName || 'Media cover'}
                                     style={{ 
                                       width: '100%',
@@ -1228,14 +1242,15 @@ export const TimelineViewPage: React.FC = () => {
                   </div>
                   {/* Cover image top, portrait aspect ratio */}
                   <div className="entry-card-image" style={{ width: 120, height: 180, position: 'relative', overflow: 'hidden', margin: '24px auto 0 auto', borderRadius: 12, boxShadow: '0 2px 8px rgba(42,77,143,0.10)', background: '#f8f9fa' }}>
-                    {entry.mediaItem && getCoverImageUrl(entry.mediaItem) ? (
+                    {entry.mediaItem && (entry.mediaItem.image && entry.mediaItem.image.state !== 'legacy' || getCoverImageUrl(entry.mediaItem)) ? (
                       <Link
                         to={`/media-library/${entry.mediaItem.Name}`}
                         style={{ display: 'block', width: '100%', height: '100%' }}
                         title={entry.mediaItem.DisplayName}
                       >
                         <LazyImage
-                          src={getCoverImageUrl(entry.mediaItem)!}
+                          src={getCoverImageUrl(entry.mediaItem) || ''}
+                          image={entry.mediaItem.image}
                           alt={entry.mediaItem.DisplayName}
                           style={{
                             width: '100%',

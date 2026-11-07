@@ -69,11 +69,11 @@ async function smoke() {
     const acl=await local.api(target,{operation:'GetAcl',account:accounts.admin});
     const editorRow=acl.entries.find(entry=>entry.identity.path===accounts.editor.path);
     for(const name of ['Open','OpenMinor','Save'])assert.equal(editorRow?.permissions[name]?.value,'deny','Admin ACL must prove the concrete editor '+name+' deny.');
-    const permission=await local.request(local.endpoint(target)+'/HasPermission?'+new URLSearchParams({permissions:'Open'}),{account:accounts.editor});
-    const permissionFalse=permission.status===200&&permission.value?.d===false;
-    assert.ok(permissionFalse||nativeOpenReadDenied(permission),'Open precondition returned unexpected status/type: HTTP '+permission.status);
+    const openRead=await local.request(local.endpoint(target)+'?'+new URLSearchParams({$select:'Id',metadata:'no'}),{account:accounts.editor});
+    const exactReadDenied=[403,404].includes(openRead.status);
+    assert.ok(exactReadDenied||nativeOpenReadDenied(openRead),'Exact content GET returned unexpected status/type: HTTP '+openRead.status);
     report.permissionReadDenials=report.permissionReadDenials||[];
-    report.permissionReadDenials.push({targetKind,adminFixtureExists:true,adminAclOpenOpenMinorSaveDenied:true,status:permission.status,permissionFalse,nativePolicyDeny:nativeOpenReadDenied(permission),code:permission.value?.error?.code,exceptiontype:permission.value?.error?.exceptiontype});
+    report.permissionReadDenials.push({targetKind,adminFixtureExists:true,adminAclOpenOpenMinorSaveDenied:true,status:openRead.status,exactReadDenied,nativePolicyDeny:nativeOpenReadDenied(openRead),code:openRead.value?.error?.code,exceptiontype:openRead.value?.error?.exceptiontype});
   };
   const denied = [{ identity: VISITOR, See:'deny', Open:'deny', OpenMinor:'deny', SeePermissions:'deny' }, { identity:accounts.reader.path, See:'deny', Open:'deny', OpenMinor:'deny', SeePermissions:'deny' }];
   const getEntries = async timeline => {
@@ -110,6 +110,7 @@ async function smoke() {
     const forbidden = [];
     const externalRequests=[];
     const imageHeaders = [];
+    const hasPermissionRequests = [];
     await context.route('**/*', route => {
       const url = new URL(route.request().url());
       if (!['https://localhost:8080', local.REPOSITORY, local.AUTHORITY].includes(url.origin)) {
@@ -121,6 +122,7 @@ async function smoke() {
     });
     page.on('request', async request => {
       const url = new URL(request.url());
+      if (url.origin === local.REPOSITORY && /\/HasPermission$/i.test(url.pathname)) hasPermissionRequests.push({method:request.method(),path:url.pathname});
       if (url.origin === local.REPOSITORY && ['POST','PUT','PATCH','DELETE'].includes(request.method())) rawMutations.push({method:request.method(),path:url.pathname});
       if(url.origin===FRONTEND&&request.method()==='POST') {
         const applied=url.pathname.match(/^\/api\/v1\/plans\/([^/]+)\/apply$/);
@@ -171,7 +173,7 @@ async function smoke() {
       }
     });
     page.on('dialog', dialog => dialog.accept());
-    const session={context,page,writes,rawMutations,providerRequests,forbidden,imageHeaders,externalRequests};sessions.push(session);return session;
+    const session={context,page,writes,rawMutations,providerRequests,forbidden,imageHeaders,externalRequests,hasPermissionRequests};sessions.push(session);return session;
   };
   const gotoStable = async (page,url) => {
     try { await page.goto(url); }
@@ -521,24 +523,31 @@ async function smoke() {
       assert.equal(editor.imageHeaders.filter(image=>!image.repository).some(image=>image.bearer),false,'Repository bearer was sent to an external image origin.');
       assert.equal(editor.imageHeaders.filter(image=>!image.repository).some(image=>image.cookie),false,'Cookies were sent to an external cover fetch.');
     });
-    await checked('Unknown HasPermission prevents combined shared Save and upload',async()=>{
+    await checked('Unavailable fresh compound Actions metadata prevents combined shared Save and upload without HasPermission',async()=>{
       await editorGoto(editor,'/timelines/'+uiSlug);await editor.page.getByTitle('Edit Entry',{exact:true}).first().click();
       await editor.page.getByRole('button',{name:'Media Item Data',exact:true}).click();const modal=editModal(editor.page);
       await modal.locator('input[type="text"]').first().fill('Unknown permission must not save');
       await modal.getByRole('radio',{name:'Upload Image',exact:true}).check();await modal.locator('input[type="file"]').setInputFiles({name:'unknown-must-not-upload.png',mimeType:'image/png',buffer:PNG});
-      const permissionPath=new URL(local.endpoint(uiMedia.Id)+'/HasPermission').pathname.toLowerCase();
+      const permissionPath=('/odata.svc'+ROOT).toLowerCase();
       let injected=0;const routeHandler=route=>{
-        const url=new URL(route.request().url());
-        if(route.request().method()==='GET'&&url.pathname.toLowerCase()===permissionPath&&url.searchParams.get('permissions')?.includes('Save')){
+        const request=route.request(),url=new URL(request.url()),query=url.searchParams.get('query')||'';
+        const select=new Set((url.searchParams.get('$select')||'').split(',')),expand=new Set((url.searchParams.get('$expand')||'').split(','));
+        const concreteTarget=[...query.matchAll(/\bId:([0-9]+)/g)].some(match=>Number(match[1])===uiMedia.Id);
+        if(request.method()==='GET'&&url.pathname.toLowerCase()===permissionPath&&concreteTarget&&expand.has('Actions')&&expand.has('EffectiveAllowedChildTypes')&&['Id','Path','Actions/Name','Actions/Forbidden','EffectiveAllowedChildTypes/Name'].every(field=>select.has(field))){
           injected++;return route.fulfill({status:500,contentType:'application/json',body:'{"error":{"message":{"value":"M0 injected unknown permission"}}}'});
         }
         return route.fallback();
       };
       await editor.context.route(local.REPOSITORY+'/**',routeHandler);const mark=editor.writes.length;
-      await modal.getByRole('button',{name:'Save Changes',exact:true}).click();await modal.getByText('M0 injected unknown permission',{exact:true}).waitFor();
-      assert.ok(injected>0,'No actual HasPermission operation was faulted.');expectNoWrites(editor,mark);
-      await editor.context.unroute(local.REPOSITORY+'/**',routeHandler);await modal.getByRole('button',{name:'Cancel',exact:true}).click();
-    },'browser GET permission fault injection; actual Save handler');
+      const before=await local.api(uiMedia.Id,{account:accounts.admin,query:{$select:'DisplayName,CoverImageBin',metadata:'no'}});
+      try {
+        await modal.getByRole('button',{name:'Save Changes',exact:true}).click();await modal.getByText('Permission content is unavailable',{exact:true}).waitFor();
+        assert.ok(injected>0,'No fresh compound Actions metadata request was faulted.');expectNoWrites(editor,mark);
+        assert.equal(editor.hasPermissionRequests.length,0,'The browser must not fall back to HasPermission.');
+        const after=await local.api(uiMedia.Id,{account:accounts.admin,query:{$select:'DisplayName,CoverImageBin',metadata:'no'}});assert.deepEqual(after,before);
+      } finally { await editor.context.unroute(local.REPOSITORY+'/**',routeHandler); }
+      await modal.getByRole('button',{name:'Cancel',exact:true}).click();
+    },'browser fresh compound GET transport fault injection; actual Save handler and backend readback');
     await checked('Revoked shared Save/upload preflight stops before the first browser write', async () => {
       await editorGoto(editor,'/timelines/'+uiSlug);
       await editor.page.getByTitle('Edit Entry',{exact:true}).first().click();await editor.page.getByRole('button',{name:'Media Item Data',exact:true}).click();
@@ -565,7 +574,7 @@ async function smoke() {
       assert.equal(rejected,true);expectNoWrites(editor,mark);
       await editor.page.reload();await editor.page.getByRole('button',{name:/Logout/}).waitFor();
     },'actual authenticated browser module context transition');
-    await checked('Media and entry Open revocation hides cached card metadata and image while timeline stays readable',async()=>{
+    await checked('Explicit reload after media and entry Open revocation hides metadata and images while timeline stays readable',async()=>{
       await editorGoto(editor,'/timelines/'+uiSlug);await editor.page.getByText(currentMediaTitle,{exact:true}).waitFor();
       const openDenied={...READ_PERMISSIONS,Open:'deny',OpenMinor:'deny'};
       await permissions(uiMedia.Id,[{identity:accounts.editor.path,...openDenied}]);const mark=editor.writes.length;
@@ -583,8 +592,10 @@ async function smoke() {
       report.referenceOpenAcl={status:expansion.status,nativePolicyDeny:nativeOpenReadDenied(expansion),entryDisplayNameExcludedFromReferenceCheck:true,entryFields:Object.keys(expanded),MediaItem:referenceShape};
       assert.equal(protectedFields.length,0,'Protected MediaItem expansion exposed Open-denied fields; response shape: '+JSON.stringify({entryFields:Object.keys(expanded),MediaItem:referenceShape}));
       },'real editor authenticated OData reference ACL',true);
-      // Do not navigate/refetch: the bounded permission poll must remove already loaded content.
-      await editor.page.getByText(currentMediaTitle,{exact:true}).waitFor({state:'hidden',timeout:35_000});
+      // The viewer is static: refresh this exact route to observe external ACL changes.
+      await editorGoto(editor,'/timelines/'+uiSlug);await editor.page.waitForLoadState('networkidle');
+      await editor.page.getByText(uiTitle+' edited',{exact:true}).waitFor();
+      await editor.page.getByText(currentMediaTitle,{exact:true}).waitFor({state:'hidden'});
       assert.equal(await editor.page.getByRole('img',{name:currentMediaTitle,exact:true}).count(),0);
       await editor.page.getByText(uiTitle+' edited',{exact:true}).waitFor();expectNoWrites(editor,mark);
       await permissions(uiMedia.Id,[{identity:accounts.editor.path,...READ_PERMISSIONS}]);
@@ -593,7 +604,8 @@ async function smoke() {
       // Save implies Open on SenseNet; remove dependent write grants to revoke effective Open.
       await permissions(remaining.Id,[{identity:accounts.editor.path,...openDenied}]);
       await assertOpenDenied(remaining.Id,'TimelineEntry');
-      await editor.page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+      await editorGoto(editor,'/timelines/'+uiSlug);await editor.page.waitForLoadState('networkidle');
+      await editor.page.getByText(uiTitle+' edited',{exact:true}).waitFor();
       await editor.page.getByText(currentMediaTitle,{exact:true}).waitFor({state:'hidden'});
       assert.equal(await editor.page.getByRole('img',{name:currentMediaTitle,exact:true}).count(),0);
       await editor.page.getByText(uiTitle+' edited',{exact:true}).waitFor();expectNoWrites(editor,mark);
@@ -601,7 +613,18 @@ async function smoke() {
       await editorGoto(editor,'/media-library');await editor.page.getByPlaceholder('Search titles, descriptions...').fill(id);
       await editor.page.getByRole('button',{name:'Search',exact:true}).click();await editor.page.getByRole('heading',{name:libraryTitle,exact:true}).waitFor();
       await permissions(uiMedia.Id,[{identity:accounts.editor.path,...openDenied}]);
-      await editor.page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+      // Reload clears the page-local search; reapply the same UUID filter before asserting absence.
+      await editorGoto(editor,'/media-library');
+      await editor.page.getByPlaceholder('Search titles, descriptions...').fill(id);
+      const filteredRead=editor.page.waitForResponse(response=>{
+        const request=response.request(),url=new URL(request.url());
+        return request.method()==='GET'&&url.origin===local.REPOSITORY&&(url.searchParams.get('query')||'').includes(id);
+      });
+      await editor.page.getByRole('button',{name:'Search',exact:true}).click();
+      const filteredResponse=await filteredRead;assert.equal(filteredResponse.status(),200);
+      const filteredResult=await filteredResponse.json();assert.ok(Array.isArray(filteredResult?.d?.results));
+      assert.equal(filteredResult.d.results.some(row=>row.Id===uiMedia.Id),false,'Fresh filtered repository GET exposed the Open-denied media.');
+      await editor.page.locator('[aria-label="Media items"][aria-busy="false"]').waitFor();
       await editor.page.getByRole('heading',{name:libraryTitle,exact:true}).waitFor({state:'hidden'});
       assert.equal(await editor.page.getByRole('img',{name:currentMediaTitle+' cover',exact:true}).count(),0);expectNoWrites(editor,mark);
       await permissions(uiMedia.Id,[{identity:accounts.editor.path,...READ_PERMISSIONS}]);
@@ -642,7 +665,8 @@ async function smoke() {
     report.browserMutationCounts={visitor:visitor.writes.length,reader:reader.writes.length,editor:editor.writes.length};
     report.browserMutationTransport='Native plans/apply POSTs; raw repository writes are forbidden.';
     report.rawRepositoryMutationCounts={visitor:visitor.rawMutations.length,reader:reader.rawMutations.length,editor:editor.rawMutations.length};
-    for(const session of sessions)assert.equal(session.rawMutations.length,0,'A browser flow bypassed the native gateway.');
+    report.browserHasPermissionCounts={visitor:visitor.hasPermissionRequests.length,reader:reader.hasPermissionRequests.length,editor:editor.hasPermissionRequests.length};
+    for(const session of sessions){assert.equal(session.rawMutations.length,0,'A browser flow bypassed the native gateway.');assert.equal(session.hasPermissionRequests.length,0,'A browser flow called HasPermission.');}
     report.passed=report.checks.every(check=>check.passed);
   } catch(error) {
     report.failure=redact(error.message);

@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { NativeCreationIntent } from '../services/nativeApi';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MediaLibrarySelector } from '../components/MediaLibrarySelector';
+import { LazyImage } from '../components/LazyImage';
 import { MediaItemCreateForm } from '../components/MediaItemCreateForm';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import type { MediaItem } from '../services/mediaLibraryService';
@@ -181,7 +182,14 @@ export default function TimelineEntryCreatePage() {
               borderRadius: 8,
               border: '1px solid #e9ecef'
             }}>
-              {selectedMedia.CoverImageUrl && (
+              {selectedMedia.image && selectedMedia.image.state !== 'legacy' ? (
+                <LazyImage
+                  src=""
+                  image={selectedMedia.image}
+                  alt={selectedMedia.DisplayName}
+                  style={{ width: 60, height: 90, objectFit: 'cover', borderRadius: 4 }}
+                />
+              ) : selectedMedia.CoverImageUrl && (
                 <img 
                   src={selectedMedia.CoverImageUrl} 
                   alt={selectedMedia.DisplayName}

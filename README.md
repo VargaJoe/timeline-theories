@@ -41,17 +41,16 @@ Current feature coverage and limitations are recorded in the [2026-10-14 feature
 
 ## 🚀 Quick Start
 
-Use Node.js 22.21+, PowerShell 7, Docker Desktop and the .NET 8 SDK (a newer compatible SDK also works). The M0 default is an isolated local repository with trusted HTTPS.
+Run the complete local app in Docker Compose so it can be restarted from Docker Desktop. The tracked example uses only this project's isolated localhost SenseNet. Actual target settings and secrets belong in the ignored root `.env`.
 
 ```powershell
-npm ci
-npm ci --prefix client
-./deployment/scripts/m0-bootstrap.ps1 -TrustCertificate
-node scripts/m1-local-inventory-setup.cjs
-npm run dev:m0
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
+docker compose -f compose.local.yaml up -d --build
+# Later:
+docker compose -f compose.local.yaml restart app
 ```
 
-Open https://localhost:8080 for the isolated M0 app; its API is https://localhost:8080/api/v1. One Netlify Dev command serves the UI and Functions. Ordinary `npm run dev` / `npm run build` take their repository/auth targets from standard `client/.env` and hosting variables. Existing `.env` files are preserved; `dev:m0` explicitly selects M0. Keep credentials in private app configuration.
+Open https://localhost:8080; the API is https://localhost:8080/api/v1. The `timeline-local` / `app` container runs the UI, Functions and persistent local app journal together. It restarts with Docker unless you explicitly stop it. The existing `timeline-m0` repository/auth/database containers and their volumes remain separate and unchanged. Existing local setup is reused; a fresh checkout's one-time setup, `.env` target selection, logs, rebuilds and data boundaries are in [Local Docker app](docs/local-docker.md). The host Node launcher remains the implementation used inside the container; normal local starts should use Compose.
 
 See [local runtime, full snapshot and restore](docs/m0-local-data.md), [profiles, permissions and manual tests](docs/m0-client-safety.md), and the [M0 verification handoff](docs/m0-verification-2026-10-13.md) for setup and validation. The application does not provision content on startup.
 

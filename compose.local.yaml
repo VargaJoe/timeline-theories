@@ -1,0 +1,51 @@
+# Complete local UI + Functions + persistent app journal. SenseNet stays separate.
+# Copy .env.example to .env once; actual/private target settings stay untracked.
+name: timeline-local
+services:
+  app:
+    image: timeline-theories-app:local
+    build:
+      context: .
+      dockerfile: deployment/docker/Dockerfile.app
+    init: true
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      NODE_EXTRA_CA_CERTS: /app/deployment/.local/certificates/localhost.pem
+      # Netlify's local Function bridge calls IPv4; bind localhost consistently.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+    ports:
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ./deployment/.local/certificates
+        target: /app/deployment/.local/certificates
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./client/profiles
+        target: /run/timeline/profiles
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./deployment/.local/m1-inventory.json
+        target: /app/deployment/.local/m1-inventory.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./deployment/.local/netlify-app-blobs
+        target: /app/deployment/.local/netlify-app-blobs
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: [CMD, node, scripts/local-app-health.mjs]
+      interval: 15s
+      timeout: 8s
+      start_period: 90s
+      retries: 8

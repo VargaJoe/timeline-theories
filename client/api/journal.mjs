@@ -1,5 +1,6 @@
 import { DomainError, FIELDS } from '../domain/content.mjs';
 import { stableJson, hash } from './store.mjs';
+import { isImageMutation } from './image-assets.mjs';
 
 export class MutationJournal {
   constructor(store,principal,repo){this.store=store;this.principal=principal;this.repo=repo;}
@@ -24,6 +25,11 @@ export class MutationJournal {
       return {found:true,requestHash:row.request_hash,...(row.state==='partial'?{ok:false,failure:saved}:{result:saved})};
     }
     const before=JSON.parse(row.before_state),saved=JSON.parse(row.payload);
+    if (isImageMutation(saved)) {
+      const result = await this.repo.images.reconcile(saved);
+      await this.complete(payload, result);
+      return { found: true, requestHash: row.request_hash, result };
+    }
     if(saved.action==='create') {
       let current;
       try{current=await this.repo.read(before.path);}catch(error){
@@ -53,6 +59,7 @@ export class MutationJournal {
     const expected={...before.snapshot,...saved.fields};
     const names=FIELDS[current.Type].filter(name=>name!=='CoverImageBin');
     if(names.some(name=>!this.equal(current[name],expected[name],name)))throw new DomainError('uncertain_operation_conflict','The uncertain operation differs from its approved postcondition. Review before retrying.',409,{uncertain:true});
+    if (saved.action === 'cover-presentation' && ((current.image?.setId ?? null) !== saved.setId || saved.setId !== null && current.image?.state !== 'active')) throw new DomainError('uncertain_image_activation', 'The active image reference differs from the approved presentation; no activation is dispatched again.', 409, { uncertain: true });
     if(saved.bytesBase64){const bytes=await this.repo.coverBytes(current.Id);if(hash(bytes.toString('base64'))!==hash(saved.bytesBase64))throw new DomainError('uncertain_cover_conflict','Binary bytes differ from the approved cover; no new upload is dispatched.',409,{uncertain:true,completed:[{id:current.Id,revision:current.revision,fieldsApplied:true,coverApplied:false}]});}
     const result={id:current.Id,revision:current.revision,replayed:true,reconciled:true};await this.complete(payload,result);return {found:true,requestHash:row.request_hash,result};
   }
@@ -61,10 +68,11 @@ export class MutationJournal {
   async prepare(payload,before) { return this.store.prepareMutation(this.principal,payload,before); }
   async complete(payload,result){return this.store.completeMutation(this.principal,payload,result);}
   async fail(payload,result){return this.store.partialMutation(this.principal,payload,result);}
-  async mutation(payload) {
+  async mutation(payload, transient) {
     const previous=await this.receipt(payload);if(previous.found)return previous.ok===false?{...previous.failure,replayed:true}:{ok:true,result:previous.result,replayed:true};
     let before;
-    if(payload.action==='create') {
+    if (isImageMutation(payload)) before = await this.repo.images.before(payload);
+    else if(payload.action==='create') {
       const parent=await this.repo.read(payload.parentId,{parent:true}),targetPath=parent.Path+'/'+payload.fields.Name;
       try{await this.repo.read(targetPath);throw new DomainError('duplicate_name','The requested Name already exists. Choose a new occurrence Name or operation.',409);}catch(error){if(error.status!==404)throw error;}
       before={path:targetPath,parent};
@@ -78,13 +86,13 @@ export class MutationJournal {
       return saved.ok===false?{...saved.failure,replayed:true}:{ok:true,result:saved.result,replayed:true};
     }
     try {
-      const result=await this.repo.write(payload);
+      const result=await this.repo.write(payload, transient);
       if(result.ok)await this.complete(payload,result.result??result);
       else if(!result.uncertain)await this.fail(payload,result);
       return result;
     } catch(error) {
-      if([400,401,403,404,409].includes(error.status)&&!error.details?.uncertain) {
-        await this.fail(payload,{ok:false,code:error.code,message:error.message,status:error.status,completed:error.details?.completed??[]});
+      if(([400,401,403,404,409].includes(error.status)||this.repo.mutationDispatched===false)&&!error.details?.uncertain) {
+        await this.fail(payload,{ok:false,code:error.code,message:error.message,status:error.status??500,completed:error.details?.completed??[]});
       }
       throw error;
     }

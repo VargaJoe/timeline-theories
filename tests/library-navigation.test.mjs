@@ -40,7 +40,9 @@ export const useNavigate=()=>()=>{};
 export const useSearchParams=()=>{const state=globalThis.__libraryNavigationFixture;return [state.searchParams,value=>{state.searchParams=value;}];};`);
 const checked = moduleUrl(`
 export const subscribePermissions=listener=>{const state=globalThis.__libraryNavigationFixture;state.listeners.add(listener);return ()=>state.listeners.delete(listener);};
-export const canOperations=operations=>globalThis.__libraryNavigationFixture.canOperations(operations);
+export const inspectDisplayOperations=(operations,options)=>globalThis.__libraryNavigationFixture.inspectDisplayOperations(operations,options);
+export const invalidatePermissions=()=>globalThis.__libraryNavigationFixture.invalidate();
+export const canOperations=()=>{throw Error('UI display must not invoke the fresh write guard');};
 export const captureOperationContext=()=>{const state=globalThis.__libraryNavigationFixture,epoch=state.epoch;return ()=>{if(epoch!==state.epoch)throw Error('identity or permissions changed');};};
 export const loadBackgroundImage=async()=>null;
 export const assertOperations=async()=>{};
@@ -49,6 +51,12 @@ const permissionUrl = compile('hooks/usePermissions.ts', {
   react, '../context/useSharedAuth': auth, '../configuration': config, '../services/sensenet': checked,
 });
 const { usePermissionState, usePermissions } = await import(permissionUrl);
+const unavailableUrl = compile('components/PermissionUnavailable.tsx', {
+  'react/jsx-runtime': jsx, '../services/sensenet': checked,
+});
+const { PermissionContent } = await import(compile('components/PermissionContent.tsx', {
+  'react/jsx-runtime': jsx, '../hooks/usePermissions': permissionUrl, './PermissionUnavailable': unavailableUrl,
+}));
 const media = moduleUrl(`export const MediaLibraryService={
 getMediaItems:(...args)=>globalThis.__libraryNavigationFixture.request('media',args),getCoverImageUrl:()=>null};`);
 const timelines = moduleUrl(`
@@ -62,6 +70,9 @@ const common = {
   '../configuration': config, '../projectPaths': paths, '../contentTypes': types,
   '../components/PageHeader': widget('PageHeader'),
   '../components/CollectionPlaceholder': widget('CollectionPlaceholder'),
+  '../components/PermissionUnavailable': unavailableUrl,
+  '../components/LazyImage': widget('LazyImage'),
+  '../components/TimelineCover': widget('TimelineCover'),
 };
 const { default: MediaLibraryPage } = await import(compile('pages/MediaLibraryPage.tsx', {
   ...common, '../services/mediaLibraryService': media,
@@ -83,9 +94,11 @@ function fixture() {
   const state = {
     auth: { isAuthenticated: true, isLoading: false, accessToken: 'owner-one', user: { sub: 'owner-one' } },
     epoch: 0, listeners: new Set(), permissions: [], requests: [], searchParams: new URLSearchParams('filter=a'),
-    canOperations(operations) {
-      if (operations.some(operation => operation.action !== 'read')) return Promise.resolve(false);
-      const pending = deferred(); this.permissions.push({ operations, ...pending }); return pending.promise;
+    inspectDisplayOperations(operations, options) {
+      if (operations.some(operation => operation.action !== 'read')) return Promise.resolve('denied');
+      const pending = deferred();
+      this.permissions.push({ operations, options, ...pending, resolve: value => pending.resolve(typeof value === 'boolean' ? value ? 'allowed' : 'denied' : value) });
+      return pending.promise;
     },
     request(kind, args) {
       const pending = deferred(); this.requests.push({ kind, args, ...pending }); return pending.promise;
@@ -103,6 +116,12 @@ function host(Component) {
   const slots = []; let cursor = 0, dirty = true, tree;
   const changed = (a, b) => !a || !b || a.length !== b.length || a.some((value, i) => !Object.is(value, b[i]));
   const effects = [];
+  const expand = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(expand);
+    if (typeof node.type === 'function') return expand(node.type(node.props));
+    return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
+  };
   const hooks = {
     state(initial) {
       const index = cursor++;
@@ -130,7 +149,7 @@ function host(Component) {
   const ui = {
     // A render without passive effects checks that private rows are masked
     // immediately when identity/permission state changes.
-    render() { cursor = 0; globalThis.__libraryNavigationHooks = hooks; tree = Component(); return tree; },
+    render() { cursor = 0; globalThis.__libraryNavigationHooks = hooks; tree = expand(Component()); return tree; },
     flush() {
       for (let pass = 0; pass < 30; pass++) {
         dirty = false; ui.render();
@@ -173,6 +192,35 @@ function item(kind, title) {
 }
 const pages = [['media', MediaLibraryPage], ['timeline', TimelineListPage]];
 
+test('default route gates show pending access, an actionable outage and a separate real denial', async () => {
+  const state = fixture();
+  const ui = host(() => PermissionContent({ operations: [{ target: '/MediaLibrary', action: 'read' }], children: 'Protected editor' }));
+  try {
+    assert.match(text(ui.flush()), /Checking access/);
+    state.permissions[0].reject(new Error('Repository is unavailable'));
+    let tree = await settle(ui);
+    assert.match(text(tree), /Unable to check access/);
+    assert.doesNotMatch(text(tree), /Protected editor|current permissions|Checking access/);
+    assert.equal(find(tree, node => node.props?.role === 'alert')?.type, 'div');
+    button(tree, 'Try Again').props.onClick();
+    assert.match(text(ui.flush()), /Checking access/);
+    state.permissions.at(-1).resolve(false); tree = await settle(ui);
+    assert.match(text(tree), /current permissions/);
+    assert.equal(find(tree, node => node.type === 'button' && text(node) === 'Try Again'), undefined);
+  } finally { ui.unmount(); }
+});
+
+test('per-card permission gates keep explicit null fallbacks hidden during an outage', async () => {
+  const state = fixture();
+  const ui = host(() => PermissionContent({ operations: [{ target: '/MediaLibrary', action: 'read' }], children: 'Private card', fallback: null }));
+  try {
+    assert.equal(text(ui.flush()), '');
+    state.permissions[0].reject(new Error('Repository is unavailable'));
+    assert.equal(text(await settle(ui)), '');
+    assert.equal(state.permissions.length, 1);
+  } finally { ui.unmount(); }
+});
+
 test('permission tri-state stays checking while pending and never reuses an earlier identity result', async () => {
   const state = fixture();
   const ui = host(() => ({ props: { children: usePermissionState([{ target: '/MediaLibrary', action: 'read' }]) } }));
@@ -212,7 +260,91 @@ test('a late allowed permission response cannot authorize the next identity', as
   } finally { ui.unmount(); }
 });
 
+test('20 permission consumers make no idle/focus/visibility refresh and still honor explicit invalidation', async () => {
+  function lifecycleFixture() {
+    const state = fixture(), intervals = new Map(), windowEvents = new Map(), documentEvents = new Map();
+    const added = { interval: 0, focus: 0, visibilitychange: 0 };
+    const add = (events, type, listener) => { if (!events.has(type)) events.set(type, new Set()); events.get(type).add(listener); added[type]++; };
+    const remove = (events, type, listener) => events.get(type)?.delete(listener);
+    globalThis.window = {
+      addEventListener: (type, listener) => add(windowEvents, type, listener),
+      removeEventListener: (type, listener) => remove(windowEvents, type, listener),
+      setInterval: (run, delay) => { const id = ++added.interval; intervals.set(id, { run, delay }); return id; },
+      clearInterval: id => intervals.delete(id),
+    };
+    globalThis.document = { visibilityState: 'visible',
+      addEventListener: (type, listener) => add(documentEvents, type, listener),
+      removeEventListener: (type, listener) => remove(documentEvents, type, listener) };
+    const emit = (events, type) => { for (const listener of events.get(type) || []) listener(); };
+    const assertResources = count => {
+      assert.equal(intervals.size, count); assert.equal(windowEvents.get('focus')?.size || 0, count);
+      assert.equal(documentEvents.get('visibilitychange')?.size || 0, count);
+    };
+    return { state, intervals, added, assertResources, focus: () => emit(windowEvents, 'focus'), visible: () => emit(documentEvents, 'visibilitychange') };
+  }
+  const session = lifecycleFixture(), mounted = new Set(), originalNow = Date.now;
+  try {
+    for (let target = 1; target <= 20; target++) {
+      const ui = host(() => ({ props: { children: String(usePermissions([{ target, action: 'read' }])) } }));
+      mounted.add(ui); ui.flush();
+    }
+    assert.equal(session.state.permissions.length, 20);
+    session.assertResources(0); assert.deepEqual(session.added, { interval: 0, focus: 0, visibilitychange: 0 });
+    for (const pending of session.state.permissions) pending.resolve(true);
+    for (const ui of mounted) await settle(ui);
+    Date.now = () => 86_500_000;
+    for (let event = 0; event < 3; event++) {
+      session.focus(); session.visible();
+      for (const timer of session.intervals.values()) timer.run();
+      for (const ui of mounted) await settle(ui);
+    }
+    assert.equal(session.state.permissions.length, 20, 'a loaded content view is not a live service');
+    session.state.invalidate();
+    for (const ui of mounted) ui.flush();
+    assert.equal(session.state.permissions.length, 40, 'explicit app invalidation still rechecks each mounted consumer');
+    assert.deepEqual(session.state.permissions.slice(20).map(call => call.operations[0].target), Array.from({ length: 20 }, (_, index) => index + 1));
+    const consumers = [...mounted];
+    for (const ui of consumers.slice(0, -1)) { ui.unmount(); mounted.delete(ui); }
+    session.assertResources(0); assert.equal(session.state.listeners.size, 1);
+    consumers.at(-1).unmount(); mounted.clear();
+    session.assertResources(0); assert.equal(session.state.listeners.size, 0);
+
+    const next = lifecycleFixture(), remounted = host(() => ({ props: { children: String(usePermissions([{ target: 99, action: 'read' }])) } }));
+    mounted.add(remounted); remounted.flush(); next.assertResources(0);
+    assert.deepEqual(next.added, { interval: 0, focus: 0, visibilitychange: 0 });
+    next.focus(); assert.equal(next.state.permissions.length, 1, 'the next fixture must not inherit earlier consumers');
+    remounted.unmount(); mounted.clear(); next.assertResources(0);
+  } finally {
+    for (const ui of mounted) ui.unmount();
+    Date.now = originalNow;
+  }
+});
+
 for (const [kind, Component] of pages) {
+  test(`${kind}: unavailable access ends the busy state and retries only on an explicit click`, async () => {
+    const state = fixture(), ui = host(Component);
+    try {
+      ui.flush();
+      state.permissions[0].reject(new Error('Content service timed out'));
+      let tree = await settle(ui); assertChrome(tree, kind);
+      assert.match(text(tree), /Unable to check access/);
+      assert.doesNotMatch(text(tree), /Checking access|current permissions/);
+      assert.equal(find(tree, node => node.props?.['aria-busy'] !== undefined).props['aria-busy'], false);
+      assert.equal(find(tree, node => node.type === 'CollectionPlaceholder'), undefined);
+      assert.equal(state.requests.length, 0);
+      for (let pass = 0; pass < 3; pass++) await settle(ui);
+      assert.equal(state.permissions.length, 1, 'An outage does not install a retry loop');
+      button(tree, 'Try Again').props.onClick(); tree = ui.flush();
+      assert.match(text(tree), /Checking access/);
+      assert.equal(state.permissions.length, 2);
+      await allowRead(state, ui);
+      assert.equal(state.requests.length, 1);
+      state.requests[0].resolve([item(kind, 'Recovered card')]); tree = await settle(ui);
+      assert.match(text(tree), /Recovered card/);
+      assert.doesNotMatch(text(tree), /Unable to check access|Checking access/);
+    } finally { ui.unmount(); }
+  });
+
   test(`${kind}: header and filters survive pending permission and initial data requests`, async () => {
     const state = fixture(), ui = host(Component);
     try {

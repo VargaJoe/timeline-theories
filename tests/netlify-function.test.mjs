@@ -3,14 +3,17 @@ import assert from 'node:assert/strict';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import forge from '../client/node_modules/node-forge/lib/index.js';
 import { startBlobFixture } from './helpers/netlify-blobs-fixture.mjs';
-import { createFunctionApp } from '../client/api/function.mjs';
+import { createFunctionApp, invocationTimeoutMs, handleRequest as handleFunctionRequest } from '../client/api/function.mjs';
 import { FIELDS } from '../client/domain/content.mjs';
 import { hash } from '../client/api/store.mjs';
 import { loadConfig } from '../client/api/config.mjs';
 import { invokeBackground } from '../client/api/jobs.mjs';
+import { imageProtocolFixture } from './helpers/image-assets-protocol-fixture.mjs';
+import { StockRepository } from '../client/api/stock-repository.mjs';
+import rasterFixture from '../scripts/helpers/image-variant-fixture.cjs';
 
 // Function routing and ACL-flow tests only. Blobs uses its real SDK/HTTP/file
 // emulator; the isolated HTTPS stub below supplies controlled SenseNet protocol
@@ -34,11 +37,13 @@ async function setup(t, extra = {}) {
   const content = { Id: 10, ParentId: 2, Name: 'media', DisplayName: 'Fixture media', Path: projectRoot + '/MediaLibrary/media', Type: 'MediaItem', Title: 'Before', CreationDate: '2026-10-01T00:00:00Z', CreatedById: 42, ModificationDate: '2026-10-01T00:00:00Z', ModifiedById: 42, Version: 'V1.0', VersionId: 1 };
   const contents = new Map([[content.Id, content]]);
   const send = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ d: value })); };
+  const imageFixture = imageProtocolFixture(projectRoot, contents, send, state); state.images = imageFixture.state;
   const server = https.createServer(tls, async (req, res) => {
     try {
       const url = new URL(req.url, 'https://localhost'), credential = req.headers.apikey || req.headers.authorization?.replace(/^Bearer /, '');
       state.requests.push({ method: req.method, path: url.pathname, permissions: url.searchParams.get('permissions'), credential });
       if (url.pathname.endsWith('/GetCurrentUser')) return send(res, credential === 'rejected' ? 401 : 200, { Id: credential === 'other-user' ? 99 : 42, Name: 'AuthenticatedFixture' });
+      if (await imageFixture.handle(req, res, url)) return;
       if (url.pathname.endsWith('/HasPermission')) {
         if (url.searchParams.get('permissions') === 'Save' && state.onSave) { const callback = state.onSave; state.onSave = null; await callback(); }
         return send(res, 200, url.searchParams.get('permissions') === 'Save' ? state.allowSave : state.allowRead && (state.allowRootRead || url.pathname.includes('content(10)')));
@@ -49,6 +54,7 @@ async function setup(t, extra = {}) {
         const names = ['Id','ParentId','Name','Path','Type','CreationDate','CreatedById','ModificationDate','ModifiedById','Version','VersionId', ...(FIELDS[type] || []), 'CoverImageBin'];
         return send(res, 200, [{ ContentTypeName: type, FieldSettings: [...new Set(names)].map(Name => ({ Name, ReadOnly: false })) }]);
       }
+      if (url.pathname.endsWith('/AllowedChildTypes') || url.pathname.endsWith('/EffectiveAllowedChildTypes')) return send(res, 200, { results: [{ Name: 'File' }, {Name:'Folder'}] });
       if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0' });
       const target = url.pathname.match(/^\/OData.svc\/content\((\d+)\)$/);
       if (target) {
@@ -95,6 +101,27 @@ async function setup(t, extra = {}) {
   return { app, config, state, content, contents, request, enqueue, background, runNext, invocations, preview };
 }
 
+test('stored generic cover reads preserve bytes and metadata while retaining MIME and caller-access checks', async t => {
+  const { app, request, state, content } = await setup(t);
+  state.images.enabled = true;
+  state.images.original = rasterFixture.png(4, 6);
+  state.images.originalMime = 'application/octet-stream';
+  content.CoverImageBin = { __mediaresource: { content_type: 'application/octet-stream', media_src: 'legacy-original' } };
+  const before = structuredClone(content);
+  const response = await app.handleRequest(request('content/10/cover'));
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), state.images.original);
+  assert.deepEqual(content, before, 'read-time MIME inference never repairs or reuploads original metadata');
+  assert.equal(state.patches, 0); assert.equal(state.images.uploads, 0);
+  state.images.originalMime = 'image/jpeg';
+  assert.equal((await app.handleRequest(request('content/10/cover'))).status, 404, 'known MIME mismatch remains unavailable');
+  const reads = state.images.binaryReads.length;
+  state.allowRead = false;
+  assert.equal((await app.handleRequest(request('content/10/cover'))).status, 403);
+  assert.equal(state.images.binaryReads.length, reads, 'denied caller cannot probe original bytes');
+});
+
 test('anonymous content and snapshot reads work when production GetSchema is permission-filtered to an empty list', async t => {
   const {app,request,state,content}=await setup(t);state.schemaAvailable=false;content.ExtraRepositoryField='not-an-application-field';
   for(const req of [request('content/10',{token:null}),request('snapshots',{method:'POST',token:null,body:{ids:[10]}})]) {
@@ -129,7 +156,12 @@ test('snapshot batches bound complete caller reads to four and preserve input or
   };
   const response=await app.handleRequest(request('snapshots',{method:'POST',token:null,body:{ids}}));
   assert.equal(response.status,200,await response.clone().text());const {data}=await response.json();
-  assert.equal(peak,4);assert.equal(active,0);assert.deepEqual(started,ids);assert.notEqual(finished[0],ids[0]);
+  assert.equal(peak,4);assert.equal(active,0);
+  // Independent HTTP requests may reach the repository in a different order.
+  // The first wave and duplicates must be complete; response order is checked below.
+  const numeric=(a,b)=>a-b;
+  assert.deepEqual(started.slice(0,4).sort(numeric),ids.slice(0,4).sort(numeric));
+  assert.deepEqual([...started].sort(numeric),[...ids].sort(numeric));assert.notEqual(finished[0],ids[0]);
   assert.deepEqual(data.map(row=>row.Id),ids);assert.deepEqual(data.map(row=>row.Title),ids.map(id=>'Media '+id));
   for(const row of data)assert.match(row.revision,/^sha256:[0-9a-f]{64}$/);
   assert.equal(state.requests.some(row=>row.credential),false);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);
@@ -161,7 +193,9 @@ test('snapshot batch denial drains started reads, stops new IDs and returns no p
   await denial;await new Promise(resolve=>setTimeout(resolve,30));assert.equal(returned,false);
   release();const response=await running;assert.equal(response.status,403);
   const value=await response.json();assert.equal(value.error.code,'backend_denied');assert.equal(Object.hasOwn(value,'data'),false);
-  assert.deepEqual(started,[10,11,12,13]);assert.deepEqual([...finished].sort((a,b)=>a-b),[10,12,13]);
+  // Independent HTTPS reads may arrive in any order; the membership proves
+  // that the denied first wave never starts IDs 14/15 and is fully drained.
+  assert.deepEqual([...started].sort((a,b)=>a-b),[10,11,12,13]);assert.deepEqual([...finished].sort((a,b)=>a-b),[10,12,13]);
   assert.equal(state.requests.some(row=>row.credential),false);assert.equal(state.requests.every(row=>row.method==='GET'),true);assert.equal(state.patches,0);
 });
 
@@ -212,6 +246,20 @@ test('public capability normalization and CORS reject foreign origins without ba
   assert.equal(denied.status, 403); assert.equal((await denied.json()).error.code, 'origin_denied');
   assert.equal((await app.handleRequest(request('capabilities', { method: 'OPTIONS', token: null }))).status, 204);
   assert.equal((await app.handleRequest(new Request('https://app.fixture.invalid/not-an-api'))).status, 404);
+  assert.equal(state.requests.length, 0);
+});
+
+test('local numeric origins remain denied before native API or repository work', async t => {
+  const { app, request, state } = await setup(t, { frontendOrigin: 'https://localhost:8080' });
+  for (const alias of ['https://127.0.0.1:8080', 'https://[::1]:8080']) {
+    const denied = await app.handleRequest(request('snapshots', {
+      method: 'POST', token: null, body: { ids: [10] },
+      headers: { Origin: alias, 'X-Timeline-Client-Origin': alias }
+    }));
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'origin_denied');
+    assert.equal(denied.headers.get('access-control-allow-origin'), null);
+  }
   assert.equal(state.requests.length, 0);
 });
 
@@ -443,4 +491,191 @@ test('actual background HTTPS acknowledgement uses app-only CA, rejects redirect
   assert.throws(()=>invokeBackground(new URL('/.netlify/functions/native-api-background','https://foreign.fixture.invalid'),headers,bytes,{frontendOrigin,devRuntime:true,appCa:tls.cert}),error=>error.code==='job_dispatch_invalid');
   assert.throws(()=>invokeBackground(new URL('/not-background',frontendOrigin),headers,bytes,{frontendOrigin,devRuntime:true,appCa:tls.cert}),error=>error.code==='job_dispatch_invalid');
   status=302;await assert.rejects(invokeBackground(url,headers,bytes,{frontendOrigin,devRuntime:true,appCa:tls.cert}));assert.equal(received.length,2);
+});
+
+test('generated variants travel directly to SenseNet, activate through a saved plan and read one current size without changing originals', async t => {
+  const { app, request, state, content, contents, config, enqueue, runNext } = await setup(t);
+  state.images.enabled = true;
+  content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'preserved-original-stamp' } };
+  contents.set(11, { ...content, Id: 11, Name: 'second-media', Path: config.projectRoot + '/MediaLibrary/second-media' });
+  const owner = { ...content, Id: 20, Type: 'Timeline', Name: 'timeline', Path: config.projectRoot + '/Timelines/timeline', CoverImageBin: null };
+  contents.set(owner.Id, owner);
+  const originalHash = createHash('sha256').update(state.images.original).digest('hex');
+  const get = async route => { const response = await app.handleRequest(request(route)); assert.equal(response.status, 200, await response.clone().text()); return response.json(); };
+  const post = async (route, body, key, expected = 200) => { const response = await app.handleRequest(request(route, { method: 'POST', body, headers: { 'Idempotency-Key': key } })); assert.equal(response.status, expected, await response.clone().text()); return response.json(); };
+  const before = (await get('content/20')).data;
+  assert.equal((await get('images/capabilities')).data.available, true);
+  const source = (await get('content/10/image-presentation')).data;
+  const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: config.projectRoot, ownerId: 20, generationId, sourceIds: [11, 10], sourceStamps: [{ id: 11, stamp: state.images.stamp }, { id: 10, stamp: state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [11, 10], seed: 42 }, variants: [] };
+  const prepared = (await post('images/drafts', { ownerId: 20, generationId, expectedRevision: before.revision, manifest }, 'prepare-image-1', 201)).data;
+  assert.deepEqual(prepared.manifest.recipe.sourceIds, [11, 10]);
+  assert.deepEqual(JSON.parse(state.images.sets.get(prepared.setId).Description).manifest.sourceIds, [11, 10]);
+  const imageBytes = rasterFixture.png(400,200);
+  const variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: imageBytes.length, sha256: createHash('sha256').update(imageBytes).digest('hex') };
+  const uploadBody = { ownerId: 20, variant, bytesBase64: imageBytes.toString('base64') };
+  state.images.interruptUploadOnce = true;
+  const uploadRequestStart = state.requests.length, originalReadsBeforeUpload = state.images.binaryReads.filter(row=>row.property==='CoverImageBin').length;
+  const interrupted = await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1', 502);
+  const uploadRequests = state.requests.slice(uploadRequestStart);
+  assert.equal(state.images.binaryReads.filter(row=>row.property==='CoverImageBin').length,originalReadsBeforeUpload,'variant upload never redownloads originals');
+  assert.equal(uploadRequests.some(row=>/ImageAsset|GetImagePresentation/.test(row.path)),false);
+  assert.ok(uploadRequests.some(row => row.permissions === 'AddNew'));
+  assert.equal(interrupted.error.details.uncertain, true); assert.equal((await app.store.pendingMutations()).length, 1);
+  const uploaded = (await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1')).data;
+  assert.equal((await app.store.pendingMutations()).length, 0); assert.equal(state.images.uploads, 1);
+  await post(`images/drafts/${prepared.setId}/seal`, { ownerId: 20, variants: [uploaded] }, 'seal-image-1');
+  assert.equal(state.images.activations, 0);
+  const planJob = await enqueue('plans', { commands: [{ action: 'cover-presentation', targetId: 20, expectedRevision: prepared.ownerRevision, setId: prepared.setId }] }); await runNext();
+  const plan = await get(`jobs/${planJob}`);
+  assert.equal(plan.repositoryWrites, 0); assert.equal(state.images.activations, 0);
+  const savedPlan = await app.store.plan(plan.id, (await app.store.read(`plans/${plan.id}`)).data.principal);
+  assert.equal(savedPlan.steps[0].payload.setId, prepared.setId);
+  assert.equal(JSON.stringify(savedPlan).includes('bytesBase64'), false);
+  const applyJob = await enqueue(`plans/${plan.id}/apply`, {}, { headers: { 'Idempotency-Key': 'activate-image-1' } }); await runNext();
+  const applied = await get(`jobs/${applyJob}`); assert.equal(applied.ok, true); assert.equal(state.images.activations, 1);
+  const snapshotResponse = await app.handleRequest(request('content/20', { token: null })); assert.equal(snapshotResponse.status, 200);
+  const snapshot = (await snapshotResponse.json()).data; assert.equal(snapshot.image.state, 'active'); assert.equal(snapshot.image.variants.length, 1);
+  assert.deepEqual(snapshot.image.layout, { template: 'poster-strip-v1', count: 2 });
+  assert.equal(Object.hasOwn(snapshot.image, 'recipe'), false);
+  assert.equal(Object.hasOwn(snapshot.image, 'sourceIds'), false);
+  assert.equal(Object.hasOwn(snapshot.image, 'sourceStamps'), false);
+  assert.deepEqual((await get('content/20/image-presentation/editor')).data.recipe, manifest.recipe);
+  state.images.binaryReads.length = 0;
+  const imageResponse = await app.handleRequest(request(snapshot.image.variants[0].url.slice('/api/v1/'.length), { token: null }));
+  assert.equal(imageResponse.status, 200); assert.equal(imageResponse.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(Buffer.from(await imageResponse.arrayBuffer()), imageBytes);
+  assert.deepEqual(state.images.binaryReads, [{ id: uploaded.id, property: 'Binary' }]);
+  // Replays use immutable journal receipts and never resend the image upload.
+  await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1'); assert.equal(state.images.uploads, 1);
+  assert.equal((await get('content/20/image-sets')).data[0].deletable, false);
+  assert.equal(createHash('sha256').update(state.images.original).digest('hex'), originalHash);
+  // Published copies depend on owner/file ACL, not later source changes.
+  state.images.original = rasterFixture.png(4,6,99);
+  state.images.sourceReadable = false; state.deniedIds.add(10);
+  assert.equal((await get('content/20')).data.image.state, 'active');
+  assert.equal((await get('content/20/image-presentation/editor')).data.recipe.template, 'poster-strip-v1');
+  const staticResponse = await app.handleRequest(request(snapshot.image.variants[0].url.slice('/api/v1/'.length), {token:null}));
+  assert.equal(staticResponse.status,200);
+  const current = (await get('content/20')).data;
+  const clearJob = await enqueue('plans', { commands: [{ action: 'cover-presentation', targetId: 20, expectedRevision: current.revision, setId: null }] }); await runNext();
+  const clearPlan = await get(`jobs/${clearJob}`), clearApply = await enqueue(`plans/${clearPlan.id}/apply`, {}, { headers: { 'Idempotency-Key': 'clear-image-1' } }); await runNext();
+  assert.equal((await get(`jobs/${clearApply}`)).ok, true);
+  assert.equal((await get('content/20')).data.image.state, 'legacy');
+  const management = (await get('content/20/image-sets')).data[0];
+  assert.equal(management.state, 'inactive'); assert.equal(management.deletable, true); assert.equal(management.generationId, generationId);
+  state.images.interruptDeleteOnce = true;
+  const deleteInterrupted = await post(`images/drafts/${prepared.setId}/delete`, { ownerId: 20 }, 'delete-image-1', 502);
+  assert.equal(deleteInterrupted.error.details.uncertain, true);
+  await post(`images/drafts/${prepared.setId}/delete`, { ownerId: 20 }, 'delete-image-1');
+  await post(`images/drafts/${prepared.setId}/delete`, { ownerId: 20 }, 'delete-image-1'); assert.equal(state.images.deletions, 1);
+  assert.equal(state.images.sets.size, 0);
+  const blobRows = await app.store.blobs.list({ prefix: app.store.prefix });
+  assert.equal(blobRows.blobs.some(row => row.key.includes('/transfers/')), false);
+  for (const row of blobRows.blobs) {
+    const bytes = Buffer.from(await app.store.blobs.get(row.key, { type: 'arrayBuffer' }));
+    assert.equal(bytes.includes(imageBytes), false, row.key);
+    assert.equal(bytes.toString().includes(imageBytes.toString('base64')), false, row.key);
+  }
+});
+
+test('dedicated image writes keep their existing deadline in deployed and local runtimes', () => {
+  for (const devRuntime of [false, true]) for (const path of ['/api/v1/images/drafts', '/api/v1/images/drafts/30/variants/w400', '/.netlify/functions/native-api/v1/images/drafts/30/seal', '/.netlify/functions/native-api/images/drafts/30/delete']) assert.equal(invocationTimeoutMs(new Request('https://app.fixture.invalid' + path, { method: 'POST' }), false, devRuntime), 25000);
+});
+
+test('local synchronous reads and plans leave cleanup headroom while deployed and background deadlines remain unchanged', () => {
+  for (const [method, path] of [['GET', '/api/v1/capabilities'], ['POST', '/api/v1/lookup'], ['GET', '/api/v1/content/10'], ['POST', '/api/v1/plans'], ['GET', '/.netlify/functions/native-api/v1/capabilities'], ['POST', '/.netlify/functions/native-api/lookup']]) {
+    const request = new Request('https://app.fixture.invalid' + path, { method });
+    assert.equal(invocationTimeoutMs(request, false, true), 25000);
+    assert.equal(invocationTimeoutMs(request), 55000);
+    assert.equal(invocationTimeoutMs(request, false, false), 55000);
+  }
+  const background = new Request('https://app.fixture.invalid/.netlify/functions/native-api-background', { method: 'POST' });
+  for (const devRuntime of [false, true]) assert.equal(invocationTimeoutMs(background, true, devRuntime), 895000);
+});
+
+test('the function entrypoint chooses its local deadline from the exact runtime flag before configuration', async t => {
+  const names = ['TIMELINE_NETLIFY_DEV', 'TIMELINE_APP_DEV_CA_FILE', 'TIMELINE_READ_ONLY'], saved = new Map(names.map(name => [name, process.env[name]]));
+  t.after(() => { for (const [name, value] of saved) if (value === undefined) delete process.env[name]; else process.env[name] = value; });
+  // Configuration deliberately fails before any backend or storage access.
+  process.env.TIMELINE_APP_DEV_CA_FILE = 'relative-test-only.pem'; process.env.TIMELINE_READ_ONLY = 'invalid-test-only';
+  const delays = [], originalTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => { delays.push(delay); return originalTimeout(callback, delay, ...args); });
+  for (const flag of [undefined, 'false', 'true']) {
+    if (flag === undefined) delete process.env.TIMELINE_NETLIFY_DEV; else process.env.TIMELINE_NETLIFY_DEV = flag;
+    const response = await handleFunctionRequest(new Request('https://app.fixture.invalid/api/v1/lookup', { method: 'POST', body: '{}' }));
+    assert.equal(response.status, 503); assert.equal((await response.json()).error.code, 'invalid_configuration');
+  }
+  assert.deepEqual(delays, [55000, 55000, 25000]);
+});
+
+async function preparedImageUpload(t, extra = {}) {
+  const f = await setup(t, extra); f.state.images.enabled = true;
+  f.content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'stored-original' } };
+  f.contents.set(20, { ...f.content, Id: 20, Type: 'Timeline', CoverImageBin: null, Name: 'owner', Path: f.config.projectRoot + '/Timelines/owner' });
+  const current = (await (await f.app.handleRequest(f.request('content/20'))).json()).data;
+  const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: f.config.projectRoot, ownerId: 20, generationId, sourceIds: [10], sourceStamps: [{ id: 10, stamp: f.state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [10] }, variants: [] };
+  const draftResponse = await f.app.handleRequest(f.request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'deadline-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
+  const draft = (await draftResponse.json()).data, bytes = rasterFixture.png(400,200), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  return { ...f, route: `images/drafts/${draft.setId}/variants/w400`, upload: { method: 'POST', body: { ownerId: 20, variant, bytesBase64: bytes.toString('base64') }, headers: { 'Idempotency-Key': 'deadline-upload-key' } } };
+}
+
+test('deadline after native upload committed but before readback remains uncertain and same-key retry reads without uploading again', async t => {
+  const controller = new AbortController(), f = await preparedImageUpload(t, { signal: controller.signal });
+  const original = StockRepository.prototype.request;
+  StockRepository.prototype.request = async function (url, options) {
+    const result = await original.call(this, url, options);
+    if (options?.method === 'POST' && new URL(url).pathname.endsWith('/Upload')) controller.abort();
+    return result;
+  };
+  t.after(() => { StockRepository.prototype.request = original; });
+  const response = await f.app.handleRequest(f.request(f.route, f.upload));
+  assert.equal(response.status, 409); const failure = (await response.json()).error;
+  assert.equal(failure.code, 'function_deadline'); assert.equal(failure.details.uncertain, true);
+  assert.equal(f.state.images.uploads, 1); assert.equal((await f.app.store.pendingMutations()).length, 1);
+  assert.equal((await f.app.coordinator.inspect()).state, 'released');
+  const first = (await f.app.store.pendingMutations())[0]; assert.equal(first.state, 'pending'); assert.equal(first.result, null);
+  const restarted = createFunctionApp({ ...f.config, signal: undefined }), afterCommit = f.state.requests.length;
+  const replay = await restarted.handleRequest(f.request(f.route, f.upload));
+  assert.equal(replay.status, 200, await replay.clone().text());
+  assert.equal(f.state.images.uploads, 1); assert.equal((await restarted.store.pendingMutations()).length, 0);
+  assert.equal(f.state.requests.slice(afterCommit).some(row => ['POST', 'PATCH', 'DELETE', 'PUT'].includes(row.method)), false);
+});
+
+test('deadline before actual native dispatch is a terminal no-write failure and releases only its own writer', async t => {
+  const controller = new AbortController(), f = await preparedImageUpload(t, { signal: controller.signal });
+  const original = StockRepository.prototype.request;
+  StockRepository.prototype.request = async function (url, options) {
+    const result = await original.call(this, url, options), parsed = new URL(url);
+    if (parsed.pathname.endsWith('/HasPermission') && parsed.searchParams.get('permissions') === 'AddNew') controller.abort();
+    return result;
+  };
+  t.after(() => { StockRepository.prototype.request = original; });
+  const response = await f.app.handleRequest(f.request(f.route, f.upload));
+  assert.equal(response.status, 409); const failure = (await response.json()).error;
+  assert.equal(failure.code, 'function_deadline'); assert.equal(f.state.images.uploads, 0);
+  assert.equal((await f.app.store.pendingMutations()).length, 0); assert.equal((await f.app.coordinator.inspect()).state, 'released');
+});
+
+test('current stock draft AddNew denial blocks image upload without writing bytes', async t => {
+  const { app, request, state, content, contents, config } = await setup(t); state.images.enabled = true;
+  content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'stored-original' } };
+  contents.set(20, { ...content, Id: 20, Type: 'Timeline', CoverImageBin: null, Name: 'owner', Path: config.projectRoot + '/Timelines/owner' });
+  const currentResponse = await app.handleRequest(request('content/20')), current = (await currentResponse.json()).data;
+  const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: config.projectRoot, ownerId: 20, generationId, sourceIds: [10], sourceStamps: [{ id: 10, stamp: state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [10] }, variants: [] };
+  const draftResponse = await app.handleRequest(request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'acl-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
+  const draft = (await draftResponse.json()).data, bytes = rasterFixture.png(400,200), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  state.images.revokeAtUpload = true;
+  const response = await app.handleRequest(request(`images/drafts/${draft.setId}/variants/w400`, { method: 'POST', body: { ownerId: 20, variant, bytesBase64: bytes.toString('base64') }, headers: { 'Idempotency-Key': 'acl-upload-key' } }));
+  assert.equal(response.status, 403); assert.equal((await response.json()).error.code, 'permission_denied');
+  assert.equal(state.images.uploads, 0); assert.equal(state.images.files.size, 0); assert.equal(state.images.activations, 0);
+});
+
+test('metadata GET failure before upload dispatch is a durable terminal failure and never redispatches', async t => {
+  const f=await preparedImageUpload(t),original=StockRepository.prototype.request;
+  StockRepository.prototype.request=async function(url,options){const parsed=new URL(url);if((!options?.method||options.method==='GET')&&parsed.searchParams.get('query')?.startsWith('+ParentId:')){const error=new Error('Controlled stock metadata failure');error.status=502;error.code='backend_failure';throw error;}return original.call(this,url,options);};
+  t.after(()=>{StockRepository.prototype.request=original;});
+  const failed=await f.app.handleRequest(f.request(f.route,f.upload));assert.equal(failed.status,502);assert.equal((await failed.json()).error.details.uncertain,false);
+  assert.equal(f.state.images.uploads,0);assert.equal((await f.app.store.pendingMutations()).length,0);assert.equal((await f.app.coordinator.inspect()).state,'released');
+  StockRepository.prototype.request=original;
+  const retry=await f.app.handleRequest(f.request(f.route,f.upload));assert.equal(retry.status,502);assert.equal((await retry.json()).error.details.uncertain,false);assert.equal(f.state.images.uploads,0,'terminal key never replays the failed write');
 });

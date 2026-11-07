@@ -56,3 +56,40 @@ test('revoked deletion fallback is rechecked for the whole plan before an earlie
   f.state.rootAllowed=false;
   await assert.rejects(apply(f.context,plan.id,'original-key',f.store),e=>e.code==='permission_denied');assert.equal(f.state.writes,0);
 });
+
+test('image presentation plans retain IDs and source guards but accept no embedded image bytes', async () => {
+  const f = fixture(); f.context.scopes.push('covers:write');
+  const guard = { setId: 30, generationId: '11111111-1111-4111-a111-111111111111', manifestHash: 'a'.repeat(64), sourceStamps: [{ id: 11, stamp: 'b'.repeat(64) }] };
+  f.repo.images = { preflight: async () => guard };
+  const plan = await preview(f.context, { commands: [{ action: 'cover-presentation', targetId: 10, expectedRevision: f.rev, setId: 30 }] }, f.store);
+  assert.deepEqual(plan.targets, [10, 11]); assert.equal(plan.repositoryWrites, 0);
+  assert.equal(f.getPlan().steps[0].payload.presentation.manifestHash, guard.manifestHash);
+  assert.deepEqual(f.getPlan().steps[0].operations, [{ target: 10, action: 'cover' }, { target: 11, action: 'read' }]);
+  assert.equal(JSON.stringify(f.getPlan()).includes('bytesBase64'), false);
+  await assert.rejects(preview(f.context, { commands: [{ action: 'cover-presentation', targetId: 10, expectedRevision: f.rev, setId: 30, bytesBase64: 'Zm9yYmlkZGVu' }] }, f.store), error => error.code === 'invalid_input');
+});
+
+test('source image changes between preview and apply fail before any earlier allowed plan mutation', async () => {
+  const f = fixture(); f.context.scopes.push('covers:write'); let sourceChanged = false;
+  f.repo.images = { preflight: async () => { if (sourceChanged) throw new DomainError('image_source_changed', 'Source changed.', 409); return { setId: 30, manifestHash: 'a'.repeat(64), sourceStamps: [{ id: 11, stamp: 'b'.repeat(64) }] }; } };
+  const plan = await preview(f.context, { commands: [f.rename(11, 'allowed-first'), { action: 'cover-presentation', targetId: 10, expectedRevision: f.rev, setId: 30 }] }, f.store);
+  sourceChanged = true;
+  await assert.rejects(apply(f.context, plan.id, 'image-change-key', f.store), error => error.code === 'image_source_changed');
+  assert.equal(f.state.writes, 0);
+});
+
+test('clearing a generated presentation is an explicit owner-only plan and does not touch originals or source fields', async () => {
+  const f = fixture(); f.context.scopes.push('covers:write');
+  const read = f.repo.read; f.repo.read = async target => ({ ...await read(target), image: { state: 'stale', setId: 30 } });
+  f.repo.images = { preflight: async (_owner, setId) => { assert.equal(setId, null); return { setId: null }; } };
+  await preview(f.context, { commands: [{ action: 'cover-presentation', targetId: 10, expectedRevision: f.rev, setId: null }] }, f.store);
+  const step = f.getPlan().steps[0];
+  assert.deepEqual(step.operations, [{ target: 10, action: 'cover' }]);
+  assert.equal(step.payload.setId, null); assert.equal(Object.hasOwn(step.payload, 'fields'), false); assert.equal(Object.hasOwn(step.payload, 'bytesBase64'), false);
+});
+
+test('managed image deletion preflight denies unsupported descendants before saving a plan', async () => {
+  const f = fixture(); f.repo.managedChildren = async () => { const error = new Error('Foreign image subtree'); error.code='unexpected_children'; throw error; };
+  await assert.rejects(preview(f.context, { commands: [{ action: 'delete', targetId: 10, expectedRevision: f.rev }] }, f.store), error => error.code === 'unexpected_children');
+  assert.equal(f.state.saved, 0); assert.equal(f.state.writes, 0);
+});

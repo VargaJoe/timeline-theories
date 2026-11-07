@@ -27,7 +27,9 @@ globalThis.window = { location: { origin: 'https://ui.fixture.invalid' }, fetch:
 globalThis.fetch = http;
 const checkedUrl = compile('services/sensenet.ts', {
   '@sensenet/client-core': file('node_modules/@sensenet/client-core/dist/cjs/index.js'), '../configuration': config,
-  './operationGuard.mjs': file('services/operationGuard.mjs'), '../domain/content.mjs': file('domain/content.mjs'), './nativeApi': nativeUrl,
+  './operationGuard.mjs': file('services/operationGuard.mjs'), './displayPermissions.mjs': file('services/displayPermissions.mjs'),
+  './permissionRequest.mjs': file('services/permissionRequest.mjs'),
+  '../domain/content.mjs': file('domain/content.mjs'), './nativeApi': nativeUrl,
 });
 const common = { './sensenet': checkedUrl, '../projectPaths': paths, '../contentTypes': types, '../configuration': config, './contentValues': values, './nativeApi': nativeUrl };
 const mediaUrl = compile('services/mediaLibraryService.ts', common);
@@ -45,13 +47,23 @@ function fixture(options = {}) {
   insert(10, root + '/Timelines', 'Folder'); insert(11, library, 'Folder'); insert(12, timeline, 'Timeline'); insert(20, library + '/existing', 'MediaItem', { DisplayName: 'Existing', MediaType: 'movie' });
   let next = 100, faulted = false;
   const find = target => records.get(Number(target)) || [...records.values()].find(row => row.Path === target);
+  const descriptor = row => ({ ...row, Actions: ['Edit','Add','Delete'].map(Name => ({ Name, Forbidden: false })),
+    EffectiveAllowedChildTypes: ['Timeline','MediaItem','BookMediaItem','TimelineEntry'].map(Name => ({ Name })) });
   const state = { records, plans, receipts, requests, applies, creations: 0, options, async dispatch(request) {
     const url = new URL(request.url), body = request.method === 'GET' ? undefined : JSON.parse(await request.text());
     requests.push({ url, method: request.method, body });
     if (url.origin === environment.repositoryUrl) {
       assert.equal(request.method, 'GET', 'the SDK must not send raw repository mutations');
-      if (/\/HasPermission$/.test(url.pathname)) return new Response('true');
-      if (/\/(?:Effective)?AllowedChildTypes$/.test(url.pathname)) return web({ d: { results: ['Timeline','MediaItem','BookMediaItem','TimelineEntry'].map(Name => ({ Name })) } });
+      assert.doesNotMatch(url.pathname, /\/(?:HasPermission|(?:Effective)?AllowedChildTypes)$/i,
+        'creation must use the compound caller-filtered Actions response');
+      if (url.searchParams.get('$expand') === 'Actions,EffectiveAllowedChildTypes' && url.searchParams.has('query')) {
+        const query = url.searchParams.get('query');
+        const targets = [...query.matchAll(/\bId:([0-9]+)/g)].map(match => Number(match[1]));
+        targets.push(...[...query.matchAll(/\bPath:("(?:\\.|[^"\\])*")/g)].map(match => JSON.parse(match[1])));
+        assert.ok(targets.length, 'compound permission review must name concrete targets');
+        const rows = targets.map(target => { const row = find(target); assert.ok(row, `unexpected permission target ${target}`); return descriptor(row); });
+        return web({ d: { results: rows } });
+      }
       const id = Number(url.pathname.match(/content\((\d+)\)/)?.[1]);
       const target = id || decodeURIComponent(url.pathname.replace('/odata.svc', '')).replace(/\('([^']+)'\)$/, '/$1');
       const row = find(target); assert.ok(row, `unexpected SDK target ${target}`);
