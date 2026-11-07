@@ -11,8 +11,9 @@ import { useParams, Link } from 'react-router-dom';
 import { LazyImage } from '../components/LazyImage';
 import { mediaLibraryPath, timelinesPath } from '../projectPaths';
 import { repository, assertOperations, captureOperationContext, patchContentWithRevision, type Operation } from '../services/sensenet';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, usePermissionState } from '../hooks/usePermissions';
 import { PermissionContent } from '../components/PermissionContent';
+import { PermissionUnavailable } from '../components/PermissionUnavailable';
 import { useSharedAuth } from '../context/useSharedAuth';
 import { TimelineEntryService } from '../services/timelineEntryService';
 import { loadBackgroundImage } from '../services/sensenet';
@@ -179,7 +180,8 @@ export const TimelineViewPage: React.FC = () => {
 
   const timelinePath = timelineName ? `${timelinesPath}/${timelineName}` : '';
   const readContext = JSON.stringify([timelinePath, auth.accessToken, auth.user?.Id, auth.user?.sub]);
-  const canRead = usePermissions(timelinePath ? [{ target: timelinePath, action: 'read' }] : []);
+  const readPermission = usePermissionState(timelinePath ? [{ target: timelinePath, action: 'read' }] : []);
+  const canRead = readPermission === 'allowed';
   const canCreateEntry = usePermissions(timelinePath ? [{ target: timelinePath, action: 'create', contentType: TIMELINE_ENTRY_CONTENT_TYPE }] : []);
   const reorderOperations: Operation[] = entries.map(entry => ({ target: entry.id, action: 'update' }));
   const canReorder = usePermissions(reorderOperations);
@@ -346,6 +348,8 @@ export const TimelineViewPage: React.FC = () => {
     setPendingOrder(newEntries);
   };
 
+  if (readPermission === 'checking') return <div role="status" style={{ padding: 24 }}>Checking access…</div>;
+  if (readPermission === 'unavailable') return <PermissionUnavailable />;
   if (!canRead) return <div role="status" style={{ padding: 24 }}>This timeline is unavailable with your current permissions.</div>;
 
   if (loading || loadedContext !== readContext) {

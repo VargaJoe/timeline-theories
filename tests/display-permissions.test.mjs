@@ -62,6 +62,46 @@ function fixture(options = {}) {
 }
 const operation = (target, action) => ({ target, action });
 
+test('transport outages are unavailable, fail closed, and stay cached until explicit retry', async () => {
+  let healthy = false;
+  const f = fixture({ load: async () => {
+    if (!healthy) throw new Error('Repository request timed out');
+    return content(7);
+  } });
+  const operations = [operation(7, 'read')];
+  assert.equal(await f.store.inspect(operations), 'unavailable');
+  assert.equal(await f.store.can(operations), false);
+  healthy = true;
+  assert.equal(await f.store.inspect(operations), 'unavailable', 'No background retry or fail-open stale hint');
+  assert.equal(f.loads.length, 1);
+  f.store.invalidate();
+  assert.equal(await f.store.inspect(operations), 'allowed');
+  assert.equal(f.loads.length, 2);
+});
+
+test('known inaccessible targets and forbidden actions remain denials rather than outages', async () => {
+  const missing = fixture({ load: async () => { throw Object.assign(new Error('Not available to this caller'), { permissionUnavailable: false }); } });
+  assert.equal(await missing.store.inspect([operation(7, 'read')]), 'denied');
+  assert.equal(await missing.store.can([operation(7, 'read')]), false);
+  assert.equal(missing.loads.length, 1);
+  const forbidden = fixture();
+  forbidden.store.remember(content(7, [{ Name: 'Edit', Forbidden: true }]));
+  assert.equal(await forbidden.store.inspect([operation(7, 'update')]), 'denied');
+  assert.equal(forbidden.loads.length, 0);
+});
+
+test('an outage result from a previous identity cannot replace a fresh allowed descriptor', async () => {
+  const gate = deferred();
+  const f = fixture({ load: async () => gate.promise });
+  const previous = f.store.inspect([operation(7, 'read')]);
+  await started(() => f.loads.length === 1);
+  f.setIdentity('next-editor');
+  f.store.remember(content(7));
+  gate.resolve(null);
+  assert.equal(await previous, 'denied');
+  assert.equal(await f.store.inspect([operation(7, 'read')]), 'allowed');
+});
+
 test('successful caller read proves read availability even when Browse is absent', async () => {
   const f = fixture();
   f.setIdentity('visitor');

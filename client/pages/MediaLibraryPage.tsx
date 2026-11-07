@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { MediaLibraryService, type MediaItem } from '../services/mediaLibraryService';
 import { PageHeader } from '../components/PageHeader';
 import { CollectionPlaceholder } from '../components/CollectionPlaceholder';
+import { PermissionUnavailable } from '../components/PermissionUnavailable';
 import { LazyImage } from '../components/LazyImage';
 import { BookImportDialog } from '../components/BookImportDialog';
 import { MediaItemEditDialog } from '../components/MediaItemEditDialog';
@@ -395,7 +396,8 @@ export default function MediaLibraryPage() {
       <div role="status" style={{ minHeight: 24, marginBottom: 8, color: '#52627a', fontSize: 14 }}>
         {readPermission === 'checking' ? 'Checking access…' : readPermission === 'allowed' && loading ? (visibleMediaItems.length ? 'Updating media library…' : 'Loading media library…') : ''}
       </div>
-      {readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
+      {readPermission === 'unavailable' ? <PermissionUnavailable />
+      : readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
       : visibleMediaItems.length === 0 && (loading || readPermission === 'checking') ? <CollectionPlaceholder kind="media" />
       : visibleMediaItems.length === 0 && error ? null
       : visibleMediaItems.length === 0 ? (

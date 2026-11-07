@@ -28,6 +28,7 @@ globalThis.fetch = http;
 const checkedUrl = compile('services/sensenet.ts', {
   '@sensenet/client-core': file('node_modules/@sensenet/client-core/dist/cjs/index.js'), '../configuration': config,
   './operationGuard.mjs': file('services/operationGuard.mjs'), './displayPermissions.mjs': file('services/displayPermissions.mjs'),
+  './permissionRequest.mjs': file('services/permissionRequest.mjs'),
   '../domain/content.mjs': file('domain/content.mjs'), './nativeApi': nativeUrl,
 });
 const common = { './sensenet': checkedUrl, '../projectPaths': paths, '../contentTypes': types, '../configuration': config, './contentValues': values, './nativeApi': nativeUrl };

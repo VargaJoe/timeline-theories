@@ -1,7 +1,9 @@
 import type { Operation } from './operationGuard.mjs';
+export type DisplayPermissionState = 'allowed' | 'denied' | 'unavailable';
 export interface DisplayPermissions {
   remember(content: unknown, aliases?: (string | number)[]): unknown;
   can(operations: readonly Operation[], options?: { refreshSince?: number }): Promise<boolean>;
+  inspect(operations: readonly Operation[], options?: { refreshSince?: number }): Promise<DisplayPermissionState>;
   invalidate(): void;
 }
 export function createDisplayPermissions(dependencies: {

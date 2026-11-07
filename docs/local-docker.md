@@ -24,6 +24,36 @@ docker compose -f compose.local.yaml stop app
 
 Ugyanezek npm-rövidítései: `npm run local:up`, `local:restart`, `local:logs`, `local:stop`, `local:status`. A korábbi `npm run dev:m0` is Docker Compose-t indít, a gyökérből és a client könyvtárból egyaránt. Az image rögzített Node 22 alapról, lockfile-okkal buildel. Forráskód-változás után `up -d --build`; `.env`-változás után `up -d --force-recreate`. A `restart` a már létrehozott konténer környezetét használja. Az app induláskor nem másol tartalmat és nem provisionál SenseNetet.
 
+### Ha indulás után „Checking access…” látszik
+
+Az `app healthy` csak az app/API állapotát igazolja. A külön SenseNet konténer is elakadhat indulás közben, miközben Docker szerint `Up`. A saját M0 környezet egyszeri, olvasási ellenőrzése:
+
+```powershell
+npm run local:check
+```
+
+Ez a privát `.env`-et használja, és párhuzamosan, legfeljebb hat másodpercig ellenőrzi az app API-t, a projekt valódi SenseNet-tartalmát és az IdentityServer discovery válaszát. Nem használ fiókot vagy tokent, nem ír tartalmat, nem küld HasPermission-kérést, és nem fut a háttérben. Más projekt céljára állított `.env` esetén nem küld kérést. A discovery önmagában még nem igazolja a bejelentkezéshez szükséges kliensregisztrációt.
+
+2026-11-07: Docker Desktop indulása után a saját repository `Starting BlobProviders` állapotban maradt; a tartalomolvasás nem válaszolt. Az IdentityServer emiatt nulla klienst töltött a cache-be, majd `unauthorized_client` hibával elutasította a belépést. A konkrét esetben a repository, majd a már válaszoló repository mellett az identity újraindítása segített. Ez az adatokat és volume-okat megőrző helyreállítás, a SenseNet belső indulási hibájának oka továbbra sincs igazolva.
+
+Ha ugyanez a naplóval igazolt helyzet ismétlődik, és nincs folyamatban szerkesztés/publikálás:
+
+```powershell
+docker logs --tail 40 timeline-m0-repository-1
+docker restart timeline-m0-repository-1
+
+# Várd meg a Repository started bejegyzést és az OK SenseNet content eredményt.
+npm run local:check
+
+# Csak azután indítsd újra a beléptetőt, hogy a repository már válaszol.
+docker restart timeline-m0-identity-1
+npm run local:check
+```
+
+Ezután az appban **Try Again**, vagy oldalfrissítés; a Login gombbal a belépést is ellenőrizd. Nem kell SQL-t, volume-ot, bootstrapet vagy szerverbővítményt módosítani. Aktív vagy bizonytalan publikálást ne szakíts meg ilyen újraindítással: arra a lent leírt, azonos generációt folytató folyamat vonatkozik. Az app nem indítja újra automatikusan a backendet.
+
+A jogosultsági metaadatok egyetlen összetett kérése a válasz törzsével együtt legfeljebb 15 másodpercig vár. Időtúllépés vagy szerverhiba után külön „Unable to check access” hiba és kézi **Try Again** jelenik meg; valódi tiltás továbbra is tiltás marad. A gomb érvényteleníti az adott felhasználó megjelenítési gyorsítótárát. Automatikus újrapróbálás, időzített adatfrissítés és HasPermission nincs; az írás előtti friss szerveroldali ellenőrzés megmarad.
+
 A `restart: unless-stopped` miatt Docker-újraindítás után is elindul, ha előzőleg nem állítottad le kézzel. A healthcheck a valódi HTTPS API `capabilities` válaszát ellenőrzi, nem csupán a portot. Ez az app állapota; a külön SenseNet repositorynak is működnie kell a tartalmakhoz. A hoston csak a `127.0.0.1:8080` port publikus.
 
 ## Beállítások és Git-határ

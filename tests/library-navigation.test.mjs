@@ -40,7 +40,8 @@ export const useNavigate=()=>()=>{};
 export const useSearchParams=()=>{const state=globalThis.__libraryNavigationFixture;return [state.searchParams,value=>{state.searchParams=value;}];};`);
 const checked = moduleUrl(`
 export const subscribePermissions=listener=>{const state=globalThis.__libraryNavigationFixture;state.listeners.add(listener);return ()=>state.listeners.delete(listener);};
-export const canDisplayOperations=(operations,options)=>globalThis.__libraryNavigationFixture.canDisplayOperations(operations,options);
+export const inspectDisplayOperations=(operations,options)=>globalThis.__libraryNavigationFixture.inspectDisplayOperations(operations,options);
+export const invalidatePermissions=()=>globalThis.__libraryNavigationFixture.invalidate();
 export const canOperations=()=>{throw Error('UI display must not invoke the fresh write guard');};
 export const captureOperationContext=()=>{const state=globalThis.__libraryNavigationFixture,epoch=state.epoch;return ()=>{if(epoch!==state.epoch)throw Error('identity or permissions changed');};};
 export const loadBackgroundImage=async()=>null;
@@ -50,6 +51,12 @@ const permissionUrl = compile('hooks/usePermissions.ts', {
   react, '../context/useSharedAuth': auth, '../configuration': config, '../services/sensenet': checked,
 });
 const { usePermissionState, usePermissions } = await import(permissionUrl);
+const unavailableUrl = compile('components/PermissionUnavailable.tsx', {
+  'react/jsx-runtime': jsx, '../services/sensenet': checked,
+});
+const { PermissionContent } = await import(compile('components/PermissionContent.tsx', {
+  'react/jsx-runtime': jsx, '../hooks/usePermissions': permissionUrl, './PermissionUnavailable': unavailableUrl,
+}));
 const media = moduleUrl(`export const MediaLibraryService={
 getMediaItems:(...args)=>globalThis.__libraryNavigationFixture.request('media',args),getCoverImageUrl:()=>null};`);
 const timelines = moduleUrl(`
@@ -63,6 +70,7 @@ const common = {
   '../configuration': config, '../projectPaths': paths, '../contentTypes': types,
   '../components/PageHeader': widget('PageHeader'),
   '../components/CollectionPlaceholder': widget('CollectionPlaceholder'),
+  '../components/PermissionUnavailable': unavailableUrl,
   '../components/LazyImage': widget('LazyImage'),
   '../components/TimelineCover': widget('TimelineCover'),
 };
@@ -86,9 +94,11 @@ function fixture() {
   const state = {
     auth: { isAuthenticated: true, isLoading: false, accessToken: 'owner-one', user: { sub: 'owner-one' } },
     epoch: 0, listeners: new Set(), permissions: [], requests: [], searchParams: new URLSearchParams('filter=a'),
-    canDisplayOperations(operations, options) {
-      if (operations.some(operation => operation.action !== 'read')) return Promise.resolve(false);
-      const pending = deferred(); this.permissions.push({ operations, options, ...pending }); return pending.promise;
+    inspectDisplayOperations(operations, options) {
+      if (operations.some(operation => operation.action !== 'read')) return Promise.resolve('denied');
+      const pending = deferred();
+      this.permissions.push({ operations, options, ...pending, resolve: value => pending.resolve(typeof value === 'boolean' ? value ? 'allowed' : 'denied' : value) });
+      return pending.promise;
     },
     request(kind, args) {
       const pending = deferred(); this.requests.push({ kind, args, ...pending }); return pending.promise;
@@ -106,6 +116,12 @@ function host(Component) {
   const slots = []; let cursor = 0, dirty = true, tree;
   const changed = (a, b) => !a || !b || a.length !== b.length || a.some((value, i) => !Object.is(value, b[i]));
   const effects = [];
+  const expand = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(expand);
+    if (typeof node.type === 'function') return expand(node.type(node.props));
+    return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
+  };
   const hooks = {
     state(initial) {
       const index = cursor++;
@@ -133,7 +149,7 @@ function host(Component) {
   const ui = {
     // A render without passive effects checks that private rows are masked
     // immediately when identity/permission state changes.
-    render() { cursor = 0; globalThis.__libraryNavigationHooks = hooks; tree = Component(); return tree; },
+    render() { cursor = 0; globalThis.__libraryNavigationHooks = hooks; tree = expand(Component()); return tree; },
     flush() {
       for (let pass = 0; pass < 30; pass++) {
         dirty = false; ui.render();
@@ -175,6 +191,35 @@ function item(kind, title) {
     : { id: title, name: title, title, displayName: title, description: '', isVisible: true, coverImageUrl: 'fixture.jpg' };
 }
 const pages = [['media', MediaLibraryPage], ['timeline', TimelineListPage]];
+
+test('default route gates show pending access, an actionable outage and a separate real denial', async () => {
+  const state = fixture();
+  const ui = host(() => PermissionContent({ operations: [{ target: '/MediaLibrary', action: 'read' }], children: 'Protected editor' }));
+  try {
+    assert.match(text(ui.flush()), /Checking access/);
+    state.permissions[0].reject(new Error('Repository is unavailable'));
+    let tree = await settle(ui);
+    assert.match(text(tree), /Unable to check access/);
+    assert.doesNotMatch(text(tree), /Protected editor|current permissions|Checking access/);
+    assert.equal(find(tree, node => node.props?.role === 'alert')?.type, 'div');
+    button(tree, 'Try Again').props.onClick();
+    assert.match(text(ui.flush()), /Checking access/);
+    state.permissions.at(-1).resolve(false); tree = await settle(ui);
+    assert.match(text(tree), /current permissions/);
+    assert.equal(find(tree, node => node.type === 'button' && text(node) === 'Try Again'), undefined);
+  } finally { ui.unmount(); }
+});
+
+test('per-card permission gates keep explicit null fallbacks hidden during an outage', async () => {
+  const state = fixture();
+  const ui = host(() => PermissionContent({ operations: [{ target: '/MediaLibrary', action: 'read' }], children: 'Private card', fallback: null }));
+  try {
+    assert.equal(text(ui.flush()), '');
+    state.permissions[0].reject(new Error('Repository is unavailable'));
+    assert.equal(text(await settle(ui)), '');
+    assert.equal(state.permissions.length, 1);
+  } finally { ui.unmount(); }
+});
 
 test('permission tri-state stays checking while pending and never reuses an earlier identity result', async () => {
   const state = fixture();
@@ -276,6 +321,30 @@ test('20 permission consumers make no idle/focus/visibility refresh and still ho
 });
 
 for (const [kind, Component] of pages) {
+  test(`${kind}: unavailable access ends the busy state and retries only on an explicit click`, async () => {
+    const state = fixture(), ui = host(Component);
+    try {
+      ui.flush();
+      state.permissions[0].reject(new Error('Content service timed out'));
+      let tree = await settle(ui); assertChrome(tree, kind);
+      assert.match(text(tree), /Unable to check access/);
+      assert.doesNotMatch(text(tree), /Checking access|current permissions/);
+      assert.equal(find(tree, node => node.props?.['aria-busy'] !== undefined).props['aria-busy'], false);
+      assert.equal(find(tree, node => node.type === 'CollectionPlaceholder'), undefined);
+      assert.equal(state.requests.length, 0);
+      for (let pass = 0; pass < 3; pass++) await settle(ui);
+      assert.equal(state.permissions.length, 1, 'An outage does not install a retry loop');
+      button(tree, 'Try Again').props.onClick(); tree = ui.flush();
+      assert.match(text(tree), /Checking access/);
+      assert.equal(state.permissions.length, 2);
+      await allowRead(state, ui);
+      assert.equal(state.requests.length, 1);
+      state.requests[0].resolve([item(kind, 'Recovered card')]); tree = await settle(ui);
+      assert.match(text(tree), /Recovered card/);
+      assert.doesNotMatch(text(tree), /Unable to check access|Checking access/);
+    } finally { ui.unmount(); }
+  });
+
   test(`${kind}: header and filters survive pending permission and initial data requests`, async () => {
     const state = fixture(), ui = host(Component);
     try {

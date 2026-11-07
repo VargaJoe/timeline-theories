@@ -8,6 +8,7 @@ import { PageHeader } from '../components/PageHeader';
 import { MediaCoverMontage } from '../components/MediaCoverMontage';
 import { TimelineCover } from '../components/TimelineCover';
 import { CollectionPlaceholder } from '../components/CollectionPlaceholder';
+import { PermissionUnavailable } from '../components/PermissionUnavailable';
 import { captureOperationContext, loadBackgroundImage, subscribePermissions } from '../services/sensenet';
 import { createTimelineCoverLoader } from '../services/timelineCoverLoader';
 import { siteConfig } from '../configuration';
@@ -335,7 +336,8 @@ export const TimelineListPage: React.FC = () => {
           {error}{visibleTimelines.length > 0 && ' Previously loaded timelines remain below.'}
           <button type="button" onClick={() => setReloadRevision(value => value + 1)} style={{ marginLeft: 16 }}>Try Again</button>
         </div>}
-        {readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
+        {readPermission === 'unavailable' ? <PermissionUnavailable />
+        : readPermission === 'denied' ? <p role="status">This operation is unavailable with your current permissions.</p>
         : visibleTimelines.length === 0 && (loading || readPermission === 'checking') ? <CollectionPlaceholder kind="timeline" />
         : visibleTimelines.length === 0 && error ? null
         : visibleTimelines.length === 0 ? (

@@ -2,6 +2,7 @@ import { Repository } from '@sensenet/client-core';
 import { repositoryUrl, environment } from '../configuration';
 import { createOperationGuard, guardRepository, snapshotRequestInit } from './operationGuard.mjs';
 import { createDisplayPermissions } from './displayPermissions.mjs';
+import { fetchPermissionRows } from './permissionRequest.mjs';
 import { assertMembership, projectPaths, TYPES, validateFields } from '../domain/content.mjs';
 import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, canUseLegacyRead, configureNativeAuth, invalidateNativeSnapshots, markNativeGatewayUnavailable, nativeCommandFailure, nativeCreationApplyStart, NativeApiError, nativeCoverPayload, nativeReadSidecarAvailable, nativeSnapshot, nativeSnapshots, requireNativeWriteReadiness } from './nativeApi';
 import type { NativeCommand, NativeSnapshot } from './nativeApi';
@@ -226,11 +227,8 @@ async function permissionRows(targets: (string | number)[]): Promise<Record<stri
   const url = new URL(repositoryUrl); url.pathname = '/odata.svc' + environment.projectRoot.split('/').map(encodeURIComponent).join('/');
   url.search = new URLSearchParams({ query: '+InTree:' + JSON.stringify(environment.projectRoot) + ' +(' + clauses.join(' ') + ') .AUTOFILTERS:OFF .LIFESPAN:OFF', '$select': permissionFields, '$expand': 'Actions,EffectiveAllowedChildTypes', '$top': String(Math.max(100, targets.length)), metadata: 'no' }).toString();
   if (targets.length > 1000 || url.href.length > 16000) throw new Error('Permission review exceeds the supported batch size');
-  const response = await originalFetch(url.href, { method: 'GET' }, false); checkContext();
-  if (!response.ok) throw new Error('Permission content is unavailable');
-  const value = await response.json() as { d?: { results?: Record<string, unknown>[] } }; checkContext();
-  if (!Array.isArray(value.d?.results)) throw new Error('Permission content is invalid');
-  return value.d.results;
+  const rows = await fetchPermissionRows(originalFetch, url.href); checkContext();
+  return rows;
 }
 type PendingPermission = { target: string | number; check: () => void; resolve: (value: Record<string, unknown>) => void; reject: (error: unknown) => void };
 let pendingPermissions: PendingPermission[] = [], permissionFlushScheduled = false;
@@ -248,7 +246,7 @@ function permissionContent(target: string | number): Promise<Record<string, unkn
             item.check();
             const parsed = oDataTarget(permissionUrl(item.target));
             const row = rows.find(row => typeof parsed === 'number' ? row.Id === parsed : typeof parsed === 'string' && typeof row.Path === 'string' && row.Path.toLowerCase() === parsed.toLowerCase());
-            if (!row) throw new Error('Permission target is unavailable');
+            if (!row) throw Object.assign(new Error('Permission target is unavailable'), { permissionUnavailable: false });
             item.resolve(row);
           } catch (error) { item.reject(error); }
         }
@@ -290,6 +288,7 @@ export const repository = guardRepository(rawRepository, permissionGuard, { writ
 export const assertOperations = permissionGuard.assert;
 export const canOperations = permissionGuard.can;
 export const canDisplayOperations = displayPermissions.can;
+export const inspectDisplayOperations = displayPermissions.inspect;
 export const invalidatePermissions = () => { displayPermissions.invalidate(); permissionGuard.invalidate(); };
 export const subscribePermissions = permissionGuard.subscribe;
 export const captureOperationContext = permissionGuard.context;

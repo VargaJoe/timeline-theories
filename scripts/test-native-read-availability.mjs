@@ -120,6 +120,7 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
     .replace("import { repositoryUrl, environment } from '../configuration';", 'const environment=globalThis.__availabilityEnvironment;const repositoryUrl=environment.repositoryUrl;')
     .replace("from './operationGuard.mjs'", 'from ' + JSON.stringify(new URL('client/services/operationGuard.mjs', root).href))
     .replace("from './displayPermissions.mjs'", 'from ' + JSON.stringify(new URL('client/services/displayPermissions.mjs', root).href))
+    .replace("from './permissionRequest.mjs'", 'from ' + JSON.stringify(new URL('client/services/permissionRequest.mjs', root).href))
     .replace("from '../domain/content.mjs'", 'from ' + JSON.stringify(new URL('client/domain/content.mjs', root).href))
     .replace("from './nativeApi'", 'from ' + JSON.stringify(nativeUrl));
   const sense = await import(compile(senseSource + nonce));
