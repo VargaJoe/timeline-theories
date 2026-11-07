@@ -123,6 +123,22 @@ export class Store {
     if (!owned) throw new DomainError('plan_unavailable', 'Recovery plan is unavailable for this backend identity.', 404);
     return row.data;
   }
+  async recoveryMutation(operationId, identity, principal) {
+    assertUuid(operationId, 'Operation ID'); assertPrincipal(principal);
+    const aliasKey = `image-recoveries/${identity}/${operationId}`;
+    const alias = await this.read(aliasKey);
+    const row = await this.mutationRow(alias?.data.principal || principal, operationId) || (await this.pendingMutations()).find(item => item.operation_id === operationId);
+    let owned = false;
+    if (row?.principal.startsWith('grant:')) {
+      const grantId = row.principal.slice(6);
+      if (uuidPattern.test(grantId)) owned = (await this.read(`grant-ids/${grantId}`))?.data.identity === identity;
+    } else owned = row?.principal.startsWith(`session:${identity}:`) === true;
+    if (!owned) throw new DomainError('operation_unavailable', 'Image recovery is unavailable for this backend identity.', 404);
+    const payload = JSON.parse(row.payload);
+    if (!['image-draft','image-variant','image-seal','image-delete'].includes(payload.action)) throw new DomainError('operation_unavailable', 'This is not a dedicated image operation.', 404);
+    await this.immutable(aliasKey, { operationId, identity, principal: row.principal }, 'idempotency_conflict');
+    return row;
+  }
   async reserve(principal, key, plan) {
     if (typeof key !== 'string' || !/^[A-Za-z0-9_.:-]{8,128}$/.test(key)) throw new DomainError('invalid_idempotency_key', 'Idempotency-Key must contain 8..128 safe characters.');
     assertUuid(plan.id, 'Plan ID'); assertHash(plan.requestHash);

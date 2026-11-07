@@ -95,6 +95,7 @@ export interface NativeGatewayAvailability { ready: boolean; writable: boolean; 
 let gatewayAvailability: { identity: string; expires: number; value: NativeGatewayAvailability } | undefined;
 let gatewayDiscovery: { identity: string; promise: Promise<NativeGatewayAvailability> } | undefined;
 let writeReadinessExpires = 0;
+let writeReadiness: { identity: string; promise: Promise<void> } | undefined;
 
 export function configureNativeAuth(provider: () => string | undefined): void { getToken = provider; invalidateNativeSnapshots(); }
 function cancelActiveJobs(): void {
@@ -105,10 +106,10 @@ function cancelActiveJobs(): void {
   }
   activeJobs.clear();
 }
-export function invalidateNativeSnapshots(): void { cancelActiveJobs(); snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; identity = ''; }
+export function invalidateNativeSnapshots(): void { cancelActiveJobs(); snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; writeReadiness = undefined; identity = ''; }
 function currentIdentity(): string {
   const next = `${environment.repositoryUrl}\n${environment.projectRoot}\n${environment.authority}\n${getToken() || ''}`;
-  if (identity !== next) { cancelActiveJobs(); snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; identity = next; }
+  if (identity !== next) { cancelActiveJobs(); snapshots.clear(); targets.clear(); pending.clear(); gatewayAvailability = undefined; gatewayDiscovery = undefined; writeReadinessExpires = 0; writeReadiness = undefined; identity = next; }
   return next;
 }
 function nativeUrl(path: string): string {
@@ -123,11 +124,12 @@ function nativeUrl(path: string): string {
 function responseError(payload: unknown, status: number, applyReceipt = false): NativeApiError {
   const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const detail = value.error && typeof value.error === 'object' ? value.error as Record<string, unknown> : value;
-  const message = typeof detail.message === 'string' ? detail.message : typeof value.error === 'string' ? value.error : 'The native gateway rejected the request.';
+  const runtimeTimeout = !detail.code && !value.code && ['TimeoutError', 'LambdaTimeoutError'].includes(String(detail.errorType)) && typeof detail.errorMessage === 'string';
+  const message = runtimeTimeout ? 'The request timed out before its outcome could be confirmed.' : typeof detail.message === 'string' ? detail.message : typeof value.error === 'string' ? value.error : 'The native gateway rejected the request.';
   const retryAfter = detail.retryAfter ?? value.retryAfter;
   const source = detail.source ?? value.source;
-  const failure = new NativeApiError(message, status, String(detail.code || value.code || 'native_request_failed'), typeof source === 'string' ? source : undefined, typeof retryAfter === 'number' ? retryAfter : undefined);
-  failure.details = detail.details;
+  const failure = new NativeApiError(message, status, String(detail.code || value.code || (runtimeTimeout ? 'native_gateway_timeout' : 'native_request_failed')), typeof source === 'string' ? source : undefined, typeof retryAfter === 'number' ? retryAfter : undefined);
+  failure.details = runtimeTimeout ? { ...(detail.details && typeof detail.details === 'object' ? detail.details : {}), uncertain: true } : detail.details;
   if (applyReceipt && isNativeApplyResult(payload)) failure.applyResult = payload;
   return failure;
 }
@@ -314,7 +316,7 @@ export function canUseLegacyRead(error: unknown): error is NativeApiError {
 export function markNativeGatewayUnavailable(error: NativeApiError): void {
   const subject = currentIdentity();
   gatewayAvailability = { identity: subject, expires: Date.now() + 15000, value: { ready: false, writable: false, error } };
-  writeReadinessExpires = 0; snapshots.clear(); targets.clear();
+  writeReadinessExpires = 0; writeReadiness = undefined; snapshots.clear(); targets.clear();
 }
 async function discoverGateway(): Promise<NativeGatewayAvailability> {
   const subject = currentIdentity();
@@ -370,19 +372,31 @@ function nativeTarget(target: string | number): string | number {
   return target;
 }
 export async function requireNativeWriteReadiness(target: string | number, parent = false): Promise<void> {
+  const subject = currentIdentity();
   const availability = await nativeGatewayAvailability();
+  assertNativeIdentity(subject);
   if (!availability.ready) throw availability.error || new NativeApiError('Editing requires the configured M1 gateway.', 503, 'native_gateway_unconfigured');
   if (!availability.writable) throw new NativeApiError('The configured native gateway is read only.', 403, 'native_read_only');
   if (writeReadinessExpires > Date.now()) return;
-  try {
-    // Verify a same-caller repository snapshot through the application gateway. Do not refresh an editor's saved revision.
-    const snapshot = await nativeRequest<NativeSnapshot>('/lookup', { method: 'POST', body: JSON.stringify({ target: nativeTarget(target), ...(parent ? { parent: true } : {}) }) });
-    if (!cachedNativeSnapshot(target)) rememberNativeSnapshot(snapshot);
-    writeReadinessExpires = Date.now() + 15000;
-  } catch (caught) {
-    if (caught instanceof NativeApiError && canUseLegacyRead(caught)) markNativeGatewayUnavailable(caught);
-    throw caught;
-  }
+  if (writeReadiness?.identity === subject) return writeReadiness.promise;
+  const lookupTarget = nativeTarget(target);
+  // Readiness is already cached globally; share its in-flight read without sharing target ACL decisions.
+  const flight = { identity: subject, promise: Promise.resolve() };
+  writeReadiness = flight;
+  flight.promise = (async () => {
+    try {
+      const snapshot = await nativeRequest<NativeSnapshot>('/lookup', { method: 'POST', body: JSON.stringify({ target: lookupTarget, ...(parent ? { parent: true } : {}) }) });
+      assertNativeIdentity(subject);
+      if (writeReadiness !== flight) throw new NativeApiError('Native gateway readiness changed during the request. Retry the operation.', 409, 'native_readiness_changed');
+      // Do not refresh an editor's saved revision.
+      if (!cachedNativeSnapshot(target)) rememberNativeSnapshot(snapshot);
+      writeReadinessExpires = Date.now() + 15000;
+    } catch (caught) {
+      if (writeReadiness === flight && currentIdentity() === subject && caught instanceof NativeApiError && canUseLegacyRead(caught)) markNativeGatewayUnavailable(caught);
+      throw caught;
+    }
+  })();
+  try { await flight.promise; } finally { if (writeReadiness === flight) writeReadiness = undefined; }
 }
 
 export function rememberNativeSnapshot(value: NativeSnapshot): NativeSnapshot {

@@ -1,0 +1,57 @@
+.poster-fan {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  aspect-ratio: 2 / 1;
+  margin: auto;
+  overflow: visible;
+  isolation: isolate;
+}
+
+/* The hit window stays still while its decorative face moves. */
+.poster-fan__card {
+  position: absolute;
+  display: block;
+  transform: translate(-50%, -50%);
+  z-index: var(--poster-fan-layer);
+}
+
+/* Keep the resting rotated corners hittable even after the face straightens. */
+.poster-fan__card::before {
+  content: '';
+  position: absolute;
+  inset: -6% -5%;
+  transform: rotate(var(--poster-fan-angle));
+}
+
+.poster-fan__surface {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: 5%;
+  background-image: var(--poster-fan-source);
+  background-repeat: no-repeat;
+  outline: 1px solid rgb(255 255 255 / 22%);
+  box-shadow: 0 11px 20px rgb(0 0 0 / 34%), 0 2px 5px rgb(0 0 0 / 24%);
+  transform: rotate(var(--poster-fan-angle));
+  transform-origin: center;
+  pointer-events: none;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .poster-fan__card:hover {
+    z-index: 10;
+  }
+
+  .poster-fan__card:hover .poster-fan__surface {
+    transform: translateY(-6%) rotate(0deg) scale(1.035);
+    box-shadow: 0 15px 24px rgb(0 0 0 / 38%), 0 3px 7px rgb(0 0 0 / 24%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .poster-fan__surface {
+    transition: none;
+  }
+}

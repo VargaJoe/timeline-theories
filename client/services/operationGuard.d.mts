@@ -7,6 +7,6 @@ export interface OperationGuard {
   context: () => () => void;
   subscribe: (listener: () => void) => () => void;
 }
-export function createOperationGuard(dependencies: {probe: (target: string | number, permissions: ('Open' | 'Save' | 'Delete' | 'AddNew')[]) => Promise<boolean>; childTypes: (target: string | number) => Promise<string[]>; writable: () => boolean; identity: () => string}): OperationGuard;
-export function guardRepository(raw: Repository, guard: OperationGuard): Repository;
+export function createOperationGuard(dependencies: {probe: (target: string | number, permissions: ('Open' | 'Save' | 'Delete' | 'AddNew')[]) => Promise<boolean>; childTypes: (target: string | number) => Promise<string[]>; batchProbe?: (operations: readonly Operation[]) => Promise<boolean>; writable: () => boolean; identity: () => string}): OperationGuard;
+export function guardRepository(raw: Repository, guard: OperationGuard, options?: { writesCheckedByTransport?: boolean }): Repository;
 export function snapshotRequestInit(init?: RequestInit): Readonly<RequestInit & { method: string }>;

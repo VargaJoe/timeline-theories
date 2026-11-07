@@ -3,6 +3,16 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { DomainError, validatePublicUrl } from '../domain/content.mjs';
 export const DEFAULT_COVER_ORIGINS = ['https://image.tmdb.org','https://covers.openlibrary.org','https://books.google.com','https://m.media-amazon.com','https://images-na.ssl-images-amazon.com'];
+// Stored legacy binaries sometimes have only a generic download MIME. This
+// recognizes supported signatures without changing any repository metadata.
+export function storedCoverMime(bytes, declaredType) {
+  const mimeType = declaredType?.split(';')[0]?.trim().toLowerCase();
+  const matches = type => type === 'image/png' ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    : type === 'image/jpeg' ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+      : type === 'image/webp' && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+  return mimeType === 'application/octet-stream' ? ['image/png', 'image/jpeg', 'image/webp'].find(matches) ?? null
+    : ['image/png', 'image/jpeg', 'image/webp'].includes(mimeType) && matches(mimeType) ? mimeType : null;
+}
 export function coverOrigins(extra = '') {
   const origins=new Set(DEFAULT_COVER_ORIGINS);
   for(const value of extra.split(',').map(v=>v.trim()).filter(Boolean)){const url=validatePublicUrl(value);if(url.pathname!=='/'||url.search||url.hash)throw new DomainError('invalid_configuration','Cover allowlist entries must be HTTPS origins.',503);origins.add(url.origin);}

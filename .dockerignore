@@ -1,0 +1,22 @@
+# Build a source-only app image. Private env, local repositories/backups,
+# credentials, certificates, host dependencies and CLI accounts never enter it.
+**
+!package.json
+!package-lock.json
+!client/
+!client/**
+!scripts/
+!scripts/**
+!deployment/
+!deployment/docker/
+!deployment/docker/**
+**/node_modules
+**/dist
+**/.netlify
+**/.env
+**/.env.*
+**/*.override.json
+**/.vite
+**/bin
+**/obj
+**/*.log

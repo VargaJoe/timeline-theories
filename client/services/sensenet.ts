@@ -1,6 +1,8 @@
 import { Repository } from '@sensenet/client-core';
 import { repositoryUrl, environment } from '../configuration';
 import { createOperationGuard, guardRepository, snapshotRequestInit } from './operationGuard.mjs';
+import { createDisplayPermissions } from './displayPermissions.mjs';
+import { fetchPermissionRows } from './permissionRequest.mjs';
 import { assertMembership, projectPaths, TYPES, validateFields } from '../domain/content.mjs';
 import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, canUseLegacyRead, configureNativeAuth, invalidateNativeSnapshots, markNativeGatewayUnavailable, nativeCommandFailure, nativeCreationApplyStart, NativeApiError, nativeCoverPayload, nativeReadSidecarAvailable, nativeSnapshot, nativeSnapshots, requireNativeWriteReadiness } from './nativeApi';
 import type { NativeCommand, NativeSnapshot } from './nativeApi';
@@ -21,13 +23,13 @@ function oDataTarget(url: URL): string | number | undefined {
   const path = decodeURIComponent(url.pathname.replace(/^\/odata\.svc\/?/i, '/'));
   const numeric = path.match(/^\/content\((\d+)\)$/i);
   if (numeric) return Number(numeric[1]);
-  if (!path.startsWith('/Root/')) return undefined;
+  if (!/^\/root\//i.test(path)) return undefined;
   return path.replace(/\/?\('((?:[^']|'')*)'\)$/, (_whole, name: string) => '/' + name.replace(/''/g, "'"));
 }
 function domainPath(target: string | number | undefined): boolean {
+  const path = typeof target === 'string' ? target.toLowerCase() : '', root = environment.projectRoot.toLowerCase();
   return typeof target === 'number' || typeof target === 'string' && (
-    target.startsWith(environment.projectRoot + '/Timelines/') || target.startsWith(environment.projectRoot + '/MediaLibrary/') ||
-    target.startsWith(environment.projectRoot + '/TimelineEntries/'));
+    path.startsWith(root + '/timelines/') || path.startsWith(root + '/medialibrary/') || path.startsWith(root + '/timelineentries/'));
 }
 function oDataSnapshot(snapshot: NativeSnapshot, previous: Record<string, unknown> = {}, expanded = new Map<number, NativeSnapshot>()): Record<string, unknown> {
   const result: Record<string, unknown> = { ...previous, ...snapshot };
@@ -129,7 +131,28 @@ async function checkedRepositoryFetch(input: RequestInfo, init?: RequestInit, aw
   const action = /\/(?:HasPermission|AllowedChildTypes|EffectiveAllowedChildTypes|GetCurrentUser)$/i.test(url.pathname);
   const selectedFields = (url.searchParams.get('$select') || '').split(',');
   const editorRead = selectedFields.some(field => ['DisplayName', 'Title', 'Description', 'Position', 'Notes', 'SortOrder'].includes(field));
-  const domainCollection = collection && (domainPath(target) || typeof target === 'string' && target.startsWith(environment.projectRoot + '/'));
+  const domainCollection = collection && (domainPath(target) || typeof target === 'string' && target.toLowerCase().startsWith(environment.projectRoot.toLowerCase() + '/'));
+  const displayContent = method === 'GET' && !action && (domainPath(target) || domainCollection);
+  const readUrl = new URL(input, repositoryUrl);
+  if (displayContent) {
+    const select = new Set((readUrl.searchParams.get('$select') || '').split(',').filter(Boolean));
+    if (!select.size) select.add('*');
+    select.add('Id'); select.add('Path');
+    if (rawRepository.configuration.token && isConfiguredWriteTarget()) {
+      select.add('Actions/Name'); select.add('Actions/Forbidden');
+      const expand = new Set((readUrl.searchParams.get('$expand') || '').split(',').filter(Boolean));
+      expand.add('Actions');
+      if (expand.has('MediaItem')) {
+        select.add('MediaItem/Id'); select.add('MediaItem/Path');
+        select.add('MediaItem/Actions/Name'); select.add('MediaItem/Actions/Forbidden');
+        expand.add('MediaItem/Actions');
+      }
+      readUrl.searchParams.set('$expand', [...expand].join(','));
+      if (!readUrl.searchParams.has('scenario')) readUrl.searchParams.set('scenario', 'ContextMenu');
+    }
+    readUrl.searchParams.set('$select', [...select].join(','));
+    readUrl.searchParams.set('metadata', 'no');
+  }
   let sidecar = method === 'GET' && !action && (domainPath(target) || domainCollection) ? await nativeReadSidecarAvailable() : false;
   let baseline: NativeSnapshot | undefined;
   let baselineMedia = new Map<number, NativeSnapshot>();
@@ -144,10 +167,19 @@ async function checkedRepositoryFetch(input: RequestInfo, init?: RequestInit, aw
     }
   }
   checkContext();
-  const response = await originalFetch(input, requestInit, false);
+  const response = await originalFetch(readUrl.href, requestInit, false);
   checkContext();
+  let content: { d?: Record<string, unknown> & { results?: Record<string, unknown>[] } } | undefined;
+  if (displayContent && response.ok && response.headers.get('content-type')?.includes('json')) {
+    content = await response.clone().json(); checkContext();
+    const rows = content?.d?.results || (content?.d ? [content.d] : []);
+    for (const row of rows) {
+      displayPermissions.remember(row);
+      for (const media of Array.isArray(row.MediaItem) ? row.MediaItem : row.MediaItem ? [row.MediaItem] : []) displayPermissions.remember(media);
+    }
+  }
   if (!sidecar || method !== 'GET' || !response.ok || action || !response.headers.get('content-type')?.includes('json')) return response;
-  const value = await response.clone().json() as { d?: Record<string, unknown> & { results?: Record<string, unknown>[] } };
+  const value = content || await response.clone().json() as { d?: Record<string, unknown> & { results?: Record<string, unknown>[] } };
   if (baseline && value.d && !Array.isArray(value.d.results)) return jsonResponse({ ...value, d: oDataSnapshot(baseline, value.d, baselineMedia) });
   if (domainCollection && value.d?.results) {
     const rows = value.d.results;
@@ -173,33 +205,91 @@ async function checkedRepositoryFetch(input: RequestInfo, init?: RequestInit, aw
 }
 rawRepository.fetch = checkedRepositoryFetch;
 const checkedUploads = new WeakMap<FormData, { target: string | number; expectedRevision?: string }>();
+function permissionUrl(target: string | number): URL {
+  const url = new URL(repositoryUrl);
+  if (typeof target === 'number' || typeof target === 'string' && /^[1-9][0-9]*$/.test(target)) {
+    const id = Number(target); if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid permission target');
+    url.pathname = `/odata.svc/content(${id})`;
+  } else {
+    if (typeof target !== 'string' || !target.toLowerCase().startsWith(environment.projectRoot.toLowerCase() + '/') && target.toLowerCase() !== environment.projectRoot.toLowerCase() || /\.\.|[\\?#]/.test(target) || [...target].some(character => character.charCodeAt(0) < 32)) throw new Error('Invalid permission target');
+    const slash = target.lastIndexOf('/');
+    url.pathname = '/odata.svc' + target.slice(0, slash).split('/').map(encodeURIComponent).join('/') + "('" + encodeURIComponent(target.slice(slash + 1).replaceAll("'", "''")).replaceAll("'", '%27') + "')";
+  }
+  return url;
+}
+const permissionFields = 'Id,Path,Actions/Name,Actions/Forbidden,EffectiveAllowedChildTypes/Name';
+async function permissionRows(targets: (string | number)[]): Promise<Record<string, unknown>[]> {
+  const checkContext = permissionGuard.context();
+  const clauses = targets.map(target => {
+    const parsed = oDataTarget(permissionUrl(target));
+    return typeof parsed === 'number' ? 'Id:' + parsed : 'Path:' + JSON.stringify(parsed);
+  });
+  const url = new URL(repositoryUrl); url.pathname = '/odata.svc' + environment.projectRoot.split('/').map(encodeURIComponent).join('/');
+  url.search = new URLSearchParams({ query: '+InTree:' + JSON.stringify(environment.projectRoot) + ' +(' + clauses.join(' ') + ') .AUTOFILTERS:OFF .LIFESPAN:OFF', '$select': permissionFields, '$expand': 'Actions,EffectiveAllowedChildTypes', '$top': String(Math.max(100, targets.length)), metadata: 'no' }).toString();
+  if (targets.length > 1000 || url.href.length > 16000) throw new Error('Permission review exceeds the supported batch size');
+  const rows = await fetchPermissionRows(originalFetch, url.href); checkContext();
+  return rows;
+}
+type PendingPermission = { target: string | number; check: () => void; resolve: (value: Record<string, unknown>) => void; reject: (error: unknown) => void };
+let pendingPermissions: PendingPermission[] = [], permissionFlushScheduled = false;
+function permissionContent(target: string | number): Promise<Record<string, unknown>> {
+  const check = permissionGuard.context();
+  const promise = new Promise<Record<string, unknown>>((resolve, reject) => { pendingPermissions.push({ target, check, resolve, reject }); });
+  if (!permissionFlushScheduled) {
+    permissionFlushScheduled = true;
+    void Promise.resolve().then(async () => {
+      const batch = pendingPermissions; pendingPermissions = []; permissionFlushScheduled = false;
+      try {
+        const rows = await permissionRows([...new Set(batch.map(item => item.target))]);
+        for (const item of batch) {
+          try {
+            item.check();
+            const parsed = oDataTarget(permissionUrl(item.target));
+            const row = rows.find(row => typeof parsed === 'number' ? row.Id === parsed : typeof parsed === 'string' && typeof row.Path === 'string' && row.Path.toLowerCase() === parsed.toLowerCase());
+            if (!row) throw Object.assign(new Error('Permission target is unavailable'), { permissionUnavailable: false });
+            item.resolve(row);
+          } catch (error) { item.reject(error); }
+        }
+      } catch (error) { for (const item of batch) item.reject(error); }
+    });
+  }
+  return promise;
+}
+async function freshPermissionBatch(operations: readonly import('./operationGuard.mjs').Operation[]): Promise<boolean> {
+  const checkContext = permissionGuard.context();
+  const writing = operations.find(operation => operation.action !== 'read');
+  if (writing) {
+    if (!rawRepository.configuration.token || !isConfiguredWriteTarget()) return false;
+    await requireNativeWriteReadiness(writing.target, writing.action === 'create'); checkContext();
+  }
+  const targets = [...new Set(operations.map(operation => operation.target))];
+  if (!targets.length) return true;
+  const rows = await permissionRows(targets); checkContext();
+  // Seed only from this fresh compound response, never from cached UI hints.
+  const reviewed = createDisplayPermissions({ identity: () => `${rawRepository.configuration.repositoryUrl}:${rawRepository.configuration.token || ''}`, writable: () => !!rawRepository.configuration.token && isConfiguredWriteTarget(), load: async () => { throw new Error('Reviewed target is missing'); }, ready: async () => true });
+  for (const row of rows) reviewed.remember(row);
+  const allowed = await reviewed.can(operations); checkContext(); return allowed;
+}
 const permissionGuard = createOperationGuard({
-  probe: async (target, permissions) => {
-    if (permissions.some(permission => permission !== 'Open')) {
-      // Application writes require a backend credential before readiness or ACL probes.
-      if (!rawRepository.configuration.token) return false;
-      await requireNativeWriteReadiness(target, permissions.includes('AddNew'));
-    }
-    // SenseNet's HasPermission action excludes Visitor, even for public content.
-    // Anonymous read availability is proved by the actual backend GET on this
-    // exact content; denied/missing/transport failures still fail closed.
-    if (!rawRepository.configuration.token && permissions.length === 1 && permissions[0] === 'Open') {
-      const result = await rawRepository.load({ idOrPath: target, oDataOptions: { select: ['Id'], metadata: 'no' } });
-      return Number.isSafeInteger(result.d?.Id) && result.d.Id > 0;
-    }
-    return rawRepository.security.hasPermission(target, permissions);
-  },
-  childTypes: async target => {
-    const result = await rawRepository.allowedChildTypes.get({ idOrPath: target });
-    return result.d.results.map((type: { Name: string }) => type.Name);
-  },
+  probe: async () => false, childTypes: async () => [], batchProbe: freshPermissionBatch,
   writable: isConfiguredWriteTarget,
   identity: () => `${rawRepository.configuration.repositoryUrl}:${rawRepository.configuration.token || ''}`,
 });
-export const repository = guardRepository(rawRepository, permissionGuard);
+const displayPermissions = createDisplayPermissions({
+  identity: () => `${rawRepository.configuration.repositoryUrl}:${rawRepository.configuration.token || ''}`,
+  writable: () => !!rawRepository.configuration.token && isConfiguredWriteTarget(),
+  load: permissionContent,
+  // All queued descriptors become one compound HTTP request; this is not
+  // permission-by-permission or target-by-target network concurrency.
+  concurrency: 1000,
+  ready: async (target, parent) => { await requireNativeWriteReadiness(target, parent); return true; },
+});
+export const repository = guardRepository(rawRepository, permissionGuard, { writesCheckedByTransport: true });
 export const assertOperations = permissionGuard.assert;
 export const canOperations = permissionGuard.can;
-export const invalidatePermissions = permissionGuard.invalidate;
+export const canDisplayOperations = displayPermissions.can;
+export const inspectDisplayOperations = displayPermissions.inspect;
+export const invalidatePermissions = () => { displayPermissions.invalidate(); permissionGuard.invalidate(); };
 export const subscribePermissions = permissionGuard.subscribe;
 export const captureOperationContext = permissionGuard.context;
 
@@ -210,8 +300,6 @@ export async function readTimelineCoverReferences(timelinePath: string, signal?:
   if (!name || /[/\\?#]/.test(name) || name === '.' || name === '..') throw new Error('Invalid timeline cover target');
   signal?.throwIfAborted();
   const checkContext = captureOperationContext();
-  await permissionGuard.assert([{ target: timelinePath, action: 'read' }]);
-  checkContext();
   signal?.throwIfAborted();
   const url = new URL(repositoryUrl);
   // Encode each repository path segment; a content Name cannot change the OData target.
@@ -219,8 +307,7 @@ export async function readTimelineCoverReferences(timelinePath: string, signal?:
   url.search = new URLSearchParams({ query: '+TypeIs:TimelineEntry +Hidden:0',
     '$select': 'Id,Path,Name,Type,MediaItem/Id,MediaItem/Path,MediaItem/Type,MediaItem/CoverImageUrl,MediaItem/CoverImageBin',
     '$expand': 'MediaItem', '$orderby': 'Position', '$top': '50', metadata: 'no' }).toString();
-  // Use the SDK's same-caller transport. Open is still checked above, and both the
-  // expanded references and subsequent binary GETs remain subject to repository ACLs.
+  // This same-caller GET and subsequent binaries enforce repository access.
   const response = await originalFetch(url.href, { method: 'GET', signal }, false);
   checkContext();
   if (!response.ok) throw new Error('Timeline cover references are unavailable');

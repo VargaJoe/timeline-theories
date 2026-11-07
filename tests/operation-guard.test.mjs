@@ -59,9 +59,18 @@ for(const result of [false,undefined,'true',{isError:false,error:'SiteUrl is mis
   assert.equal(f.writes.length,0);
 });
 for(const status of [404,401,403,500,'TLS','network']) test('read failure does not create: '+status,async()=>{
-  const f=fixture({probe:async()=>{throw new Error(String(status));}});
-  await assert.rejects(f.repository.load({idOrPath:'/Root/Content/library'}));
+  const f=fixture();
+  const repository=guardRepository({load:async()=>{throw new Error(String(status));}},f.guard);
+  await assert.rejects(repository.load({idOrPath:'/Root/Content/library'}),new RegExp(String(status)));
   assert.equal(f.writes.length,0);
+});
+test('read facade trusts the actual load and collection GET without a redundant permission probe',async()=>{
+  let probes=0,reads=0;
+  const f=fixture({probe:async()=>{probes++;return false;}});
+  const repository=guardRepository({load:async options=>{reads++;return options;},loadCollection:async options=>{reads++;return options;}},f.guard);
+  assert.deepEqual(await repository.load({idOrPath:42}),{idOrPath:42});
+  assert.deepEqual(await repository.loadCollection({path:'/Root/Content/library'}),{path:'/Root/Content/library'});
+  assert.equal(reads,2);assert.equal(probes,0);
 });
 test('allowed child type does not substitute for AddNew',async()=>{
   const f=fixture({probe:async()=>false});
@@ -115,4 +124,54 @@ test('caller mutations cannot turn a pending read into a write',async()=>{
   const form=new FormData();form.append('FileName','checked');
   const copied=snapshotRequestInit({method:'POST',body:form});form.set('FileName','changed');
   assert.equal(copied.body.get('FileName'),'checked');
+});
+test('batch probe receives all concrete operations once without the legacy per-target probes',async()=>{
+  const calls=[];
+  const f=fixture({probe:async()=>{throw Error('legacy permission probe');},childTypes:async()=>{throw Error('legacy child-type probe');},batchProbe:async operations=>{calls.push(operations);return true;}});
+  const operations=Array.from({length:100},(_,index)=>({target:index+1,action:index%2?'delete':'update'}));
+  await f.guard.assert(operations);
+  assert.equal(calls.length,1);assert.deepEqual(calls[0],operations);
+  assert.notEqual(calls[0],operations);assert.notEqual(calls[0][0],operations[0]);
+});
+for(const result of [false,undefined,'true',{allowed:true}]) test('batch probe fails closed unless explicitly true: '+JSON.stringify(result),async()=>{
+  const f=fixture({batchProbe:async()=>result});
+  await assert.rejects(f.repository.patch({idOrPath:1}),/Permission denied/);assert.equal(f.writes.length,0);
+});
+test('invalid batch targets and actions are rejected before any permission request',async()=>{
+  let probes=0;
+  const f=fixture({batchProbe:async()=>{probes++;return true;}});
+  for(const operation of [{target:0,action:'update'},{target:1,action:'unknown'},{target:'',action:'read'}]) {
+    await assert.rejects(f.guard.assert([{target:1,action:'update'},operation]),/Unknown operation target/);
+  }
+  assert.equal(probes,0);assert.equal(f.writes.length,0);
+});
+test('read-only batch writes are rejected before the compound probe',async()=>{
+  let probes=0;
+  const f=fixture({writable:()=>false,batchProbe:async()=>{probes++;return true;}});
+  await assert.rejects(f.repository.patch({idOrPath:1}),/read only/);
+  assert.equal(probes,0);assert.equal(f.writes.length,0);
+});
+for(const change of ['identity','revision']) test('a '+change+' change during a batch invalidates the entire decision',async()=>{
+  let current='editor',release;
+  const f=fixture({identity:()=>current,batchProbe:()=>new Promise(resolve=>{release=resolve;})});
+  const pending=f.repository.patch({idOrPath:1});
+  if(change==='identity') current='next-editor'; else f.guard.invalidate();
+  release(true);await assert.rejects(pending,/Identity or permissions changed/);assert.equal(f.writes.length,0);
+});
+test('caller mutations cannot replace operations during a pending batch',async()=>{
+  let release,reviewed;
+  const f=fixture({batchProbe:async operations=>{reviewed=operations;await new Promise(resolve=>{release=resolve;});return true;}});
+  const operations=[{target:1,action:'create',contentType:'MediaItem'}];
+  const pending=f.guard.assert(operations);
+  operations[0].target=2;operations[0].contentType='Timeline';operations.push({target:3,action:'delete'});
+  release();await pending;
+  assert.deepEqual(reviewed,[{target:1,action:'create',contentType:'MediaItem'}]);
+});
+test('checked transport owns exactly one fresh write guard when the facade delegates to it',async()=>{
+  let probes=0;const writes=[];
+  const guard=createOperationGuard({probe:async()=>{throw Error('legacy probe');},childTypes:async()=>[],batchProbe:async operations=>{probes++;return operations[0].target===1;},writable:()=>true,identity:()=>'editor'});
+  const raw={patch:async options=>{await guard.assert([{target:options.idOrPath,action:'update'}]);writes.push(options);}};
+  const repository=guardRepository(raw,guard,{writesCheckedByTransport:true});
+  await repository.patch({idOrPath:1});assert.equal(probes,1);assert.equal(writes.length,1);
+  await assert.rejects(repository.patch({idOrPath:2}),/Permission denied/);assert.equal(probes,2);assert.equal(writes.length,1);
 });

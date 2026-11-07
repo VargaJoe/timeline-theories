@@ -3,9 +3,11 @@ import { mediaLibraryPath } from '../projectPaths';
 import { TIMELINE_ENTRY_CONTENT_TYPE } from '../contentTypes';
 import { singleChoice } from './contentValues';
 import { acknowledgeNativeCommands, applyNativeCommands, cachedNativeSnapshot, nativeSnapshot, NativeCreationIntent } from './nativeApi';
+import type { ImageDescriptor } from '../utils/imageVariants';
 
 // Minimal MediaItem reference type for expanded reference
 export interface MediaItemRef {
+  image?: ImageDescriptor;
   Name: string;
   Id: number;
   revision?: string;
@@ -25,6 +27,7 @@ export interface MediaItemRef {
   CoverImageBin?: {
     __mediaresource?: {
       media_src: string;
+      content_type?: string;
     };
   };
 }
