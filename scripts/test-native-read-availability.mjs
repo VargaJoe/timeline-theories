@@ -123,9 +123,10 @@ async function fixture({ mode = 'production', discovery = 'html', lookupError, r
     .replace("from './permissionRequest.mjs'", 'from ' + JSON.stringify(new URL('client/services/permissionRequest.mjs', root).href))
     .replace("from '../domain/content.mjs'", 'from ' + JSON.stringify(new URL('client/domain/content.mjs', root).href))
     .replace("from './nativeApi'", 'from ' + JSON.stringify(nativeUrl));
-  const sense = await import(compile(senseSource + nonce));
+  const senseUrl = compile(senseSource + nonce);
+  const sense = await import(senseUrl);
   const load = () => sense.repository.load({ idOrPath: 1, oDataOptions: { select: ['Id', 'Title', 'DisplayName'] } });
-  return { native, sense, load, rawCalls, rawWrites, aclCalls, childTypeCalls, nativeCalls, environment, permissionState };
+  return { native, sense, nativeUrl, senseUrl, load, rawCalls, rawWrites, aclCalls, childTypeCalls, nativeCalls, environment, permissionState };
 }
 let checks = 0;
 async function test(name, run) { await run(); checks++; process.stdout.write('PASS ' + name + '\n'); }
@@ -552,6 +553,82 @@ async function main() {
     assert.equal(plans.length, 1); assert.equal(applies.length, 2); assert.deepEqual(applies[0], applies[1]);
     assert.equal(f.rawWrites.length, 0);
   });
+  const cloudflareProblem = status => ({ type: 'https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-' + status + '/',
+    title: 'Provider title', status, error_code: status, cloudflare_error: true, ray_id: 'abcdef0123456789', error_name: 'origin_bad_gateway', error_category: 'origin',
+    retryable: true, retry_after: 60, what_you_should_do: 'Retry immediately and discard your saved operation', details: { uncertain: false }, message: 'Private provider details',
+    ok: true, completed: [{ result: { id: 999 } }], retrySamePlan: false });
+  for (const status of [502, 504, 520]) await test('Cloudflare ' + status + ' preserves an uncertain apply without following provider retry advice', async () => {
+    const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, plans = [], applies = [];
+    globalThis.fetch = async (url, init) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/v1/plans') { plans.push(JSON.parse(init.body)); return response({ id: 'saved-proxy-plan' }); }
+      if (path === '/api/v1/plans/saved-proxy-plan/apply') {
+        applies.push({ path, body: init.body, key: new Headers(init.headers).get('Idempotency-Key') });
+        return applies.length === 1 ? response(cloudflareProblem(status), status) : response({ ok: true, completed: [] });
+      }
+      return original(url, init);
+    };
+    const commands = [{ action: 'cover-presentation', targetId: 1, expectedRevision: 'saved-owner-revision', setId: 90 }];
+    await assert.rejects(f.native.applyNativeCommands(commands), error => {
+      assert.equal(error.code, 'native_gateway_upstream_error'); assert.equal(error.status, status);
+      assert.equal(error.message, `The gateway connection failed (HTTP ${status}). The request outcome could not be confirmed.`);
+      assert.equal(error.source, 'cloudflare'); assert.equal(error.transportFailure, true);
+      assert.deepEqual(error.details, { uncertain: true, rayId: 'abcdef0123456789' });
+      assert.equal(error.applyResult, undefined, 'A proxy problem is never an application completion receipt');
+      assert.equal(error.retryAfter, undefined); assert.equal(error.recoverable, true);
+      assert.equal(error.planId, 'saved-proxy-plan'); assert.equal(error.idempotencyKey, applies[0].key);
+      assert.equal(f.native.canUseLegacyRead(error), false); return true;
+    });
+    await tick();
+    assert.equal(applies.length, 1, 'Provider retryable does not trigger another write');
+    await f.native.applyNativeCommands(commands);
+    assert.equal(plans.length, 1); assert.equal(applies.length, 2); assert.deepEqual(applies[0], applies[1]);
+    assert.equal(f.rawWrites.length, 0);
+  });
+  await test('a Cloudflare problem cannot turn a transport outage into a legacy read fallback', async () => {
+    const f = await fixture({ discovery: 'ready' });
+    globalThis.fetch = async () => response(cloudflareProblem(502), 502);
+    await assert.rejects(f.load(), error => error.code === 'native_gateway_upstream_error' && error.transportFailure === true);
+    assert.equal(f.rawCalls.length, 0, 'A transport failure cannot start a legacy repository fallback'); assert.equal(f.rawWrites.length, 0);
+  });
+  await test('an image draft interrupted by Cloudflare retains its exact generation and never automatically uploads or restarts it', async () => {
+    const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, drafts = [];
+    const imageSource = read('client/services/imageVariantService.ts')
+      .replace("import { environment } from '../configuration';", 'const environment=globalThis.__availabilityEnvironment;')
+      .replace("from './nativeApi'", 'from ' + JSON.stringify(f.nativeUrl))
+      .replace("from './sensenet'", 'from ' + JSON.stringify(f.senseUrl));
+    const { ImagePublication } = await import(compile(imageSource + '\n// proxy image fixture'));
+    globalThis.fetch = async (url, init) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/v1/images/drafts') {
+        drafts.push({ path, body: JSON.parse(init.body), key: new Headers(init.headers).get('Idempotency-Key') });
+        return response(cloudflareProblem(502), 502);
+      }
+      assert(!path.startsWith('/api/v1/images/drafts/'), 'No variant upload or seal follows an unconfirmed draft');
+      return original(url, init);
+    };
+    const generated = { sources: [{ id: 8, stamp: 'a'.repeat(64), url: '/api/v1/content/8/cover' }], recipe: { template: 'poster-strip-v1', sourceIds: [8] },
+      variants: [{ name: 'w400', width: 400, height: 200, mimeType: 'image/webp', byteLength: 3, sha256: 'b'.repeat(64), blob: new Blob(['abc']) }] };
+    const intent = new ImagePublication(7, generated, 'timeline-composite', { Id: 7, revision: 'sha256:' + 'c'.repeat(64) });
+    await assert.rejects(intent.publish(new AbortController().signal, () => {}), error => error.code === 'native_gateway_upstream_error' && error.details.uncertain === true);
+    await tick();
+    assert.equal(intent.hasStartedMutation, true); assert.equal(intent.generated, generated); assert.equal(drafts.length, 1);
+    assert.equal(drafts[0].body.generationId, intent.generationId);
+    await assert.rejects(intent.publish(new AbortController().signal, () => {}), error => error.code === 'native_gateway_upstream_error');
+    assert.equal(drafts.length, 2); assert.deepEqual(drafts[0], drafts[1], 'Only an explicit retry reuses the original exact image request');
+    assert.equal(f.rawWrites.length, 0); assert.equal(f.aclCalls.length, 0);
+  });
+  await test('Cloudflare correlation is bounded and an unverified problem is not trusted', async () => {
+    const f = await fixture({ discovery: 'ready' });
+    globalThis.fetch = async () => response({ ...cloudflareProblem(502), ray_id: 'untrusted\nprivate text' }, 502);
+    await assert.rejects(f.native.nativeRequest('/lookup'), error => {
+      assert.deepEqual(error.details, { uncertain: true }); assert.equal(error.source, 'cloudflare'); return true;
+    });
+    for (const value of [{ ...cloudflareProblem(502), cloudflare_error: false }, { ...cloudflareProblem(502), status: 500 }, { ...cloudflareProblem(502), type: 'https://untrusted.test/provider/' }]) {
+      globalThis.fetch = async () => response(value, 502);
+      await assert.rejects(f.native.nativeRequest('/lookup'), error => error.code === 'native_request_failed' && error.transportFailure !== true);
+    }
+  });
   await test('normal native errors retain their domain code, message and details', async () => {
     const f = await fixture({ discovery: 'ready' });
     const cases = [
@@ -559,6 +636,7 @@ async function main() {
       [{ errorType: 'TimeoutError', errorMessage: 'Task timed out', code: 'revision_conflict', message: 'The owner changed', details: { uncertain: false } }, 409, 'revision_conflict', 'The owner changed'],
       [{ error: 'Explicit gateway error' }, 502, 'native_request_failed', 'Explicit gateway error'],
       [{ errorType: 'OtherRuntimeError', errorMessage: 'Private runtime details' }, 500, 'native_request_failed', 'The native gateway rejected the request.'],
+      [{ ...cloudflareProblem(502), error: { code: 'revision_conflict', message: 'Exact owner changed', details: { uncertain: false } } }, 409, 'revision_conflict', 'Exact owner changed'],
     ];
     for (const [payload, status, code, message] of cases) {
       globalThis.fetch = async () => response(payload, status);
