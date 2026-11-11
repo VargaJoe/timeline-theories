@@ -125,12 +125,19 @@ function responseError(payload: unknown, status: number, applyReceipt = false): 
   const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const detail = value.error && typeof value.error === 'object' ? value.error as Record<string, unknown> : value;
   const runtimeTimeout = !detail.code && !value.code && ['TimeoutError', 'LambdaTimeoutError'].includes(String(detail.errorType)) && typeof detail.errorMessage === 'string';
-  const message = runtimeTimeout ? 'The request timed out before its outcome could be confirmed.' : typeof detail.message === 'string' ? detail.message : typeof value.error === 'string' ? value.error : 'The native gateway rejected the request.';
-  const retryAfter = detail.retryAfter ?? value.retryAfter;
+  const cloudflareProblem = !detail.code && !value.code && value.cloudflare_error === true &&
+    [500, 502, 504, 520, 521, 522, 523, 524, 525, 526].includes(status) && value.status === status && value.error_code === status &&
+    typeof value.type === 'string' && /^https:\/\/developers\.cloudflare\.com\/support\/troubleshooting\/http-status-codes\/cloudflare-5xx-errors\//.test(value.type);
+  const message = runtimeTimeout ? 'The request timed out before its outcome could be confirmed.' : cloudflareProblem ? `The gateway connection failed (HTTP ${status}). The request outcome could not be confirmed.` : typeof detail.message === 'string' ? detail.message : typeof value.error === 'string' ? value.error : 'The native gateway rejected the request.';
+  // A provider's retryable/retry_after/instructions cannot authorize replaying
+  // an application write. Only an explicit same-plan/key retry may recover it.
+  const retryAfter = cloudflareProblem ? undefined : detail.retryAfter ?? value.retryAfter;
   const source = detail.source ?? value.source;
-  const failure = new NativeApiError(message, status, String(detail.code || value.code || (runtimeTimeout ? 'native_gateway_timeout' : 'native_request_failed')), typeof source === 'string' ? source : undefined, typeof retryAfter === 'number' ? retryAfter : undefined);
-  failure.details = runtimeTimeout ? { ...(detail.details && typeof detail.details === 'object' ? detail.details : {}), uncertain: true } : detail.details;
-  if (applyReceipt && isNativeApplyResult(payload)) failure.applyResult = payload;
+  const failure = new NativeApiError(message, status, String(detail.code || value.code || (runtimeTimeout ? 'native_gateway_timeout' : cloudflareProblem ? 'native_gateway_upstream_error' : 'native_request_failed')), cloudflareProblem ? 'cloudflare' : typeof source === 'string' ? source : undefined, typeof retryAfter === 'number' ? retryAfter : undefined);
+  failure.details = cloudflareProblem ? { uncertain: true, ...(typeof value.ray_id === 'string' && /^[a-f0-9]{16,32}$/i.test(value.ray_id) ? { rayId: value.ray_id } : {}) }
+    : runtimeTimeout ? { ...(detail.details && typeof detail.details === 'object' ? detail.details : {}), uncertain: true } : detail.details;
+  if (cloudflareProblem) failure.transportFailure = true;
+  if (applyReceipt && value.cloudflare_error !== true && isNativeApplyResult(payload)) failure.applyResult = payload;
   return failure;
 }
 function isNativeApplyResult(value: unknown): value is NativeApplyResult {

@@ -61,6 +61,10 @@ Az alkalmazás saját API-ja védi a teljes készletre váltást, a név/owner/p
 
 Bizonytalan mentésnél ugyanaz a kéréskulcs ellenőrzi a korábbi eredményt. Nem indítunk új generációt pusztán elveszett válasz miatt. A helyreállítás meglévő app-journal/recovery folyamata nem ismétel vakon natív írást.
 
+Cloudflare/proxy 5xx válasz esetén a kapcsolat hibája és a mentés bizonytalan eredménye különbözik a SenseNet által visszaadott jogosultsági vagy tartalmi hibától. A felismert Cloudflare Problem JSON fix, érthető kapcsolati hibaüzenetet ad, megőrzi az eredeti műveletet és a validált Ray ID-t. A válasz `retryable`, `retry_after` és szöveges utasításai nem indítanak automatikus újraírást. Proxyválasz nem lehet alkalmazási teljesítési nyugta, és nem kapcsolhatja át az olvasást régi repository-fallbackre. Kézi újrapróbálás ugyanazt a generációt és kéréskulcsot használja; ez önmagában nem old fel egy még nem igazolt kimenetelű journal-bejegyzést.
+
+2026-11-07: az Eastrail borító `images/drafts` kérésére kapott Cloudflare `origin_bad_gateway` 502 válasz időpontja egyezik a sikertelen kérésével. A saját app írózára felszabadult, de az előkészített művelet függő maradt. Ez a köztes kapcsolat hibáját igazolja; konkrét SenseNet-kivétel, a hibás origin-komponens vagy sikeres publikálás ebből nem állapítható meg. Az üzenetkezelés javítása nem a fizikai gateway-hiba vagy a függő készlet rendezésének igazolása. A teljes közvetlen SenseNet-publikálási út az előkészítés, feltöltés és aktiválás külön megvalósítását igényli.
+
 Ha az író már foglalt, de a megszakadás miatt még journal-bejegyzése sincs, a helyreállítás kizárólag metaadatot egyeztet az eredeti szereplőhöz, kéréskulcshoz és műveletazonosítóhoz kötve. Az operátornak előbb igazolnia kell a pontos eredeti kérés futtatójának tényleges leállását; eltelt idő vagy egy timeout önmagában nem ilyen bizonyíték. Ez az ág nem küld új SenseNet-írást és nem játssza újra a feltöltést.
 
 ## Helyi indítás és kézi próba
