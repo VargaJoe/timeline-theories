@@ -299,6 +299,11 @@ export async function nativeResponse(path: string, init: RequestInit = {}, optio
   // Same-origin GETs may omit Origin; this routes the session through actual backend token validation.
   headers.set('X-Timeline-Client-Origin', window.location.origin);
   if (token) headers.set('Authorization', `Bearer ${token}`); else headers.delete('Authorization');
+  // Image reads may follow a large-original download manifest. Keep their
+  // caller's deadline/cancellation on every chunk and its response body.
+  // Writer jobs and other routes retain their independent existing lifetime.
+  const inheritedImageSignal = (init.method || 'GET').toUpperCase() === 'GET' &&
+    /^\/(?:api\/v1\/)?(?:content\/[1-9][0-9]*\/(?:cover|image-presentation)|images\/[1-9][0-9]*\/[0-9a-f-]{36}\/w[1-9][0-9]{0,3})$/i.test(path) ? init.signal : undefined;
   const send: SendNativeRoute = async (route, options = {}) => {
     assertNativeIdentity(startedIdentity);
     const requestHeaders = new Headers(headers);
@@ -308,7 +313,7 @@ export async function nativeResponse(path: string, init: RequestInit = {}, optio
     }
     if (!['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase()) && !requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', 'application/json');
     let result: Response;
-    try { result = await fetch(nativeUrl(route), { ...options, headers: requestHeaders, credentials: 'omit', redirect: 'error', signal: options.signal || AbortSignal.timeout(120000) }); }
+    try { result = await fetch(nativeUrl(route), { ...options, headers: requestHeaders, credentials: 'omit', redirect: 'error', signal: options.signal || inheritedImageSignal || AbortSignal.timeout(120000) }); }
     catch (error) {
       if (error instanceof NativeApiError) throw error;
       const failure = new NativeApiError('The native gateway request failed. Recover an approved apply with the same saved plan and key.', 503, 'native_gateway_unavailable');

@@ -114,6 +114,23 @@ test('manual selection and random preview retain twelve posters with a bounded t
   } finally { ui.unmount(); state.restore(); }
 });
 
+test('preview progress can be cancelled and a late raster cannot replace the next preparation', async () => {
+  const state = fixture();
+  const ui = host({ ownerId: 90, kind: 'timeline-composite', candidates: [{ id: 11, title: 'Poster', url: '/original/11' }], onSaved: () => { throw Error('Preview must not publish'); } });
+  try {
+    ui.flush(); await tick(); button(ui.flush(), 'Generate preview').props.onClick(); await tick();
+    const old = state.generations[0]; old.input.onProgress('Loading selected images (0/1)…');
+    let tree = ui.flush(); assert.match(find(tree, node => node.props?.role === 'status').props.children, /Loading selected images/);
+    const cancel = find(tree, node => node.type === 'button' && node.props.children === 'Cancel preview'); assert.ok(cancel);
+    cancel.props.onClick(); tree = ui.flush(); assert.equal(old.input.signal.aborted, true);
+    assert.equal(state.sourceSessions[0].disposed, true); assert.equal(state.sourceSessions.length, 2, 'Hard cancel replaces the private byte cache even if encoding had already started.');
+    assert.equal(button(tree, 'Generate preview').props.disabled, false);
+    old.resolve(state.result(0)); await tick(); tree = ui.flush(); assert.equal(byType(preview(tree), 'PosterFan'), undefined);
+    button(tree, 'Generate preview').props.onClick(); await tick(); state.generations[1].resolve(state.result(1)); await tick();
+    assert.equal(byType(preview(ui.flush()), 'PosterFan').props.count, state.generations[1].input.sources.length);
+  } finally { ui.unmount(); state.restore(); }
+});
+
 test('pending notPrepared recovery keeps selection locked until explicit stopped recovery is terminal', async () => {
   const state = fixture(), calls = [];
   const rawButton = (tree, label) => find(tree, node => node.type === 'button' && node.props.children === label);

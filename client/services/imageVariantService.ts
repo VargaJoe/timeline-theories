@@ -4,6 +4,7 @@ import { assertOperations, captureOperationContext } from './sensenet';
 import type { GeneratedImageSet, ImageGenerationSource } from '../utils/imageGenerator';
 import type { ImageDescriptor } from '../utils/imageVariants';
 import { MAX_POSTER_SOURCES as MAX_PREVIEW_SOURCES } from '../utils/posterStripLayout.mjs';
+import { readImage, isTransientImageReadFailure } from '../utils/imageReadRetry';
 
 export interface ImagePresentation extends ImageDescriptor { setId?: number; recipe?: GeneratedImageSet['recipe']; }
 export interface ImageCapabilities { available: boolean; protocol?: string; }
@@ -23,10 +24,12 @@ export async function sourceForGeneration(id: number, signal: AbortSignal): Prom
   if (!binary || !['image/png', 'image/jpeg', 'image/webp', 'application/octet-stream'].includes(binary.ContentType || '')) throw new Error('Upload an original cover in the media editor before preparing image sizes.');
   return { id, url: `/api/v1/content/${id}/cover` };
 }
-export async function originalImageBlob(source: ImageGenerationSource, signal: AbortSignal): Promise<Blob> {
-  const response = await nativeResponse(`/content/${source.id}/cover`, { signal, cache: 'no-store' });
-  if (!response.ok) throw new Error('The original cover is unavailable with your current permissions.');
-  return response.blob();
+export async function originalImageBlob(source: ImageGenerationSource, signal: AbortSignal, assertContext = captureOperationContext()): Promise<Blob> {
+  return readImage(async requestSignal => {
+    const response = await nativeResponse(`/content/${source.id}/cover`, { signal: requestSignal, cache: 'no-store' });
+    if (!response.ok) throw Object.assign(new Error('The original cover is unavailable with your current permissions.'), { status: response.status });
+    return response.blob();
+  }, { signal, assertContext });
 }
 
 interface PreviewSourceMetadata { id: number; url: string; version: string; }
@@ -71,9 +74,9 @@ export class ImagePreviewSourceSession {
       if (!sourceIds.length || sourceIds.length > MAX_PREVIEW_SOURCES || new Set(sourceIds).size !== sourceIds.length || sourceIds.some(id => !Number.isSafeInteger(id) || id < 1)) throw new Error('Select valid, distinct image sources.');
       // Always renew caller Open access and the original version, including on
       // regeneration. Reusing bytes never reuses a previous permission decision.
-      const result = await nativeRequest<PreviewSourceResponse>('/images/preview-sources', {
-        method: 'POST', body: JSON.stringify({ ownerId: this.ownerId, sourceIds }), signal, cache: 'no-store',
-      });
+      const result = await readImage(requestSignal => nativeRequest<PreviewSourceResponse>('/images/preview-sources', {
+        method: 'POST', body: JSON.stringify({ ownerId: this.ownerId, sourceIds }), signal: requestSignal, cache: 'no-store',
+      }), { signal, assertContext: () => this.check(signal, epoch) });
       this.check(signal, epoch);
       if (result?.owner?.Id !== this.ownerId || !previewVersion(result.owner.revision) || !Array.isArray(result.sources) || result.sources.length !== sourceIds.length ||
         result.sources.some((source, index) => source?.id !== sourceIds[index] || source.url !== `/api/v1/content/${sourceIds[index]}/cover` || !previewVersion(source.version))) {
@@ -92,7 +95,7 @@ export class ImagePreviewSourceSession {
             // Touch only after this preparation's fresh caller-authorized read.
             this.cache.delete(source.id); this.cache.set(source.id, cached); return cached.blob;
           }
-          const blob = await originalImageBlob(source, sourceSignal);
+          const blob = await originalImageBlob(source, sourceSignal, () => { this.check(signal, epoch); this.check(sourceSignal, epoch); });
           this.check(signal, epoch); this.check(sourceSignal, epoch);
           if (this.maxEntries > 0 && blob.size > 0 && blob.size <= this.maxBytes) {
             this.remove(source.id);
@@ -100,9 +103,9 @@ export class ImagePreviewSourceSession {
             this.cache.set(source.id, { version: original.version, blob }); this.cacheBytes += blob.size;
           }
           return blob;
-        } catch (error) { if (epoch === this.epoch) this.reset(); throw error; }
+        } catch (error) { if (epoch === this.epoch && (!isTransientImageReadFailure(error) || signal.aborted || this.disposed)) this.reset(); throw error; }
       } };
-    } catch (error) { if (epoch === this.epoch) this.reset(); throw error; }
+    } catch (error) { if (epoch === this.epoch && (!isTransientImageReadFailure(error) || signal.aborted || this.disposed)) this.reset(); throw error; }
   }
 }
 async function post<T>(path: string, body: unknown, key: string, signal?: AbortSignal): Promise<T> {

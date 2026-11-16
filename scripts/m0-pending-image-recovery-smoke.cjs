@@ -13,6 +13,7 @@ const { png, sha256 } = require('./helpers/image-variant-fixture.cjs');
 const playwright = require(process.env.M0_PLAYWRIGHT_MODULE_PATH || path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'));
 const executablePath = process.env.M0_CHROMIUM_EXECUTABLE_PATH || path.join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1234/chrome-win64/chrome.exe');
 const FRONTEND = 'https://localhost:8080', ROOT = '/Root/Content/timelines', CONTAINER = 'timeline-local-app-1';
+const transientReads = process.argv.includes('--transient-image-reads');
 const docker = (args, input) => execFileSync('docker', args, { input, encoding: 'utf8', windowsHide: true, timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 const uuid = crypto.randomUUID(), prefix = 'q-pending-image-' + uuid;
 const directory = path.join(local.ROOT, 'pending-image-recovery', uuid);
@@ -72,6 +73,13 @@ async function run() {
     const context = await browser.newContext({ ignoreHTTPSErrors: false, viewport: { width: 1440, height: 1100 } }); page = await context.newPage();
     const wire = []; let hasPermissionRequests = 0;
     page.on('request', request => { const url = new URL(request.url()); if (/\/HasPermission$/i.test(url.pathname)) hasPermissionRequests++; if (url.origin === FRONTEND && url.pathname.startsWith('/api/')) wire.push({ method: request.method(), path: url.pathname }); });
+    const metadataPattern = '**/api/v1/images/preview-sources', sourcePattern = '**/api/v1/content/' + media.Id + '/cover';
+    const faults = { metadata: 0, original: 0 };
+    const gatewayFailure = route => route.fulfill({ status: 520, contentType: 'application/json', body: JSON.stringify({ type: 'https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-520/', status: 520, error_code: 520, cloudflare_error: true }) });
+    if (transientReads) {
+      await page.route(metadataPattern, route => faults.metadata++ === 0 ? gatewayFailure(route) : route.continue());
+      await page.route(sourcePattern, route => faults.original++ === 0 ? gatewayFailure(route) : route.continue());
+    }
     await page.goto(FRONTEND + '/timelines'); await page.getByRole('button', { name: /Login with/ }).click();
     await page.waitForURL(url => url.origin === local.AUTHORITY);
     await page.locator('input[name="Username"],input[type="email"]').first().fill(accounts.editor.loginUsername || accounts.editor.username);
@@ -99,7 +107,27 @@ console.log(JSON.stringify({operationId,requestId:input.requestId,repositoryWrit
     // must preserve the fixture rather than delete a potentially pending owner.
     report.seedIntent = seedInput; seeded = true; save();
     report.seed = JSON.parse(docker(['exec', '-i', CONTAINER, 'node', '--input-type=module', '-e', seedCode], JSON.stringify(seedInput))); save();
-    await preview(panel); await panel.getByRole('button', { name: 'Publish', exact: true }).click();
+    await preview(panel);
+    if (transientReads) {
+      await panel.locator('.image-editor-candidates [data-image-state="loaded"]').waitFor();
+      const beforeRepeat = wire.filter(item => item.path === '/api/v1/content/' + media.Id + '/cover').length;
+      await preview(panel);
+      assert.equal(wire.filter(item => item.path === '/api/v1/content/' + media.Id + '/cover').length, beforeRepeat, 'Successful originals are reused after fresh metadata.');
+      assert.ok(faults.metadata >= 3 && faults.original >= 2, 'Both failed reads must have been retried.');
+      report.checks.push('Transient 520 metadata/original failures recover once; repeated preview reuses verified original bytes');
+      await panel.screenshot({ path: path.join(directory, 'transient-read-recovered.png') });
+      let entered, resume;
+      const started = new Promise(resolve => { entered = resolve; });
+      const stalled = route => new Promise(resolve => { resume = async () => { await route.abort().catch(() => {}); resolve(); }; entered(); });
+      await page.route(metadataPattern, stalled);
+      await panel.getByRole('button', { name: 'Generate preview', exact: true }).click(); await started;
+      await panel.getByRole('button', { name: 'Cancel preview', exact: true }).click();
+      assert.equal(await panel.getByRole('button', { name: 'Generate preview', exact: true }).isEnabled(), true);
+      await resume(); await page.unroute(metadataPattern, stalled);
+      report.checks.push('A stalled preview can be cancelled without locking selection or publishing');
+      await preview(panel);
+    }
+    await panel.getByRole('button', { name: 'Publish', exact: true }).click();
     await panel.getByRole('alert').filter({ hasText: 'blocked before writing' }).waitFor({ timeout: 120000 });
     assert.equal(await panel.getByRole('button', { name: 'Retry publication', exact: true }).count(), 0);
     assert.equal(await panel.locator('.image-editor-candidates input').first().isEnabled(), true);
@@ -150,4 +178,4 @@ console.log(JSON.stringify({operationId,requestId:input.requestId,repositoryWrit
     save(); console.log(JSON.stringify({ passed: report.passed, checks: report.checks.length, cleanupPassed: report.cleanupPassed, report: path.join(directory, 'report.json') }));
   }
 }
-run().catch(error => { console.error(error.message); process.exitCode = 1; });
+run().catch(error => { console.error(error.message || `${error.name || 'Error'} (${error.code || 'no code'}) at ${String(error.stack || '').split('\n')[1] || 'startup'}`); process.exitCode = 1; });

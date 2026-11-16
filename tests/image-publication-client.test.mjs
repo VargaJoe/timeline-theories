@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from '../client/node_modules/typescript/lib/typescript.js';
+import { imageReadRetryModuleUrl } from './helpers/image-read-retry-module.mjs';
 
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const native = moduleUrl(`export const nativeRequest=(...args)=>globalThis.imagePublicationFixture.request(...args);
@@ -14,6 +15,7 @@ const context = moduleUrl(`export const captureOperationContext=()=>()=>{if(glob
 const config = moduleUrl(`export const environment={projectRoot:'/Root/Fixture'};`);
 let source = ts.transpileModule(fs.readFileSync(new URL('../client/services/imageVariantService.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 for (const [from, to] of [['../configuration', config], ['./nativeApi', native], ['./sensenet', context], ['../utils/posterStripLayout.mjs', new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href]]) source = source.replaceAll(`'${from}'`, JSON.stringify(to));
+source = source.replace("from '../utils/imageReadRetry'", `from '${imageReadRetryModuleUrl}'`);
 const { ImagePublication, OriginalImageUpload, imageCapabilities, imagePresentation, sourceForGeneration } = await import(moduleUrl(source));
 
 test('uncertain image recovery retains its exact step key, requires explicit stopped confirmation and accepts only zero-write matching results', async () => {
