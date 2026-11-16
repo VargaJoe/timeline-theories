@@ -3,6 +3,7 @@ import { applyNativeCommands, acknowledgeNativeCommands, nativeCoverPayload, nat
 import { assertOperations, captureOperationContext } from './sensenet';
 import type { GeneratedImageSet, ImageGenerationSource } from '../utils/imageGenerator';
 import type { ImageDescriptor } from '../utils/imageVariants';
+import { MAX_POSTER_SOURCES as MAX_PREVIEW_SOURCES } from '../utils/posterStripLayout.mjs';
 
 export interface ImagePresentation extends ImageDescriptor { setId?: number; recipe?: GeneratedImageSet['recipe']; }
 export interface ImageCapabilities { available: boolean; protocol?: string; }
@@ -23,9 +24,86 @@ export async function sourceForGeneration(id: number, signal: AbortSignal): Prom
   return { id, url: `/api/v1/content/${id}/cover` };
 }
 export async function originalImageBlob(source: ImageGenerationSource, signal: AbortSignal): Promise<Blob> {
-  const response = await nativeResponse(`/content/${source.id}/cover`, { signal });
+  const response = await nativeResponse(`/content/${source.id}/cover`, { signal, cache: 'no-store' });
   if (!response.ok) throw new Error('The original cover is unavailable with your current permissions.');
   return response.blob();
+}
+
+interface PreviewSourceMetadata { id: number; url: string; version: string; }
+interface PreviewSourceResponse { owner: NativeSnapshot; sources: PreviewSourceMetadata[]; }
+const MAX_PREVIEW_CACHE_BYTES = 32 * 1024 * 1024;
+const previewVersion = (value: unknown): value is string => typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
+
+/** Private bytes belong to one mounted editor and its original operation context. */
+export class ImagePreviewSourceSession {
+  private readonly checkContext = captureOperationContext();
+  private readonly cache = new Map<number, { version: string; blob: Blob }>();
+  private cacheBytes = 0;
+  private epoch = 0;
+  private disposed = false;
+  private readonly ownerId: number;
+  private readonly maxEntries: number;
+  private readonly maxBytes: number;
+  constructor(ownerId: number, limits: { maxEntries?: number; maxBytes?: number } = {}) {
+    this.ownerId = ownerId;
+    this.maxEntries = Math.min(MAX_PREVIEW_SOURCES, Math.max(0, Math.floor(limits.maxEntries ?? MAX_PREVIEW_SOURCES)));
+    this.maxBytes = Math.min(MAX_PREVIEW_CACHE_BYTES, Math.max(0, Math.floor(limits.maxBytes ?? MAX_PREVIEW_CACHE_BYTES)));
+  }
+  private reset(): void { this.epoch++; this.cache.clear(); this.cacheBytes = 0; }
+  dispose(): void { this.disposed = true; this.reset(); }
+  private check(signal: AbortSignal, epoch: number): void {
+    signal.throwIfAborted();
+    if (this.disposed || epoch !== this.epoch) throw new DOMException('Image preview source session ended.', 'AbortError');
+    this.checkContext();
+  }
+  private remove(id: number): void {
+    const entry = this.cache.get(id);
+    if (entry) { this.cacheBytes -= entry.blob.size; this.cache.delete(id); }
+  }
+  async prepare(ids: number[], signal: AbortSignal): Promise<{
+    owner: NativeSnapshot;
+    sources: ImageGenerationSource[];
+    fetchSource: (source: ImageGenerationSource, signal: AbortSignal) => Promise<Blob>;
+  }> {
+    const sourceIds = [...ids], epoch = ++this.epoch;
+    try {
+      this.check(signal, epoch);
+      if (!sourceIds.length || sourceIds.length > MAX_PREVIEW_SOURCES || new Set(sourceIds).size !== sourceIds.length || sourceIds.some(id => !Number.isSafeInteger(id) || id < 1)) throw new Error('Select valid, distinct image sources.');
+      // Always renew caller Open access and the original version, including on
+      // regeneration. Reusing bytes never reuses a previous permission decision.
+      const result = await nativeRequest<PreviewSourceResponse>('/images/preview-sources', {
+        method: 'POST', body: JSON.stringify({ ownerId: this.ownerId, sourceIds }), signal, cache: 'no-store',
+      });
+      this.check(signal, epoch);
+      if (result?.owner?.Id !== this.ownerId || !previewVersion(result.owner.revision) || !Array.isArray(result.sources) || result.sources.length !== sourceIds.length ||
+        result.sources.some((source, index) => source?.id !== sourceIds[index] || source.url !== `/api/v1/content/${sourceIds[index]}/cover` || !previewVersion(source.version))) {
+        throw new Error('The image service returned an invalid original-source snapshot.');
+      }
+      const metadata = new Map(result.sources.map(source => [source.id, { ...source }]));
+      for (const source of metadata.values()) if (this.cache.get(source.id)?.version !== source.version) this.remove(source.id);
+      const sources = result.sources.map(({ id, url }) => ({ id, url }));
+      return { owner: result.owner, sources, fetchSource: async (source, sourceSignal) => {
+        try {
+          this.check(signal, epoch); this.check(sourceSignal, epoch);
+          const original = metadata.get(source.id);
+          if (!original || source.url !== original.url) throw new Error('Prepare the current image sources before generating a preview.');
+          const cached = this.cache.get(source.id);
+          if (cached?.version === original.version) {
+            // Touch only after this preparation's fresh caller-authorized read.
+            this.cache.delete(source.id); this.cache.set(source.id, cached); return cached.blob;
+          }
+          const blob = await originalImageBlob(source, sourceSignal);
+          this.check(signal, epoch); this.check(sourceSignal, epoch);
+          if (this.maxEntries > 0 && blob.size > 0 && blob.size <= this.maxBytes) {
+            this.remove(source.id);
+            while (this.cache.size >= this.maxEntries || this.cacheBytes + blob.size > this.maxBytes) this.remove(this.cache.keys().next().value!);
+            this.cache.set(source.id, { version: original.version, blob }); this.cacheBytes += blob.size;
+          }
+          return blob;
+        } catch (error) { if (epoch === this.epoch) this.reset(); throw error; }
+      } };
+    } catch (error) { if (epoch === this.epoch) this.reset(); throw error; }
+  }
 }
 async function post<T>(path: string, body: unknown, key: string, signal?: AbortSignal): Promise<T> {
   return nativeRequest<T>(path, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': key }, signal });

@@ -18,6 +18,11 @@ export const imagePresentation=async()=>globalThis.__editorPreviewState.current;
 export const imageSets=async()=>[];
 export const sourceForGeneration=async id=>({id});
 export const originalImageBlob=${forbidden},deleteImageSet=${forbidden},restoreOriginalPresentation=${forbidden};
+export class ImagePreviewSourceSession{
+  constructor(ownerId){this.ownerId=ownerId;globalThis.__editorPreviewState.sourceSessions.push(this);}
+  async prepare(ids,signal){const state=globalThis.__editorPreviewState;state.sourcePrepares.push({ownerId:this.ownerId,ids:[...ids],signal});return{owner:{Id:this.ownerId,revision:'fixture-revision'},sources:ids.map(id=>({id})),fetchSource:${forbidden}};}
+  dispose(){this.disposed=true;}
+}
 export class ImagePublication{constructor(){const publication=globalThis.__editorPreviewState.publication;if(!publication)throw Error('Publication is forbidden in preview tests');return publication;}}
 export class OriginalImageUpload{constructor(){throw Error('Upload is forbidden in preview tests');}}
 `);
@@ -28,6 +33,7 @@ const imports = {
 export const subscribePermissions=listener=>{const state=globalThis.__editorPreviewState;state.listeners.add(listener);return()=>state.listeners.delete(listener);};`),
   '../context/useSharedAuth': moduleUrl('export const useSharedAuth=()=>({accessToken:"fixture-owner",user:{sub:"fixture-owner"},isLoading:false});'),
   '../utils/imageGenerator': moduleUrl('export const generateImageVariants=input=>globalThis.__editorPreviewState.generate(input);'),
+  '../utils/posterStripLayout.mjs': new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href,
   '../services/nativeApi': moduleUrl('export class NativeApiError extends Error{};export const nativeSnapshot=async Id=>({Id,revision:"fixture-revision"});'),
 };
 let compiled = ts.transpileModule(fs.readFileSync(new URL('../client/components/ImagePresentationEditor.tsx', import.meta.url), 'utf8')
@@ -70,7 +76,7 @@ function host(props) {
 function fixture() {
   const previous = { create: URL.createObjectURL, revoke: URL.revokeObjectURL, fetch: globalThis.fetch };
   const state = { current: { state: 'active', generationId: 'published-set', recipe: { sourceIds: [11, 12] }, variants: [] },
-    listeners: new Set(), generations: [], created: [], revoked: [],
+    listeners: new Set(), sourceSessions: [], sourcePrepares: [], generations: [], created: [], revoked: [],
     generate(input) { return new Promise(resolve => this.generations.push({ input, resolve })); },
     result(index) { const input = this.generations[index].input; return { recipe: { sourceIds: input.sources.map(source => source.id) },
       variants: [{ name: 'w1200', width: 1200, height: 600, mimeType: 'image/webp', byteLength: 4, blob: new Blob(['set' + index]) }] }; },
@@ -82,6 +88,30 @@ function fixture() {
   globalThis.__editorPreviewState = state;
   return state;
 }
+
+test('manual selection and random preview retain twelve posters with a bounded thirteenth', async () => {
+  const state = fixture(); state.current = { state: 'legacy' };
+  const ui = host({ ownerId: 90, kind: 'timeline-composite', candidates: Array.from({ length: 13 }, (_, index) => ({ id: index + 1, title: 'Poster ' + (index + 1), url: '/original/' + (index + 1) })), onSaved: () => { throw Error('Count test must not publish'); } });
+  const boxes = tree => find(tree, node => node.props?.className === 'image-editor-candidates').props.children.map(label => find(label, node => node.type === 'input'));
+  try {
+    ui.flush(); await tick(); let tree = ui.flush();
+    for (let index = 0; index < 10; index++) { const box = boxes(tree)[index]; assert.equal(box.props.disabled, false); box.props.onChange(); tree = ui.flush(); }
+    button(tree, 'Next').props.onClick(); tree = ui.flush();
+    for (let index = 0; index < 2; index++) { boxes(tree)[index].props.onChange(); tree = ui.flush(); }
+    assert.equal(boxes(tree)[2].props.checked, false); assert.equal(boxes(tree)[2].props.disabled, true, 'only the thirteenth selection is blocked');
+    assert.equal(boxes(tree)[0].props.disabled, false, 'selected posters remain removable at the maximum');
+    button(tree, 'Generate preview').props.onClick(); await tick();
+    assert.deepEqual(state.generations[0].input.sources.map(source => source.id), Array.from({ length: 12 }, (_, index) => index + 1));
+    state.generations[0].resolve(state.result(0)); await tick(); tree = ui.flush();
+    assert.equal(byType(preview(tree), 'PosterFan').props.count, 12);
+    button(tree, 'Random selection').props.onClick(); await tick();
+    const randomIds = state.generations[1].input.sources.map(source => source.id);
+    assert.equal(randomIds.length, 12); assert.equal(new Set(randomIds).size, 12);
+    assert.ok(randomIds.every(id => id >= 1 && id <= 13));
+    state.generations[1].resolve(state.result(1)); await tick();
+    assert.equal(byType(preview(ui.flush()), 'PosterFan').props.count, 12);
+  } finally { ui.unmount(); state.restore(); }
+});
 
 test('pending notPrepared recovery keeps selection locked until explicit stopped recovery is terminal', async () => {
   const state = fixture(), calls = [];
@@ -116,6 +146,8 @@ for (const kind of ['timeline-composite', 'media-sizes']) test(`${kind}: new gen
     assert.equal(byType(preview(tree), publishedType).props.image, state.current);
     assert.equal(byType(preview(tree), media ? 'TimelineCover' : 'LazyImage'), undefined);
     button(tree, media ? 'Prepare sizes' : 'Generate preview').props.onClick(); await tick();
+    assert.equal(state.sourcePrepares.length, 1);
+    assert.deepEqual(state.sourcePrepares[0].ids, media ? [11] : [11, 12], 'Prepare passes the complete selection to one fresh source metadata request.');
     const first = state.result(0); state.generations[0].resolve(first); await tick(); tree = ui.flush();
     const firstPreview = byType(preview(tree), generatedType), firstUrl = state.created[0].url;
     assert.equal(firstPreview.props[media ? 'src' : 'source'], firstUrl);
@@ -134,5 +166,6 @@ for (const kind of ['timeline-composite', 'media-sizes']) test(`${kind}: new gen
     assert.equal(state.created[0].blob, first.variants[0].blob); assert.equal(state.created[1].blob, second.variants[0].blob);
     assert.deepEqual(state.revoked, [firstUrl]);
     ui.unmount(); assert.deepEqual(state.revoked, state.created.map(item => item.url)); assert.equal(state.listeners.size, 0);
+    assert(state.sourceSessions.every(session => session.disposed), 'Unmount releases the private original-byte session.');
   } finally { ui.unmount(); state.restore(); }
 });

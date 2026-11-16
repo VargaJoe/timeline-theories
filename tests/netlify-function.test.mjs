@@ -41,13 +41,9 @@ async function setup(t, extra = {}) {
   const server = https.createServer(tls, async (req, res) => {
     try {
       const url = new URL(req.url, 'https://localhost'), credential = req.headers.apikey || req.headers.authorization?.replace(/^Bearer /, '');
-      state.requests.push({ method: req.method, path: url.pathname, permissions: url.searchParams.get('permissions'), credential });
-      if (url.pathname.endsWith('/GetCurrentUser')) return send(res, credential === 'rejected' ? 401 : 200, { Id: credential === 'other-user' ? 99 : 42, Name: 'AuthenticatedFixture' });
+      state.requests.push({ method: req.method, path: url.pathname, permissions: url.searchParams.get('permissions'), select: url.searchParams.get('$select'), expand: url.searchParams.get('$expand'), credential });
+      if (url.pathname.endsWith('/GetCurrentUser')) return send(res, credential === 'rejected' ? 401 : 200, { Id: credential === 'other-user' ? 99 : 42, Name: 'AuthenticatedFixture', Path: '/Root/IMS/Public/AuthenticatedFixture' });
       if (await imageFixture.handle(req, res, url)) return;
-      if (url.pathname.endsWith('/HasPermission')) {
-        if (url.searchParams.get('permissions') === 'Save' && state.onSave) { const callback = state.onSave; state.onSave = null; await callback(); }
-        return send(res, 200, url.searchParams.get('permissions') === 'Save' ? state.allowSave : state.allowRead && (state.allowRootRead || url.pathname.includes('content(10)')));
-      }
       if (url.pathname.endsWith('/GetSchema')) {
         if (!state.schemaAvailable) return send(res, 200, []);
         const type = url.searchParams.get('contentTypeName');
@@ -55,7 +51,7 @@ async function setup(t, extra = {}) {
         return send(res, 200, [{ ContentTypeName: type, FieldSettings: [...new Set(names)].map(Name => ({ Name, ReadOnly: false })) }]);
       }
       if (url.pathname.endsWith('/AllowedChildTypes') || url.pathname.endsWith('/EffectiveAllowedChildTypes')) return send(res, 200, { results: [{ Name: 'File' }, {Name:'Folder'}] });
-      if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0' });
+      if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0', ...(url.searchParams.get('$expand')?.includes('Actions') ? { Actions: ['Add','Edit','Delete'].map(Name=>({Name,Forbidden:!state.allowSave})), EffectiveAllowedChildTypes: [{Name:'MediaItem'},{Name:'BookMediaItem'},{Name:'Folder'},{Name:'File'}] } : {}) });
       const target = url.pathname.match(/^\/OData.svc\/content\((\d+)\)$/);
       if (target) {
         const id = Number(target[1]), row = contents.get(id);
@@ -526,7 +522,8 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   const uploadRequests = state.requests.slice(uploadRequestStart);
   assert.equal(state.images.binaryReads.filter(row=>row.property==='CoverImageBin').length,originalReadsBeforeUpload,'variant upload never redownloads originals');
   assert.equal(uploadRequests.some(row=>/ImageAsset|GetImagePresentation/.test(row.path)),false);
-  assert.ok(uploadRequests.some(row => row.permissions === 'AddNew'));
+  assert.ok(uploadRequests.some(row => row.expand?.split(',').includes('Actions') && row.expand.split(',').includes('EffectiveAllowedChildTypes')));
+  assert.equal(uploadRequests.some(row => /HasPermission/i.test(row.path)), false);
   assert.equal(interrupted.error.details.uncertain, true); assert.equal((await app.store.pendingMutations()).length, 1);
   const uploaded = (await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1')).data;
   assert.equal((await app.store.pendingMutations()).length, 0); assert.equal(state.images.uploads, 1);
@@ -653,7 +650,7 @@ test('deadline before actual native dispatch is a terminal no-write failure and 
   const original = StockRepository.prototype.request;
   StockRepository.prototype.request = async function (url, options) {
     const result = await original.call(this, url, options), parsed = new URL(url);
-    if (parsed.pathname.endsWith('/HasPermission') && parsed.searchParams.get('permissions') === 'AddNew') controller.abort();
+    if (parsed.searchParams.get('$expand')?.split(',').includes('Actions')) controller.abort();
     return result;
   };
   t.after(() => { StockRepository.prototype.request = original; });
@@ -827,4 +824,50 @@ test('cancelling queued image work prevents any repository write or automatic jo
   const replay = await f.app.handleRequest(f.input());
   assert.equal(replay.status, 409); assert.equal((await replay.json()).error.code, 'job_cancelled');
   assert.equal(f.invocations.length, 0);
+});
+
+async function previewSourcesFixture(t, count = 4) {
+  const f = await setup(t), stamp = { ModificationDate: '2026-11-01T00:00:00Z', Version: 'V1.0', VersionId: 1 };
+  const owner = { ...f.content, ...stamp, Id: 20, Type: 'Timeline', Name: 'timeline', Path: f.config.projectRoot + '/Timelines/timeline', CoverImageBin: null };
+  f.contents.set(owner.Id, owner);
+  const ids = Array.from({ length: count }, (_, index) => 100 + index);
+  for (const id of ids) f.contents.set(id, { ...f.content, ...stamp, Id: id, Name: 'poster-' + id, Path: f.config.projectRoot + '/MediaLibrary/poster-' + id, CoverImageBin: { __mediaresource: { content_type: 'image/png', media_etag: 'same-binary-etag', media_src: 'same-binary-url' } } });
+  const request = (body = { ownerId: owner.Id, sourceIds: ids }, options = {}) => f.app.handleRequest(f.request('images/preview-sources', { method: 'POST', body, ...options }));
+  return { ...f, owner, ids, requestSources: request };
+}
+
+test('preview batch returns ordered minimal source validators and one fresh owner revision without original reads or writes', async t => {
+  const f = await previewSourcesFixture(t, 12), response = await f.requestSources();
+  assert.equal(response.status, 200, await response.clone().text()); const { data } = await response.json();
+  assert.equal(data.owner.Id, 20); assert.match(data.owner.revision, /^sha256:[a-f0-9]{64}$/);
+  assert.deepEqual(data.sources.map(source => source.id), f.ids);
+  for (const source of data.sources) { assert.equal(source.url, `/api/v1/content/${source.id}/cover`); assert.match(source.version, /^sha256:[a-f0-9]{64}$/); assert.deepEqual(Object.keys(source).sort(), ['id', 'url', 'version']); }
+  const minimal = f.state.requests.filter(request => request.select?.includes('CoverImageUrl'));
+  assert.equal(minimal.length, 12, 'Exactly one minimal source GET per image.');
+  assert(minimal.every(request => request.select.includes('ModificationDate') && request.select.includes('Version') && !request.expand));
+  assert.equal(f.state.images.binaryReads.length, 0); assert.equal(f.state.patches, 0); assert.equal(f.invocations.length, 0);
+  assert(!f.state.requests.some(request => /HasPermission/i.test(request.path)));
+});
+
+test('preview source cache validators detect actual repository version changes even when binary URL and ETag do not change', async t => {
+  const f = await previewSourcesFixture(t, 1), read = async () => { const response = await f.requestSources(); assert.equal(response.status, 200, await response.clone().text()); return (await response.json()).data.sources[0].version; };
+  const original = await read(); assert.equal(await read(), original);
+  f.contents.get(f.ids[0]).Version = 'V2.0'; f.contents.get(f.ids[0]).ModificationDate = '2026-11-02T00:00:00Z';
+  assert.notEqual(await read(), original);
+});
+
+test('preview source batch fails as a whole on revoked Open or missing source version', async t => {
+  const f = await previewSourcesFixture(t, 4);
+  f.state.deniedIds.add(f.ids[2]); let response = await f.requestSources(); assert.equal(response.status, 403, await response.clone().text()); assert.equal((await response.json()).data, undefined);
+  f.state.deniedIds.clear(); delete f.contents.get(f.ids[1]).Version;
+  response = await f.requestSources(); assert.equal(response.status, 503, await response.clone().text()); assert.equal((await response.json()).error.code, 'backend_revision_unavailable');
+  assert.equal(f.state.patches, 0); assert.equal(f.invocations.length, 0);
+});
+
+test('preview batch rejects excessive, duplicate, non-media, cross-owner and unknown inputs before any write', async t => {
+  const f = await previewSourcesFixture(t, 4);
+  for (const body of [{ ownerId: 20, sourceIds: Array.from({ length: 13 }, (_, i) => i + 100) }, { ownerId: 20, sourceIds: [100, 100] }, { ownerId: 20, sourceIds: [] }, { ownerId: 20, sourceIds: [20] }, { ownerId: 100, sourceIds: [101] }, { ownerId: 20, sourceIds: [100], injected: true }]) {
+    const response = await f.requestSources(body); assert.equal(response.status, 400, await response.clone().text());
+  }
+  assert.equal(f.state.patches, 0); assert.equal(f.invocations.length, 0);
 });

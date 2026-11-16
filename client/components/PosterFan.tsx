@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { posterStripLayout } from '../utils/posterStripLayout.mjs';
+import { MAX_POSTER_SOURCES, posterStripLayout } from '../utils/posterStripLayout.mjs';
 import './PosterFan.css';
 
 export interface PosterFanProps {
@@ -12,9 +12,9 @@ type FanStyle = CSSProperties & { [name: `--${string}`]: string | number };
 
 /** Decorative windows into one already-authorized poster-strip bitmap. */
 export function PosterFan({ source, count, label }: PosterFanProps) {
-  if (!source || !Number.isSafeInteger(count) || count < 1 || count > 4) return null;
+  if (!source || !Number.isSafeInteger(count) || count < 1 || count > MAX_POSTER_SOURCES) return null;
   const slots = posterStripLayout(count);
-  const cardWidth = [120, 108, 104, 100][count - 1];
+  const cardWidth = count > 4 ? 72 : [120, 108, 104, 100][count - 1];
   const middle = (count - 1) / 2;
   const style: FanStyle = { '--poster-fan-source': `url(${JSON.stringify(source)})` };
 
@@ -23,10 +23,11 @@ export function PosterFan({ source, count, label }: PosterFanProps) {
       // Exclude the saved card border and its shadow from the movable face.
       const crop = { x: slot.x + 2, y: slot.y + 2, width: slot.width - 4, height: slot.height - 4 };
       const offset = index - middle;
-      const angle = offset * (count === 2 ? 18 : count === 3 ? 13 : 10.5);
-      const centerY = count === 1 ? 96 : count === 2 ? 102 : 96 + Math.abs(offset) * (count === 3 ? 10 : 8);
+      const angle = count > 4 ? offset / middle * 18 : offset * (count === 2 ? 18 : count === 3 ? 13 : 10.5);
+      const centerY = count > 4 ? 96 + Math.abs(offset / middle) * 12 : count === 1 ? 96 : count === 2 ? 102 : 96 + Math.abs(offset) * (count === 3 ? 10 : 8);
+      const spacing = count > 4 ? Math.min(57, 280 / (count - 1)) : 57;
       const card: FanStyle = {
-        left: `${(200 + offset * 57) / 4}%`, top: `${centerY / 2}%`,
+        left: `${(200 + offset * spacing) / 4}%`, top: `${centerY / 2}%`,
         width: `${cardWidth / 4}%`, height: `${cardWidth * crop.height / crop.width / 2}%`,
         '--poster-fan-angle': `${angle}deg`,
         '--poster-fan-layer': count - Math.round(Math.abs(offset) * 2) + (index >= middle ? 1 : 0),

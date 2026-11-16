@@ -2,6 +2,10 @@
 
 Verified locally on 2026-11-15/16, starting from `develop` `d7bf794f`, on `feature/agent-api-cover-publication`. The application remains React/Vite plus the existing Netlify Functions API. SenseNet remains the image/content store.
 
+## Follow-up before merge (2026-11-16)
+
+The owner requested zero server-side permission probes, faster preview generation and more than four posters. The same PR now uses explicit caller Actions/Forbidden plus compound descriptor reads, a minimal preview-source batch and private versioned source reuse, and supports up to twelve posters in one atlas. See [current performance, permission and poster verification](cover-preview-performance.md). The dated tables below retain the original publication/recovery acceptance; they are not relabelled as a new production proof.
+
 ## Publication changes
 
 The controlled stock-HTTPS scenario performed 107 backend requests to prepare a two-source draft inside the former 25-second synchronous budget. This demonstrates latency sensitivity; it does not establish the physical cause of the historical production Cloudflare 502.

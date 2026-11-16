@@ -1,5 +1,5 @@
 import { imageRequestQueue } from './imageLoading';
-import { posterStripLayout, type PosterSlot } from './posterStripLayout.mjs';
+import { MAX_POSTER_SOURCES, posterStripLayout, type PosterSlot } from './posterStripLayout.mjs';
 export { posterStripLayout } from './posterStripLayout.mjs';
 export type { PosterSlot } from './posterStripLayout.mjs';
 
@@ -187,7 +187,7 @@ function renderImage(canvas: HTMLCanvasElement, kind: GenerateImageVariantsOptio
   sources.forEach((source, index) => {
     const slot = slots[index];
     context.save();
-    if (sources.length > 1) {
+    if (sources.length > 1 && sources.length <= 4) {
       roundedRect(context, slot); context.shadowColor = 'rgba(0,0,0,0.3)'; context.shadowBlur = 12; context.shadowOffsetY = 4;
       context.fillStyle = '#fff'; context.fill(); context.shadowColor = 'transparent';
     }
@@ -220,7 +220,7 @@ export async function generateImageVariants(options: GenerateImageVariantsOption
   const { kind, fetchSource, assertContext = () => {}, seed } = options;
   if (seed !== undefined && (!Number.isSafeInteger(seed) || seed < 0 || seed > 2147483647)) throw new Error('Image selection seed must be an integer between 0 and 2147483647.');
   const sources = options.sources.map(source => ({ ...source }));
-  if (!['timeline-composite', 'media-sizes'].includes(kind) || !sources.length || sources.length > (kind === 'media-sizes' ? 1 : 4) ||
+  if (!['timeline-composite', 'media-sizes'].includes(kind) || !sources.length || sources.length > (kind === 'media-sizes' ? 1 : MAX_POSTER_SOURCES) ||
     new Set(sources.map(source => source.id)).size !== sources.length || sources.some(source => !Number.isSafeInteger(source.id) || source.id <= 0 || !source.url)) throw new Error('Select valid, distinct image sources.');
   const controller = new AbortController(), abort = () => controller.abort();
   options.signal?.addEventListener('abort', abort, { once: true });

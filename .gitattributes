@@ -1,0 +1,3 @@
+# Preserve the exact reviewed upstream artifact and license bytes.
+client/public/vendor/delayed-scroll-restoration-polyfill/0.1.1/index.js -text
+client/public/vendor/delayed-scroll-restoration-polyfill/0.1.1/MIT-LICENSE -text

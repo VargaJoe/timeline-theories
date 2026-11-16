@@ -101,7 +101,6 @@ export class StockRepository extends Repository {
   async read(target, options = {}) {
     const header = await this.api(target, null, { query: { '$select': HEADERS.join(','), metadata: 'no' } });
     this.scope(header, options);
-    await this.assert([{ target: header.Id, action: 'read' }]);
     const domain = TYPES.includes(header.Type);
     // GetSchema is separately permission-filtered: a caller may Open a public
     // item while receiving an empty schema list. Read the exact authorized item
@@ -147,11 +146,12 @@ export class StockRepository extends Repository {
   }
   binaryUrl(id) { return this.config.repositoryUrl + '/binaryhandler.ashx?' + new URLSearchParams({ nodeid: assertId(id), propertyname: 'CoverImageBin' }); }
   async imageSourceSnapshot(id) {
-    const data = await this.api(assertId(id), null, { query: { '$select': 'Id,Type,Path,CoverImageBin', metadata: 'no' } });
-    this.scope(data, { expectedType: 'MediaItem' });
-    await this.assert([{ target: data.Id, action: 'read' }]);
+    const data = await this.api(assertId(id), null, { query: { '$select': 'Id,Type,Path,ModificationDate,Version,CoverImageUrl,CoverImageBin', metadata: 'no' } });
+    this.scope(data);
+    if (!COVER_TYPES.has(data.Type)) fail('invalid_cover_target', 'This content does not support covers.', 400);
+    if (data.Id !== id || typeof data.ModificationDate !== 'string' || !data.ModificationDate || typeof data.Version !== 'string' || !data.Version) fail('backend_revision_unavailable', 'Source image version metadata is unavailable.', 503);
     const binary = data.CoverImageBin?.__mediaresource;
-    return { Id: data.Id, Type: data.Type, Path: data.Path, CoverImageBin: binary ? { ContentType: binary.content_type ?? null } : null };
+    return { Id: data.Id, Type: data.Type, Path: data.Path, ModificationDate: data.ModificationDate, Version: data.Version, CoverImageUrl: data.CoverImageUrl ?? null, CoverImageBin: binary ? { ContentType: binary.content_type ?? null, ETag: binary.media_etag ?? null, SnapshotToken: binary.media_src ?? null } : null };
   }
   async anonymousRead(id, { binary = false } = {}) {
     const visitor = new StockRepository(this.config, null);
@@ -161,23 +161,11 @@ export class StockRepository extends Repository {
     return row;
   }
   async coverBytes(id, options = {}) {
-    const target = await this.read(assertId(id), { ...options, image: false });
-    if (!COVER_TYPES.has(target.Type)) fail('invalid_cover_target', 'This content does not support covers.', 400);
-    await this.assert([{ target: target.Id, action: 'read' }]);
+    const target = await this.imageSourceSnapshot(assertId(id));
+    this.scope(target, options);
     const response = await this.request(this.binaryUrl(target.Id), { maxBytes: 10 * 1024 * 1024 });
     const mimeType = storedCoverMime(response.bytes, response.contentType);
     return coverBytes({ bytesBase64: response.bytes.toString('base64'), mimeType });
-  }
-
-  async assert(operations) {
-    // Stock HasPermission intentionally excludes Visitor. A concrete minimal
-    // GET uses the repository's actual read policy, including the M0 Open gate.
-    for (const op of operations) {
-      if (op.action === 'read' && !this.credential) {
-        const readable = await this.api(op.target, null, { query: { '$select': 'Id', metadata: 'no' } });
-        if (!Number.isSafeInteger(readable?.Id) || readable.Id < 1) fail('permission_denied', 'The target is unreadable or unavailable.', 403);
-      } else await super.assert([op]);
-    }
   }
 
   async list(type, { parentId, skip = 0, top = 50, search = '', includeHidden = false } = {}) {
@@ -214,14 +202,30 @@ export class StockRepository extends Repository {
   }
   async checkInventory() {
     const inventory = this.inventory(), identity = await inventory.identity();
-    if (identity.visitor || identity.Id === 6) fail('inventory_unavailable', 'Project inventory requires its configured read-only service identity.', 503);
+    if (identity.visitor || identity.Id === 6 || typeof identity.Path !== 'string' || !identity.Path.startsWith('/Root/IMS/')) fail('inventory_unavailable', 'Project inventory requires its configured read-only service identity.', 503);
     if (this.config.inventoryIdentity !== undefined && this.config.inventoryIdentity !== identity.Id) fail('inventory_unavailable', 'The inventory identity does not match its configured binding.', 503);
-    const root = await inventory.api(this.paths.root, null, { query: { '$select': 'Id,Path', metadata: 'no' } });
-    if (root?.Path !== this.paths.root || !Number.isSafeInteger(root.Id)) fail('inventory_unavailable', 'The inventory project binding is unavailable.', 503);
-    for (const target of [this.paths.root, this.paths.timelines, this.paths.media]) {
-      for (const permission of ['See', 'Open', 'OpenMinor']) if (await inventory.api(target, 'HasPermission', { query: { permissions: permission } }) !== true) fail('inventory_unavailable', 'The inventory identity lacks project read coverage.', 503);
-      for (const permission of ['Save', 'AddNew', 'Delete', 'SetPermissions']) if (await inventory.api(target, 'HasPermission', { query: { permissions: permission } }) !== false) fail('inventory_overprivileged', 'The inventory identity must have no application write permissions.', 503);
-    }
+    const roots = await Promise.all([this.paths.root, this.paths.timelines, this.paths.media].map(async target => {
+      // GetPermissions(identity) returns this identity's inherited ACE, not an
+      // aggregation of its groups. Requiring its own propagating deny proves
+      // no group allow can enable writes. Missing actions/entries prove nothing.
+      const readQuery = new URLSearchParams([['permissions', 'See'], ['permissions', 'Open'], ['permissions', 'OpenMinor'], ['$select', 'Id'], ['$filter', 'Id eq ' + identity.Id], ['$top', '1'], ['metadata', 'no']]);
+      const [readable, result, readGrants] = await Promise.all([
+        inventory.api(target, null, { query: { '$select': 'Id,Path', version: 'lastminor', metadata: 'no' } }),
+        inventory.api(target, 'GetPermissions', { query: { identity: identity.Path } }),
+        // GetAllowedUsers calls the effective evaluator for all requested bits.
+        // A summarized own ACE or lastminor GET alone cannot prove See+Open.
+        inventory.api(target, 'GetAllowedUsers', { query: readQuery }),
+      ]);
+      if (readable?.Path !== target || !Number.isSafeInteger(readable.Id) || readable.Id < 1) fail('inventory_unavailable', 'The inventory project binding is unavailable.', 503);
+      const allowedUsers = Array.isArray(readGrants) ? readGrants : readGrants?.results;
+      if (!Array.isArray(allowedUsers) || !allowedUsers.some(user => user?.Id === identity.Id)) fail('inventory_unavailable', 'The inventory identity lacks effective project read coverage.', 503);
+      const entries = Array.isArray(result) ? result : result?.results;
+      if (!Array.isArray(entries) || entries.length !== 1 || entries[0]?.identity?.id !== identity.Id || entries[0]?.identity?.path !== identity.Path || entries[0]?.propagates !== true) fail('inventory_unavailable', 'The inventory identity has no verifiable inherited permission entry.', 503);
+      const permissions = entries[0].permissions;
+      for (const permission of ['Save', 'AddNew', 'Delete', 'SetPermissions']) if (permissions?.[permission]?.value !== 'deny') fail('inventory_overprivileged', 'The inventory identity requires explicit inherited application write denials.', 503);
+      return readable;
+    }));
+    const root = roots[0];
     return { identityId: identity.Id, projectId: root.Id, projectRoot: this.paths.root, repositoryUrl: this.config.repositoryUrl, completeness: 'configured-read-all-project' };
   }
   async inventoryRows(expression) {
@@ -244,7 +248,7 @@ export class StockRepository extends Repository {
     try {
       await this.images.managedTree(timeline, rows.filter(row => row.Type !== 'TimelineEntry' || row.ParentId !== timeline.Id), { deleting: purpose === 'delete' });
       const entries = rows.filter(row => row.Type === 'TimelineEntry' && row.ParentId === timeline.Id);
-      await this.assert(entries.flatMap(row => [{ target: row.Id, action: 'read' }, { target: row.Id, action: purpose === 'order' ? 'update' : 'delete' }]));
+      await this.assert(entries.map(row => ({ target: row.Id, action: purpose === 'order' ? 'update' : 'delete' })));
       const children = [];
       for (const row of entries) {
         const child = await this.read(row.Id, { expectedType: 'TimelineEntry' });
@@ -262,7 +266,6 @@ export class StockRepository extends Repository {
     const rows = await this.inventoryRows('+TypeIs:TimelineEntry +MediaItem:' + media.Id), readableReferences = [];
     for (const row of rows) {
       try {
-        await this.assert([{ target: row.Id, action: 'read' }]);
         const entry = await this.read(row.Id, { expectedType: 'TimelineEntry' });
         if (entry.MediaItem !== media.Id) fail('inventory_unavailable', 'Reference inventory changed during the snapshot.', 503);
         readableReferences.push({ id: row.Id, parentId: row.ParentId });

@@ -17,9 +17,9 @@ const config = moduleUrl("export const repositoryUrl='https://repository.fixture
 const native = moduleUrl('export const nativeResponse=(...args)=>globalThis.__imageNative(...args);');
 const loadingUrl = compile('utils/imageLoading.ts', { '../configuration': config, '../services/nativeApi': native });
 const { createImageRequestQueue, fetchImageBlob, nativeImagePresentationTarget } = await import(loadingUrl);
-const variantsUrl = compile('utils/imageVariants.ts');
-const { selectImageVariant, selectImageUrl, posterStripCount } = await import(variantsUrl);
 const stripUrl = new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href;
+const variantsUrl = compile('utils/imageVariants.ts', { './posterStripLayout.mjs': stripUrl });
+const { selectImageVariant, selectImageUrl, posterStripCount } = await import(variantsUrl);
 const { generateImageVariants, imageOutputSizes, inspectImageSource, normalizeGeneratedPng, posterStripLayout } = await import(compile('utils/imageGenerator.ts', { './imageLoading': loadingUrl, './posterStripLayout.mjs': stripUrl }));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; }
@@ -39,10 +39,10 @@ test('responsive selection uses actual CSS width and capped DPR, with no unsafe 
 });
 
 test('fan layout accepts only active bounded strip hints, without requiring private recipe metadata', () => {
-  for (const count of [1, 2, 3, 4]) assert.equal(posterStripCount({ state: 'active', layout: { template: 'poster-strip-v1', count } }), count);
+  for (const count of [1, 2, 3, 4, 5, 8, 12]) assert.equal(posterStripCount({ state: 'active', layout: { template: 'poster-strip-v1', count } }), count);
   for (const image of [undefined, { state: 'active' }, { state: 'legacy', layout: { template: 'poster-strip-v1', count: 3 } },
     ...['blocked', 'stale', 'missing'].map(state => ({ state, layout: { template: 'poster-strip-v1', count: 3 } })),
-    ...[0, 5, -1, 2.5, '3', null, NaN, Infinity].map(count => ({ state: 'active', layout: { template: 'poster-strip-v1', count } })),
+    ...[0, 13, -1, 2.5, '3', null, NaN, Infinity].map(count => ({ state: 'active', layout: { template: 'poster-strip-v1', count } })),
     { state: 'active', layout: { template: 'unknown', count: 3 } }]) assert.equal(posterStripCount(image), undefined);
 });
 
@@ -88,16 +88,29 @@ test('native bytes use native binding and repository bearer is never sent to a t
   } finally { globalThis.fetch = oldFetch; globalThis.window = oldWindow; delete globalThis.__imageNative; }
 });
 
-test('generator preserves native resolution and contains all 1–4 poster groups', () => {
+test('generator preserves native resolution and contains all 1–12 poster groups', () => {
   assert.deepEqual(imageOutputSizes('media-sizes', [{ width: 360, height: 480 }]), [{ width: 160, height: 213 }, { width: 320, height: 427 }]);
   assert.deepEqual(imageOutputSizes('media-sizes', [{ width: 80, height: 120 }]), [{ width: 80, height: 120 }]);
   assert.deepEqual(imageOutputSizes('timeline-composite', [{ width: 360, height: 480 }]).map(size => size.width), [400, 800, 1200]);
   assert(imageOutputSizes('timeline-composite', [{ width: 50, height: 70 }])[0].width < 400);
-  for (let count = 1; count <= 4; count++) {
+  for (let count = 1; count <= 12; count++) {
     const slots = posterStripLayout(count);
     assert.equal(slots.length, count);
     for (const slot of slots) assert(slot.x >= 0 && slot.x + slot.width <= 400 && slot.y >= 0 && slot.y + slot.height <= 200);
+    assert.deepEqual(imageOutputSizes('timeline-composite', Array.from({ length: count }, () => ({ width: 360, height: 480 }))).map(size => size.width), [400, 800, 1200]);
+    if (count <= 4) {
+      const width = count === 1 ? 120 : Math.min(60 + 140 / count, 90), height = count === 1 ? 160 : 140;
+      const left = (400 - (count * width + (count - 1) * 4)) / 2;
+      assert.deepEqual(slots, Array.from({ length: count }, (_, index) => ({ x: left + index * (width + 4), y: (200 - height) / 2, width, height, radius: count === 1 ? 8 : 6 })), 'previously published 1–4 atlas crops stay exact');
+    } else {
+      for (let index = 0; index < slots.length; index++) for (let previous = 0; previous < index; previous++) {
+        const a = slots[index], b = slots[previous];
+        assert.ok(a.x >= b.x + b.width || b.x >= a.x + a.width || a.y >= b.y + b.height || b.y >= a.y + a.height, 'every saved face remains complete without atlas overlap');
+      }
+      assert.ok(slots.every(slot => (slot.width - 4) / (slot.height - 4) === 2 / 3), 'new atlas faces keep portrait proportions');
+    }
   }
+  for (const count of [0, 13, 1.5]) assert.throws(() => posterStripLayout(count), /Select one to 12/);
   // Extremely narrow sources are rejected rather than resized above the decoder/output limits.
   assert.throws(() => imageOutputSizes('media-sizes', [{ width: 1, height: 8192 }]), /aspect ratio/);
 });
@@ -180,6 +193,22 @@ test('full generator enforces two source workers, ordered deterministic outputs,
     assert.equal(env.closed.length, 4); assert(env.canvases.every(canvas => canvas.width === 0 && canvas.height === 0));
     const repeated = await generateImageVariants({ ...options, fetchSource: async source => new Blob([fixtures.png(360, 480, source.id)], { type: 'image/png' }) });
     assert.deepEqual(repeated.variants.map(variant => variant.sha256), result.variants.map(variant => variant.sha256));
+  } finally { env.restore(); }
+});
+
+test('generator keeps all five, eight and twelve atlas sources ordered and rejects excess before fetch', async () => {
+  const env = generatorEnvironment();
+  try {
+    for (const count of [5, 8, 12]) {
+      const sources = Array.from({ length: count }, (_, index) => ({ id: index + 1, url: '/source/' + index }));
+      const generated = await generateImageVariants({ kind: 'timeline-composite', sources, fetchSource: async source => new Blob([fixtures.png(80, 120, source.id)], { type: 'image/png' }) });
+      assert.deepEqual(generated.recipe.sourceIds, sources.map(source => source.id));
+      assert.deepEqual(generated.sources.map(source => source.id), sources.map(source => source.id));
+      assert.deepEqual(generated.variants.map(variant => variant.width), [400]);
+      const savedCalls = JSON.parse(await generated.variants[0].blob.text()).calls;
+      assert.equal(savedCalls.filter(call => call[0] === 'drawImage').length, count, 'all selected faces occupy the same raster');
+    }
+    await assert.rejects(generateImageVariants({ kind: 'timeline-composite', sources: Array.from({ length: 13 }, (_, index) => ({ id: index + 1, url: '/source/' + index })), fetchSource: () => { throw Error('Excess sources must fail before reading bytes'); } }), /distinct image sources/);
   } finally { env.restore(); }
 });
 

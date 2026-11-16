@@ -22,7 +22,7 @@ test('every saved poster is cropped in order from the same authorized Blob witho
   globalThis.fetch = () => { throw Error('PosterFan must not fetch'); };
   URL.createObjectURL = () => { throw Error('PosterFan must not create another asset'); };
   try {
-    for (let count = 1; count <= 4; count++) {
+    for (let count = 1; count <= 12; count++) {
       const tree = PosterFan({ source, count, label: 'Timeline posters' });
       assert.equal(tree.props['data-poster-fan'], '');
       assert.equal(tree.props.style['--poster-fan-source'], `url(${JSON.stringify(source)})`);
@@ -52,7 +52,7 @@ test('every saved poster is cropped in order from the same authorized Blob witho
 });
 
 test('fan poses overlap in the original order and keep normal and raised faces inside responsive stages', () => {
-  for (let count = 1; count <= 4; count++) {
+  for (let count = 1; count <= 12; count++) {
     const cards = PosterFan({ source, count, label: '' }).props.children;
     const layers = cards.map(card => card.props.style['--poster-fan-layer']);
     const front = layers.indexOf(Math.max(...layers));
@@ -68,6 +68,8 @@ test('fan poses overlap in the original order and keep normal and raised faces i
         assert.ok(x - halfWidth >= 0 && x + halfWidth <= stageWidth);
         assert.ok(y - halfHeight >= 0 && y + halfHeight <= stageHeight);
         assert.ok(y - height * 0.06 - height * 1.035 / 2 >= 0, 'a lifted face fits without clipping');
+        assert.ok(x - width * 1.035 / 2 >= 0 && x + width * 1.035 / 2 <= stageWidth);
+        assert.ok(y - height * 0.06 + height * 1.035 / 2 <= stageHeight);
         const original = posterStripLayout(count)[index];
         assert.ok(width * 1.035 / ((original.width - 4) * stageWidth / 400) <= 1.5, 'upfront 1.5 resolution scale covers the largest hover pose');
         if (index) {
@@ -80,13 +82,13 @@ test('fan poses overlap in the original order and keep normal and raised faces i
   }
   assert.match(css, /aspect-ratio:\s*2\s*\/\s*1/); assert.match(css, /overflow:\s*visible/);
   assert.match(css, /@media\s*\(hover:\s*hover\)\s*and\s*\(pointer:\s*fine\)/);
-  assert.match(css, /\.poster-fan__card:hover\s*\{\s*z-index:\s*10/);
+  assert.match(css, /\.poster-fan__card:hover\s*\{\s*z-index:\s*20/);
   assert.match(css, /pointer-events:\s*none/);
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*transition:\s*none/);
   assert.doesNotMatch(css, /@keyframes|animation:/);
 });
 
 test('unsupported counts or a missing authorized source render no image windows', () => {
-  for (const count of [0, -1, 1.5, 5, NaN]) assert.equal(PosterFan({ source, count, label: '' }), null);
+  for (const count of [0, -1, 1.5, 13, NaN]) assert.equal(PosterFan({ source, count, label: '' }), null);
   assert.equal(PosterFan({ source: '', count: 3, label: '' }), null);
 });

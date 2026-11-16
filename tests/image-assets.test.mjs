@@ -26,8 +26,7 @@ function imageRepositoryFixture(owner, rows = []) {
     const res = {};
     if (!await fixture.handle(req, res, url)) {
       const row = contents.get(Number(url.pathname.match(/content\((\d+)\)/)?.[1]));
-      if (row && url.pathname.endsWith('/HasPermission')) res.response = { status: 200, value: !host.deniedIds.has(row.Id) && (url.searchParams.get('permissions') !== 'Save' || host.allowSave) };
-      else res.response = { status: row ? 200 : 404, value: structuredClone(row || null) };
+      res.response = { status: row ? 200 : 404, value: structuredClone(row || null) };
     }
     const response = res.response;
     if (response.status >= 400) { const error = new Error('Fixture repository rejected the request.'); error.status = response.status; throw error; }
@@ -76,7 +75,7 @@ test('root creation requires SystemFolder permission even when ordinary Folder a
   const { repo, requests } = imageRepositoryFixture(owner), api = repo.api.bind(repo);
   repo.api = async (target, operation, options) => {
     const value = await api(target, operation, options);
-    return operation === 'EffectiveAllowedChildTypes' ? { results: value.results.filter(type => type.Name !== 'SystemFolder') } : value;
+    return operation === null && options?.query?.$expand?.includes('Actions') ? { ...value, EffectiveAllowedChildTypes: value.EffectiveAllowedChildTypes.filter(type => type.Name !== 'SystemFolder') } : value;
   };
   await assert.rejects(repo.images.ensureStorage(await repo.read(owner.Id, { image: false })), error => error.code === 'child_type_denied');
   assert.equal(requests.filter(request => ['POST', 'PATCH'].includes(request.method)).length, 0, 'allowed Folder/File types cannot authorize a SystemFolder root');
@@ -113,6 +112,15 @@ test('manifest binds exact ordered sources, original SHA hashes and numeric dete
   const valid = manifest(); assert.deepEqual(validateImageManifest(valid, { draft: true }), valid);
   for (const change of [value => value.recipe.sourceIds.reverse(), value => value.sourceStamps.reverse(), value => value.recipe.seed = randomUUID(), value => value.sourceIds.push(10), value => value.recipe.template = 'media-sizes-v1']) {
     const value = manifest(); change(value); assert.throws(() => validateImageManifest(value, { draft: true }), error => error.code === 'invalid_image_asset');
+  }
+});
+
+test('poster manifests accept five, eight and twelve exact sources and reject a thirteenth', () => {
+  for (const count of [5, 8, 12, 13]) {
+    const sourceIds = Array.from({ length: count }, (_, index) => index + 100);
+    const value = { ...manifest(), sourceIds, sourceStamps: sourceIds.map(id => ({ id, stamp: 'a'.repeat(64) })), recipe: { template: 'poster-strip-v1', sourceIds, seed: 42 } };
+    if (count <= 12) assert.deepEqual(validateImageManifest(value, { draft: true }), value);
+    else assert.throws(() => validateImageManifest(value, { draft: true }), error => error.code === 'invalid_image_asset');
   }
 });
 
@@ -181,7 +189,7 @@ test('a private Timeline flag never grants storage privacy when actual anonymous
 });
 
 test('public owners cannot copy privately readable source originals into public child storage', async () => {
-  const images=new ImageAssets({imageSourceSnapshot:async()=>({CoverImageBin:{ContentType:'image/png'}}),anonymousRead:async()=>{const error=new Error('Denied');error.status=403;throw error;}});
+  const images=new ImageAssets({imageSourceSnapshot:async()=>({Type:'MediaItem',CoverImageBin:{ContentType:'image/png'}}),anonymousRead:async()=>{const error=new Error('Denied');error.status=403;throw error;}});
   await assert.rejects(images.assertSources({sourceStamps:[{id:10,stamp:'a'.repeat(64)}]},{publicOwner:true}),error=>error.code==='image_source_not_public');
 });
 
@@ -224,7 +232,7 @@ test('delete receipts observe the exact target ID rather than a missing or renam
 test('known AddNew denial is checked before any owner child-setting mutation or original hash read', async () => {
   let writes=0,originals=0;
   const owner={Id:20,Type:'Timeline',Path:'/Root/Content/Images/Timelines/owner'};
-  const repo={api:async(_target,operation,options)=>{if(options?.method)writes++;assert.equal(operation,'HasPermission');return false;},revisionMatches:()=>{},coverBytes:async()=>{originals++;}};
+  const repo={api:async(_target,_operation,options)=>{if(options?.method)writes++;},assert:async operations=>{assert.deepEqual(operations,[{target:20,action:'create',type:'SystemFolder'}]);const error=new Error('Add denied');error.code='permission_denied';throw error;},revisionMatches:()=>{},coverBytes:async()=>{originals++;}};
   const images=new ImageAssets(repo);images.storage=async()=>null;images.owner=async()=>owner;
   await assert.rejects(images.ensureStorage(owner),error=>error.code==='permission_denied');
   await assert.rejects(images.before({action:'image-draft',targetId:20,manifest:manifest()}),error=>error.code==='permission_denied');

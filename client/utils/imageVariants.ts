@@ -1,3 +1,5 @@
+import { MAX_POSTER_SOURCES } from './posterStripLayout.mjs';
+
 export interface ImageVariant {
   name: string;
   width: number;
@@ -18,7 +20,7 @@ export interface ImageDescriptor {
 /** Public layout hints contain no source identities or editor reconstruction metadata. */
 export function posterStripCount(image: ImageDescriptor | undefined): number | undefined {
   const layout = image?.state === 'active' ? image.layout : undefined;
-  return layout?.template === 'poster-strip-v1' && Number.isSafeInteger(layout.count) && layout.count >= 1 && layout.count <= 4
+  return layout?.template === 'poster-strip-v1' && Number.isSafeInteger(layout.count) && layout.count >= 1 && layout.count <= MAX_POSTER_SOURCES
     ? layout.count : undefined;
 }
 

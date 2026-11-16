@@ -42,6 +42,16 @@ test('image presentation commands reference a sealed set or explicit legacy rese
   assert.ok(spec.paths['/images/recovery'].post.parameters.some(parameter => parameter.name === 'Idempotency-Key' && parameter.required));
 });
 
+test('image manifest schema exposes the twelve-poster bound for all ordered source arrays', () => {
+  const manifestValid = validate('ImageManifest');
+  for (const count of [1, 4, 5, 8, 12, 13]) {
+    const sourceIds = Array.from({ length: count }, (_, index) => index + 1);
+    const manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: '/Root/Content/Timelines', ownerId: 20, generationId: randomUUID(), sourceIds,
+      sourceStamps: sourceIds.map(id => ({ id, stamp: 'a'.repeat(64) })), recipe: { template: 'poster-strip-v1', sourceIds }, variants: [] };
+    assert.equal(manifestValid(manifest), count <= 12);
+  }
+});
+
 test('staging schema distinguishes cover requirements/limits from owned ZIP references', () => {
   const common = { targetId: 10, size: 1, sha256: 'a'.repeat(64) };
   assert.equal(uploadValid({ kind: 'cover', ...common, mimeType: 'image/png', expectedRevision: revision }), true);
@@ -108,4 +118,17 @@ test('public diagnostic polls only the fixed empty-JSON route and never sends or
   }});
   assert.equal(result.httpRequests,3);assert.equal(result.credentialsSent,false);assert.equal(result.senseNetRequests,0);assert.equal(result.repositoryWrites,0);
   assert.equal(JSON.stringify(result).includes('private-response-must-not-be-dumped'),false);
+});
+
+test('preview metadata contract describes the bounded read-only batch, stable validators and actual 16KiB wire limit', () => {
+  const operation = spec.paths['/images/preview-sources'].post;
+  assert.equal(operation.requestBody['x-max-bytes'], 16384);
+  const input = ajv.compile(operation.requestBody.content['application/json'].schema);
+  assert(input({ ownerId: 20, sourceIds: Array.from({ length: 12 }, (_, i) => i + 1) }));
+  assert(!input({ ownerId: 20, sourceIds: Array.from({ length: 13 }, (_, i) => i + 1) }));
+  assert(!input({ ownerId: 20, sourceIds: [1, 1] }));
+  const output = ajv.compile({ $ref: 'api#/paths/~1images~1preview-sources/post/responses/200/content/application~1json/schema' });
+  assert(output({ data: { owner: { Id: 20, revision }, sources: [{ id: 1, url: '/api/v1/content/1/cover', version: revision }] } }));
+  assert(!output({ data: { owner: { Id: 20, revision }, sources: [{ id: 1, url: '/api/v1/content/1/cover', version: 'unversioned' }] } }));
+  assert.equal(operation.responses[202], undefined);
 });
