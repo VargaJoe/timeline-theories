@@ -41,13 +41,9 @@ async function setup(t, extra = {}) {
   const server = https.createServer(tls, async (req, res) => {
     try {
       const url = new URL(req.url, 'https://localhost'), credential = req.headers.apikey || req.headers.authorization?.replace(/^Bearer /, '');
-      state.requests.push({ method: req.method, path: url.pathname, permissions: url.searchParams.get('permissions'), credential });
-      if (url.pathname.endsWith('/GetCurrentUser')) return send(res, credential === 'rejected' ? 401 : 200, { Id: credential === 'other-user' ? 99 : 42, Name: 'AuthenticatedFixture' });
+      state.requests.push({ method: req.method, path: url.pathname, permissions: url.searchParams.get('permissions'), select: url.searchParams.get('$select'), expand: url.searchParams.get('$expand'), credential });
+      if (url.pathname.endsWith('/GetCurrentUser')) return send(res, credential === 'rejected' ? 401 : 200, { Id: credential === 'other-user' ? 99 : 42, Name: 'AuthenticatedFixture', Path: '/Root/IMS/Public/AuthenticatedFixture' });
       if (await imageFixture.handle(req, res, url)) return;
-      if (url.pathname.endsWith('/HasPermission')) {
-        if (url.searchParams.get('permissions') === 'Save' && state.onSave) { const callback = state.onSave; state.onSave = null; await callback(); }
-        return send(res, 200, url.searchParams.get('permissions') === 'Save' ? state.allowSave : state.allowRead && (state.allowRootRead || url.pathname.includes('content(10)')));
-      }
       if (url.pathname.endsWith('/GetSchema')) {
         if (!state.schemaAvailable) return send(res, 200, []);
         const type = url.searchParams.get('contentTypeName');
@@ -55,7 +51,7 @@ async function setup(t, extra = {}) {
         return send(res, 200, [{ ContentTypeName: type, FieldSettings: [...new Set(names)].map(Name => ({ Name, ReadOnly: false })) }]);
       }
       if (url.pathname.endsWith('/AllowedChildTypes') || url.pathname.endsWith('/EffectiveAllowedChildTypes')) return send(res, 200, { results: [{ Name: 'File' }, {Name:'Folder'}] });
-      if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0' });
+      if (url.pathname.endsWith("('MediaLibrary')") || url.pathname === '/OData.svc/content(2)') return send(res, state.allowRead && state.allowRootRead ? 200 : 403, { Id: 2, ParentId: 1, Name: 'MediaLibrary', Path: projectRoot + '/MediaLibrary', Type: 'Folder', ModificationDate: '2026-10-01T00:00:00Z', Version: 'V1.0', ...(url.searchParams.get('$expand')?.includes('Actions') ? { Actions: ['Add','Edit','Delete'].map(Name=>({Name,Forbidden:!state.allowSave})), EffectiveAllowedChildTypes: [{Name:'MediaItem'},{Name:'BookMediaItem'},{Name:'Folder'},{Name:'File'}] } : {}) });
       const target = url.pathname.match(/^\/OData.svc\/content\((\d+)\)$/);
       if (target) {
         const id = Number(target[1]), row = contents.get(id);
@@ -91,6 +87,13 @@ async function setup(t, extra = {}) {
   }
   function background(sent) { return new Request(sent.url, { method: 'POST', headers: sent.headers, body: sent.bytes }); }
   async function runNext() { const sent = invocations.shift(); assert.ok(sent); assert.equal((await app.handleBackgroundRequest(background(sent))).status, 204); return sent; }
+  async function finish(input) {
+    const response = await app.handleRequest(input);
+    if (response.status !== 202) return response;
+    const { job } = await response.clone().json();
+    while (invocations.length) await runNext();
+    return app.handleRequest(request(`jobs/${job.id}`));
+  }
   async function preview() {
     const current = await (await app.handleRequest(request('content/10'))).json(); assert.ok(current.data?.revision);
     const id = await enqueue('plans', { commands: [{ action: 'update', targetId: 10, expectedRevision: current.data.revision, fields: { Title: 'Approved' } }] });
@@ -98,7 +101,7 @@ async function setup(t, extra = {}) {
     const result = await app.handleRequest(request(`jobs/${id}`)); assert.equal(result.status, 200, await result.clone().text());
     return result.json();
   }
-  return { app, config, state, content, contents, request, enqueue, background, runNext, invocations, preview };
+  return { app, config, state, content, contents, request, enqueue, background, runNext, finish, invocations, preview };
 }
 
 test('stored generic cover reads preserve bytes and metadata while retaining MIME and caller-access checks', async t => {
@@ -494,7 +497,7 @@ test('actual background HTTPS acknowledgement uses app-only CA, rejects redirect
 });
 
 test('generated variants travel directly to SenseNet, activate through a saved plan and read one current size without changing originals', async t => {
-  const { app, request, state, content, contents, config, enqueue, runNext } = await setup(t);
+  const { app, request, state, content, contents, config, enqueue, runNext, finish } = await setup(t);
   state.images.enabled = true;
   content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'preserved-original-stamp' } };
   contents.set(11, { ...content, Id: 11, Name: 'second-media', Path: config.projectRoot + '/MediaLibrary/second-media' });
@@ -502,7 +505,7 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   contents.set(owner.Id, owner);
   const originalHash = createHash('sha256').update(state.images.original).digest('hex');
   const get = async route => { const response = await app.handleRequest(request(route)); assert.equal(response.status, 200, await response.clone().text()); return response.json(); };
-  const post = async (route, body, key, expected = 200) => { const response = await app.handleRequest(request(route, { method: 'POST', body, headers: { 'Idempotency-Key': key } })); assert.equal(response.status, expected, await response.clone().text()); return response.json(); };
+  const post = async (route, body, key, expected = 200) => { const response = await finish(request(route, { method: 'POST', body, headers: { 'Idempotency-Key': key } })); assert.equal(response.status, expected, await response.clone().text()); return response.json(); };
   const before = (await get('content/20')).data;
   assert.equal((await get('images/capabilities')).data.available, true);
   const source = (await get('content/10/image-presentation')).data;
@@ -519,7 +522,8 @@ test('generated variants travel directly to SenseNet, activate through a saved p
   const uploadRequests = state.requests.slice(uploadRequestStart);
   assert.equal(state.images.binaryReads.filter(row=>row.property==='CoverImageBin').length,originalReadsBeforeUpload,'variant upload never redownloads originals');
   assert.equal(uploadRequests.some(row=>/ImageAsset|GetImagePresentation/.test(row.path)),false);
-  assert.ok(uploadRequests.some(row => row.permissions === 'AddNew'));
+  assert.ok(uploadRequests.some(row => row.expand?.split(',').includes('Actions') && row.expand.split(',').includes('EffectiveAllowedChildTypes')));
+  assert.equal(uploadRequests.some(row => /HasPermission/i.test(row.path)), false);
   assert.equal(interrupted.error.details.uncertain, true); assert.equal((await app.store.pendingMutations()).length, 1);
   const uploaded = (await post(`images/drafts/${prepared.setId}/variants/w400`, uploadBody, 'upload-image-1')).data;
   assert.equal((await app.store.pendingMutations()).length, 0); assert.equal(state.images.uploads, 1);
@@ -614,7 +618,7 @@ async function preparedImageUpload(t, extra = {}) {
   f.contents.set(20, { ...f.content, Id: 20, Type: 'Timeline', CoverImageBin: null, Name: 'owner', Path: f.config.projectRoot + '/Timelines/owner' });
   const current = (await (await f.app.handleRequest(f.request('content/20'))).json()).data;
   const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: f.config.projectRoot, ownerId: 20, generationId, sourceIds: [10], sourceStamps: [{ id: 10, stamp: f.state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [10] }, variants: [] };
-  const draftResponse = await f.app.handleRequest(f.request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'deadline-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
+  const draftResponse = await f.finish(f.request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'deadline-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
   const draft = (await draftResponse.json()).data, bytes = rasterFixture.png(400,200), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
   return { ...f, route: `images/drafts/${draft.setId}/variants/w400`, upload: { method: 'POST', body: { ownerId: 20, variant, bytesBase64: bytes.toString('base64') }, headers: { 'Idempotency-Key': 'deadline-upload-key' } } };
 }
@@ -646,7 +650,7 @@ test('deadline before actual native dispatch is a terminal no-write failure and 
   const original = StockRepository.prototype.request;
   StockRepository.prototype.request = async function (url, options) {
     const result = await original.call(this, url, options), parsed = new URL(url);
-    if (parsed.pathname.endsWith('/HasPermission') && parsed.searchParams.get('permissions') === 'AddNew') controller.abort();
+    if (parsed.searchParams.get('$expand')?.split(',').includes('Actions')) controller.abort();
     return result;
   };
   t.after(() => { StockRepository.prototype.request = original; });
@@ -657,12 +661,12 @@ test('deadline before actual native dispatch is a terminal no-write failure and 
 });
 
 test('current stock draft AddNew denial blocks image upload without writing bytes', async t => {
-  const { app, request, state, content, contents, config } = await setup(t); state.images.enabled = true;
+  const { app, request, state, content, contents, config, finish } = await setup(t); state.images.enabled = true;
   content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'stored-original' } };
   contents.set(20, { ...content, Id: 20, Type: 'Timeline', CoverImageBin: null, Name: 'owner', Path: config.projectRoot + '/Timelines/owner' });
   const currentResponse = await app.handleRequest(request('content/20')), current = (await currentResponse.json()).data;
   const generationId = randomUUID(), manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: config.projectRoot, ownerId: 20, generationId, sourceIds: [10], sourceStamps: [{ id: 10, stamp: state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [10] }, variants: [] };
-  const draftResponse = await app.handleRequest(request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'acl-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
+  const draftResponse = await finish(request('images/drafts', { method: 'POST', body: { ownerId: 20, generationId, expectedRevision: current.revision, manifest }, headers: { 'Idempotency-Key': 'acl-draft-key' } })); assert.equal(draftResponse.status, 201, await draftResponse.clone().text());
   const draft = (await draftResponse.json()).data, bytes = rasterFixture.png(400,200), variant = { name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
   state.images.revokeAtUpload = true;
   const response = await app.handleRequest(request(`images/drafts/${draft.setId}/variants/w400`, { method: 'POST', body: { ownerId: 20, variant, bytesBase64: bytes.toString('base64') }, headers: { 'Idempotency-Key': 'acl-upload-key' } }));
@@ -678,4 +682,192 @@ test('metadata GET failure before upload dispatch is a durable terminal failure 
   assert.equal(f.state.images.uploads,0);assert.equal((await f.app.store.pendingMutations()).length,0);assert.equal((await f.app.coordinator.inspect()).state,'released');
   StockRepository.prototype.request=original;
   const retry=await f.app.handleRequest(f.request(f.route,f.upload));assert.equal(retry.status,502);assert.equal((await retry.json()).error.details.uncertain,false);assert.equal(f.state.images.uploads,0,'terminal key never replays the failed write');
+});
+
+async function queuedImageDraft(t, config = {}) {
+  const f = await setup(t, config); f.state.images.enabled = true;
+  f.content.CoverImageBin = { __mediaresource: { content_type: 'image/png', media_src: 'original' } };
+  f.contents.set(20, { ...f.content, Id: 20, Type: 'Timeline', CoverImageBin: null, Name: 'owner', Path: f.config.projectRoot + '/Timelines/owner' });
+  const current = (await (await f.app.handleRequest(f.request('content/20'))).json()).data;
+  const generationId = randomUUID(), body = { ownerId: 20, generationId, expectedRevision: current.revision, manifest: { schemaVersion: 1, kind: 'timeline-composite', projectPath: f.config.projectRoot, ownerId: 20, generationId, sourceIds: [10], sourceStamps: [{ id: 10, stamp: f.state.images.stamp }], recipe: { template: 'poster-strip-v1', sourceIds: [10] }, variants: [] } };
+  return { ...f, body, input: (value = body, key = 'background-image-draft') => f.request('images/drafts', { method: 'POST', body: value, headers: { 'Idempotency-Key': key } }) };
+}
+
+test('image preparation returns a job before repository work, concurrent retries share it and automatic delivery never creates twice', async t => {
+  const f = await queuedImageDraft(t), originalCount = f.contents.size;
+  const [first, second] = await Promise.all([f.app.handleRequest(f.input()), f.app.handleRequest(f.input())]);
+  assert.equal(first.status, 202); assert.equal(second.status, 202);
+  const id = (await first.json()).job.id;
+  assert.equal((await second.json()).job.id, id); assert.equal(f.invocations.length, 1);
+  assert.equal(f.contents.size, originalCount, 'the synchronous response performs no repository mutation');
+  const saved = (await f.app.jobs.read(id, 'input')).data;
+  assert.equal(saved.image.targetId, 20); assert.equal(saved.image.action, 'image-draft');
+  assert.deepEqual(JSON.parse(Buffer.from(saved.body, 'base64')), f.body, 'only validated metadata is durable');
+  const sent = await f.runNext(), size = f.contents.size;
+  const result = await f.app.handleRequest(f.request(`jobs/${id}`));
+  assert.equal(result.status, 201, await result.clone().text());
+  const draft = (await result.json()).data;
+  assert.equal(draft.generationId, f.body.generationId);
+  assert.equal((await f.app.handleBackgroundRequest(f.background(sent))).status, 204);
+  const replay = await f.app.handleRequest(f.input());
+  assert.equal(replay.status, 201); assert.equal((await replay.json()).data.setId, draft.setId);
+  assert.equal(f.contents.size, size); assert.equal(f.invocations.length, 0);
+  assert.equal((await f.app.store.pendingMutations()).length, 0);
+  const changed = await f.app.handleRequest(f.input({ ...f.body, expectedRevision: 'sha256:' + 'a'.repeat(64) }));
+  assert.equal(changed.status, 409); assert.equal((await changed.json()).error.code, 'idempotency_conflict');
+});
+
+test('queued image preparation rechecks Save, and a revoked owner cannot read its stored image result', async t => {
+  const f = await queuedImageDraft(t), count = f.contents.size;
+  const response = await f.app.handleRequest(f.input()), id = (await response.json()).job.id;
+  f.state.allowSave = false;
+  await f.runNext();
+  assert.equal(f.contents.size, count, 'revoked Save prevents storage creation');
+  assert.equal((await f.app.jobs.read(id, 'result')).data.status, 403);
+  assert.equal((await f.app.handleRequest(f.request(`jobs/${id}`))).status, 403);
+});
+
+test('image preparation survives the finished HTTP invocation deadline in a separate background invocation', async t => {
+  const controller = new AbortController(), f = await queuedImageDraft(t, { signal: controller.signal });
+  const response = await f.app.handleRequest(f.input()); assert.equal(response.status, 202);
+  const id = (await response.json()).job.id, sent = f.invocations.shift();
+  controller.abort();
+  const worker = createFunctionApp({ ...f.config, signal: new AbortController().signal });
+  assert.equal((await worker.handleBackgroundRequest(f.background(sent))).status, 204);
+  const result = await worker.handleRequest(f.request(`jobs/${id}`));
+  assert.equal(result.status, 201, await result.clone().text());
+  assert.equal((await result.json()).data.generationId, f.body.generationId);
+  assert.equal((await worker.store.pendingMutations()).length, 0);
+});
+
+async function loseImageWorkerResult(f, beforeExecute = false) {
+  const response = await f.app.handleRequest(f.input()); assert.equal(response.status, 202);
+  const id = (await response.json()).job.id, sent = f.invocations.shift();
+  const saveResult = f.app.jobs.saveResult, run = f.app.jobs.run;
+  f.app.jobs.saveResult = async () => { throw Error('Controlled worker loss before job result'); };
+  if (beforeExecute) f.app.jobs.run = function (input, context) { return run.call(this, input, context, async () => { throw Error('Controlled worker loss before coordinator'); }); };
+  try { assert.equal((await f.app.handleBackgroundRequest(f.background(sent))).status, 500); }
+  finally { f.app.jobs.saveResult = saveResult; f.app.jobs.run = run; }
+  assert.equal(await f.app.jobs.read(id, 'result'), null);
+  return { id, sent, saved: (await f.app.jobs.read(id, 'input')).data };
+}
+
+test('confirmed native image recovery finalizes a hard-stopped job so the original publication can continue without replay', async t => {
+  const f = await queuedImageDraft(t), { id, sent, saved } = await loseImageWorkerResult(f), count = f.contents.size;
+  const pending = await f.app.handleRequest(f.request(`jobs/${id}`)); assert.equal(pending.status, 202);
+  const recovery = await f.app.handleRequest(f.request('images/recovery', { method: 'POST', headers: { 'Idempotency-Key': 'background-image-draft' }, body: { operationId: saved.image.operationId } }));
+  assert.equal(recovery.status, 200, await recovery.clone().text());
+  const observed = await recovery.json(); assert.equal(observed.confirmed, true); assert.equal(observed.repositoryWrites, 0);
+  const retry = await f.app.handleRequest(f.input()); assert.equal(retry.status, 201, await retry.clone().text());
+  assert.equal((await retry.json()).data.setId, observed.result.setId);
+  assert.equal((await f.app.handleBackgroundRequest(f.background(sent))).status, 204);
+  assert.equal(f.contents.size, count); assert.equal(f.invocations.length, 0);
+});
+
+test('confirmed native image recovery preserves an immutable job error but replaces its mapping with a completed receipt view', async t => {
+  const f = await queuedImageDraft(t), queued = await f.app.handleRequest(f.input()), id = (await queued.json()).job.id;
+  const original = f.app.jobs.saveResult; let failed = false;
+  f.app.jobs.saveResult = async function (...args) { if (!failed) { failed = true; throw Error('Transient result storage failure after committed draft'); } return original.apply(this, args); };
+  try { await f.runNext(); } finally { f.app.jobs.saveResult = original; }
+  const saved = (await f.app.jobs.read(id, 'input')).data, count = f.contents.size;
+  const failedResponse = await f.app.handleRequest(f.input());
+  assert.equal(failedResponse.status, 500, 'the old job reports its storage failure');
+  assert.equal((await failedResponse.json()).error.details.operationId, saved.image.operationId, 'the UI can reach exact receipt recovery even after a generic result-storage error');
+  const recovery = await f.app.handleRequest(f.request('images/recovery', { method: 'POST', headers: { 'Idempotency-Key': 'background-image-draft' }, body: { operationId: saved.image.operationId } }));
+  assert.equal(recovery.status, 200, await recovery.clone().text()); assert.equal((await recovery.json()).confirmed, true);
+  const retry = await f.app.handleRequest(f.input()); assert.equal(retry.status, 201, await retry.clone().text());
+  assert.equal((await f.app.jobs.read(id, 'result')).data.status, 500, 'the old job error is immutable');
+  assert.equal(f.contents.size, count); assert.equal(f.invocations.length, 0, 'receipt recovery never invokes the worker again');
+});
+
+test('explicit stopped recovery before coordinator preparation closes the claimed image job honestly and permits a new preview', async t => {
+  const f = await queuedImageDraft(t), count = f.contents.size, { id, saved } = await loseImageWorkerResult(f, true);
+  const pending = await f.app.handleRequest(f.request(`jobs/${id}`)), descriptor = await pending.json();
+  assert.equal(pending.status, 202); assert.equal(descriptor.recovery.operationId, saved.image.operationId);
+  assert.equal(descriptor.recovery.stoppedRequestId, saved.requestId);
+  const recovery = await f.app.handleRequest(f.request('images/recovery', { method: 'POST', headers: { 'Idempotency-Key': 'background-image-draft' }, body: { operationId: saved.image.operationId, stoppedRequestId: saved.requestId, confirmStopped: true } }));
+  assert.equal(recovery.status, 200, await recovery.clone().text());
+  const closed = await recovery.json(); assert.equal(closed.notPrepared, true); assert.equal(closed.repositoryWrites, 0);
+  const retry = await f.app.handleRequest(f.input()); assert.equal(retry.status, 409);
+  assert.equal((await retry.json()).error.code, 'image_publication_not_prepared');
+  assert.equal(f.contents.size, count); assert.equal(f.invocations.length, 0);
+  const generationId = randomUUID(), body = { ...f.body, generationId, manifest: { ...f.body.manifest, generationId } };
+  assert.equal((await f.app.handleRequest(f.input(body, 'new-background-image-draft'))).status, 202);
+  await f.runNext();
+});
+
+test('image job results recheck selected source Open and current Save instead of treating a receipt as permission', async t => {
+  const f = await queuedImageDraft(t), response = await f.app.handleRequest(f.input()), id = (await response.json()).job.id;
+  await f.runNext();
+  assert.equal((await f.app.handleRequest(f.request(`jobs/${id}`))).status, 201);
+  f.state.deniedIds.add(10);
+  assert.equal((await f.app.handleRequest(f.request(`jobs/${id}`))).status, 403);
+  f.state.deniedIds.delete(10); f.state.allowSave = false;
+  assert.equal((await f.app.handleRequest(f.input())).status, 403);
+});
+
+test('image job input rejects embedded image bytes and foreign bindings before storing or dispatching a job', async t => {
+  const f = await queuedImageDraft(t), count = f.contents.size;
+  for (const body of [{ ...f.body, bytesBase64: 'must-not-be-stored' }, { ...f.body, manifest: { ...f.body.manifest, recipe: { ...f.body.manifest.recipe, bytesBase64: 'must-not-be-stored' } } }, { ...f.body, manifest: { ...f.body.manifest, projectPath: '/Root/foreign' } }]) {
+    const response = await f.app.handleRequest(f.input(body));
+    assert.ok([400, 403].includes(response.status), await response.clone().text());
+  }
+  assert.equal(f.invocations.length, 0); assert.equal(f.contents.size, count);
+});
+
+test('cancelling queued image work prevents any repository write or automatic job restart', async t => {
+  const f = await queuedImageDraft(t), count = f.contents.size, response = await f.app.handleRequest(f.input()), id = (await response.json()).job.id;
+  const cancelled = await f.app.handleRequest(f.request(`jobs/${id}/cancel`, { method: 'POST', body: {} }));
+  assert.equal(cancelled.status, 409); assert.equal((await cancelled.json()).error.code, 'job_cancelled');
+  await f.runNext();
+  assert.equal(f.contents.size, count);
+  const replay = await f.app.handleRequest(f.input());
+  assert.equal(replay.status, 409); assert.equal((await replay.json()).error.code, 'job_cancelled');
+  assert.equal(f.invocations.length, 0);
+});
+
+async function previewSourcesFixture(t, count = 4) {
+  const f = await setup(t), stamp = { ModificationDate: '2026-11-01T00:00:00Z', Version: 'V1.0', VersionId: 1 };
+  const owner = { ...f.content, ...stamp, Id: 20, Type: 'Timeline', Name: 'timeline', Path: f.config.projectRoot + '/Timelines/timeline', CoverImageBin: null };
+  f.contents.set(owner.Id, owner);
+  const ids = Array.from({ length: count }, (_, index) => 100 + index);
+  for (const id of ids) f.contents.set(id, { ...f.content, ...stamp, Id: id, Name: 'poster-' + id, Path: f.config.projectRoot + '/MediaLibrary/poster-' + id, CoverImageBin: { __mediaresource: { content_type: 'image/png', media_etag: 'same-binary-etag', media_src: 'same-binary-url' } } });
+  const request = (body = { ownerId: owner.Id, sourceIds: ids }, options = {}) => f.app.handleRequest(f.request('images/preview-sources', { method: 'POST', body, ...options }));
+  return { ...f, owner, ids, requestSources: request };
+}
+
+test('preview batch returns ordered minimal source validators and one fresh owner revision without original reads or writes', async t => {
+  const f = await previewSourcesFixture(t, 12), response = await f.requestSources();
+  assert.equal(response.status, 200, await response.clone().text()); const { data } = await response.json();
+  assert.equal(data.owner.Id, 20); assert.match(data.owner.revision, /^sha256:[a-f0-9]{64}$/);
+  assert.deepEqual(data.sources.map(source => source.id), f.ids);
+  for (const source of data.sources) { assert.equal(source.url, `/api/v1/content/${source.id}/cover`); assert.match(source.version, /^sha256:[a-f0-9]{64}$/); assert.deepEqual(Object.keys(source).sort(), ['id', 'url', 'version']); }
+  const minimal = f.state.requests.filter(request => request.select?.includes('CoverImageUrl'));
+  assert.equal(minimal.length, 12, 'Exactly one minimal source GET per image.');
+  assert(minimal.every(request => request.select.includes('ModificationDate') && request.select.includes('Version') && !request.expand));
+  assert.equal(f.state.images.binaryReads.length, 0); assert.equal(f.state.patches, 0); assert.equal(f.invocations.length, 0);
+  assert(!f.state.requests.some(request => /HasPermission/i.test(request.path)));
+});
+
+test('preview source cache validators detect actual repository version changes even when binary URL and ETag do not change', async t => {
+  const f = await previewSourcesFixture(t, 1), read = async () => { const response = await f.requestSources(); assert.equal(response.status, 200, await response.clone().text()); return (await response.json()).data.sources[0].version; };
+  const original = await read(); assert.equal(await read(), original);
+  f.contents.get(f.ids[0]).Version = 'V2.0'; f.contents.get(f.ids[0]).ModificationDate = '2026-11-02T00:00:00Z';
+  assert.notEqual(await read(), original);
+});
+
+test('preview source batch fails as a whole on revoked Open or missing source version', async t => {
+  const f = await previewSourcesFixture(t, 4);
+  f.state.deniedIds.add(f.ids[2]); let response = await f.requestSources(); assert.equal(response.status, 403, await response.clone().text()); assert.equal((await response.json()).data, undefined);
+  f.state.deniedIds.clear(); delete f.contents.get(f.ids[1]).Version;
+  response = await f.requestSources(); assert.equal(response.status, 503, await response.clone().text()); assert.equal((await response.json()).error.code, 'backend_revision_unavailable');
+  assert.equal(f.state.patches, 0); assert.equal(f.invocations.length, 0);
+});
+
+test('preview batch rejects excessive, duplicate, non-media, cross-owner and unknown inputs before any write', async t => {
+  const f = await previewSourcesFixture(t, 4);
+  for (const body of [{ ownerId: 20, sourceIds: Array.from({ length: 13 }, (_, i) => i + 100) }, { ownerId: 20, sourceIds: [100, 100] }, { ownerId: 20, sourceIds: [] }, { ownerId: 20, sourceIds: [20] }, { ownerId: 100, sourceIds: [101] }, { ownerId: 20, sourceIds: [100], injected: true }]) {
+    const response = await f.requestSources(body); assert.equal(response.status, 400, await response.clone().text());
+  }
+  assert.equal(f.state.patches, 0); assert.equal(f.invocations.length, 0);
 });

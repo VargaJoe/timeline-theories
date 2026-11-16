@@ -35,8 +35,21 @@ test('image presentation commands reference a sealed set or explicit legacy rese
   assert.equal(spec.paths['/images/drafts/{setId}/variants/{name}'].post.requestBody['x-max-bytes'], 1500000);
   assert.equal(spec.paths['/images/{ownerId}/{generationId}/{name}'].parameters[0].schema.type, 'integer');
   assert.ok(spec.paths['/images/drafts'].post.responses[201]);
+  for (const route of ['/images/drafts', '/images/drafts/{setId}/seal', '/images/drafts/{setId}/delete']) assert.ok(spec.paths[route].post.responses[202]);
+  assert.equal(spec.paths['/images/drafts/{setId}/variants/{name}'].post.responses[202], undefined, 'image bytes cannot enter a background job');
+  assert.equal(spec.paths['/images/recovery'].post.requestBody.content['application/json'].schema.properties.abandon.const, true);
   assert.equal(spec.paths['/images/recovery'].post.requestBody['x-max-bytes'], 16384);
   assert.ok(spec.paths['/images/recovery'].post.parameters.some(parameter => parameter.name === 'Idempotency-Key' && parameter.required));
+});
+
+test('image manifest schema exposes the twelve-poster bound for all ordered source arrays', () => {
+  const manifestValid = validate('ImageManifest');
+  for (const count of [1, 4, 5, 8, 12, 13]) {
+    const sourceIds = Array.from({ length: count }, (_, index) => index + 1);
+    const manifest = { schemaVersion: 1, kind: 'timeline-composite', projectPath: '/Root/Content/Timelines', ownerId: 20, generationId: randomUUID(), sourceIds,
+      sourceStamps: sourceIds.map(id => ({ id, stamp: 'a'.repeat(64) })), recipe: { template: 'poster-strip-v1', sourceIds }, variants: [] };
+    assert.equal(manifestValid(manifest), count <= 12);
+  }
 });
 
 test('staging schema distinguishes cover requirements/limits from owned ZIP references', () => {
@@ -105,4 +118,17 @@ test('public diagnostic polls only the fixed empty-JSON route and never sends or
   }});
   assert.equal(result.httpRequests,3);assert.equal(result.credentialsSent,false);assert.equal(result.senseNetRequests,0);assert.equal(result.repositoryWrites,0);
   assert.equal(JSON.stringify(result).includes('private-response-must-not-be-dumped'),false);
+});
+
+test('preview metadata contract describes the bounded read-only batch, stable validators and actual 16KiB wire limit', () => {
+  const operation = spec.paths['/images/preview-sources'].post;
+  assert.equal(operation.requestBody['x-max-bytes'], 16384);
+  const input = ajv.compile(operation.requestBody.content['application/json'].schema);
+  assert(input({ ownerId: 20, sourceIds: Array.from({ length: 12 }, (_, i) => i + 1) }));
+  assert(!input({ ownerId: 20, sourceIds: Array.from({ length: 13 }, (_, i) => i + 1) }));
+  assert(!input({ ownerId: 20, sourceIds: [1, 1] }));
+  const output = ajv.compile({ $ref: 'api#/paths/~1images~1preview-sources/post/responses/200/content/application~1json/schema' });
+  assert(output({ data: { owner: { Id: 20, revision }, sources: [{ id: 1, url: '/api/v1/content/1/cover', version: revision }] } }));
+  assert(!output({ data: { owner: { Id: 20, revision }, sources: [{ id: 1, url: '/api/v1/content/1/cover', version: 'unversioned' }] } }));
+  assert.equal(operation.responses[202], undefined);
 });

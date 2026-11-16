@@ -18,9 +18,10 @@ import { verifyAppStorage } from './storage-selftest.mjs';
 import { IMAGE_PROTOCOL, IMAGE_LIMITS, imageOperationId, validateImageManifest, validateImageVariant, decodeImageVariant } from './image-assets.mjs';
 import { hash, assertUuid } from './store.mjs';
 import { observeHeldImage, recoverImage } from './image-recovery.mjs';
+import { imageJobAction } from './image-jobs.mjs';
 
-const routes = ['capabilities','openapi.json','schemas/{type}','lookup','snapshots','content/{id}','content/{id}/cover','content/{id}/image-presentation','content/{id}/image-presentation/editor','content/{id}/image-sets','images/capabilities','images/recovery','images/drafts','images/drafts/{setId}/variants/{name}','images/drafts/{setId}/seal','images/drafts/{setId}/delete','images/{ownerId}/{generationId}/{name}','timelines','media','books','entries','plans','plans/{id}/apply','recovery','providers/books/search','providers/books/details','providers/media/lookup','providers/trakt/list','exchange/{timelineId}/export','exchange/{timelineId}/preview','grants','grants/{id}/revoke','jobs/{id}','jobs/{id}/cancel','uploads','uploads/{id}/chunks/{index}','uploads/{id}/complete','downloads/{id}/chunks/{index}'];
-const longRoute = (method, route) => method === 'POST' && (route === 'plans' || /^plans\/[0-9a-f-]{36}\/apply$/.test(route) || route.startsWith('providers/') || /^exchange\/\d+\/preview$/.test(route)) || method === 'GET' && /^exchange\/\d+\/export$/.test(route);
+const routes = ['capabilities','openapi.json','schemas/{type}','lookup','snapshots','content/{id}','content/{id}/cover','content/{id}/image-presentation','content/{id}/image-presentation/editor','content/{id}/image-sets','images/capabilities','images/preview-sources','images/recovery','images/drafts','images/drafts/{setId}/variants/{name}','images/drafts/{setId}/seal','images/drafts/{setId}/delete','images/{ownerId}/{generationId}/{name}','timelines','media','books','entries','plans','plans/{id}/apply','recovery','providers/books/search','providers/books/details','providers/media/lookup','providers/trakt/list','exchange/{timelineId}/export','exchange/{timelineId}/preview','grants','grants/{id}/revoke','jobs/{id}','jobs/{id}/cancel','uploads','uploads/{id}/chunks/{index}','uploads/{id}/complete','downloads/{id}/chunks/{index}'];
+const longRoute = (method, route) => method === 'POST' && (imageJobAction(route) || route === 'plans' || /^plans\/[0-9a-f-]{36}\/apply$/.test(route) || route.startsWith('providers/') || /^exchange\/\d+\/preview$/.test(route)) || method === 'GET' && /^exchange\/\d+\/export$/.test(route);
 const descriptor = (status, value, readTargets = []) => ({ status, headers: {'Content-Type':'application/json; charset=utf-8'}, body: Buffer.from(JSON.stringify(value)), readTargets });
 function failure(error, requestId) {
   const recognized = error instanceof DomainError || error?.code?.startsWith('provider_') || error?.code === 'invalid_provider_input';
@@ -40,12 +41,12 @@ async function bodyJson(request, limit = TRANSFER_JSON_BYTES) {
   let input; try { input = JSON.parse((await bytes(request, limit)).toString()); } catch (error) { if (error instanceof DomainError) throw error; throw new DomainError('invalid_json','Invalid JSON body.'); }
   assertObject(input); return input;
 }
-async function readSnapshots(repo, ids) {
+async function readSnapshots(repo, ids, read = id => repo.read(id)) {
   const data = new Array(ids.length); let next = 0, failed;
   async function worker() {
     while (!failed && next < ids.length) {
       const index = next++;
-      try { data[index] = await repo.read(ids[index]); }
+      try { data[index] = await read(ids[index]); }
       catch (error) { if (!failed || index < failed.index) failed = { index, error }; }
     }
   }
@@ -72,10 +73,12 @@ function capabilities(config) {
     inventory:{configured:!!config.inventoryCredential,requiredFor:['create/rename collision preflight','full order','timeline deletion','media reference preflight'],policy:'Explicit read-only identity. Mutations and public snapshots always use caller ACL.'},exchange:'19-column timeline_data.tsv plus covers; references require existing local media IDs.' };
 }
 async function readCover(context, media) {
-  await context.check(); await context.repo.assert([{target:media.Id,action:'read'}]);
+  // The source GET already proves Open; the binary handler enforces its own
+  // caller ACL. A separate permission round trip adds no authorization proof.
+  await context.check();
   if (!media.CoverImageBin || !(Number(media.CoverImageBin.Size)>0) && !['image/png','image/jpeg','image/webp','application/octet-stream'].includes(media.CoverImageBin.ContentType)) {
     if (!media.CoverImageUrl) return null;
-    return fetchPublicCover(media.CoverImageUrl,{origins:coverOrigins(process.env.TIMELINE_COVER_ORIGINS),beforeFetch:async()=>{await context.check();await context.repo.assert([{target:media.Id,action:'read'}]);}});
+    return fetchPublicCover(media.CoverImageUrl,{origins:coverOrigins(process.env.TIMELINE_COVER_ORIGINS),beforeFetch:async()=>{await context.check();}});
   }
   const result = await context.repo.request(context.repo.config.repositoryUrl+'/binaryhandler.ashx?'+new URLSearchParams({nodeid:String(media.Id),propertyname:'CoverImageBin'}),{maxBytes:10*1024*1024});
   const contentType=storedCoverMime(result.bytes,result.contentType);
@@ -108,6 +111,26 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
     if (route === 'images/capabilities' && method === 'GET') {
       requireScope(context, 'content:read'); const value = await context.repo.images.capabilities();
       return descriptor(200, { data: { available: value.supported, protocol: value.protocol, limits: IMAGE_LIMITS } });
+    }
+    if (route === 'images/preview-sources' && method === 'POST') {
+      requireScope(context, 'content:read');
+      const input = await bodyJson(request, 16384);
+      if (Object.keys(input).some(key => !['ownerId', 'sourceIds'].includes(key)) ||
+        !Array.isArray(input.sourceIds) || !input.sourceIds.length || input.sourceIds.length > IMAGE_LIMITS.sources || new Set(input.sourceIds).size !== input.sourceIds.length) {
+        throw new DomainError('invalid_input', 'Preview needs an owner and distinct bounded source IDs.');
+      }
+      const ownerId = assertId(input.ownerId), ids = input.sourceIds.map(assertId);
+      const owner = await context.repo.read(ownerId, { image: false });
+      if (!['Timeline', 'MediaItem', 'BookMediaItem'].includes(owner.Type) || owner.Type !== 'Timeline' && (ids.length !== 1 || ids[0] !== ownerId)) throw new DomainError('invalid_input', 'Preview sources do not match this owner type.');
+      const sources = await readSnapshots(context.repo, ids, async id => {
+        const source = await context.repo.imageSourceSnapshot(id);
+        if (owner.Type === 'Timeline' && !['MediaItem', 'BookMediaItem'].includes(source.Type)) throw new DomainError('invalid_input', 'Timeline posters require media sources.');
+        if (!source.CoverImageBin || !['image/png', 'image/jpeg', 'image/webp', 'application/octet-stream'].includes(source.CoverImageBin.ContentType)) throw new DomainError('cover_unavailable', 'Upload an original cover before preparing image sizes.', 404);
+        if (!source.ModificationDate || typeof source.Version !== 'string' || !source.Version) throw new DomainError('backend_revision_unavailable', 'Source version metadata is unavailable.', 503);
+        return { id: source.Id, url: `/api/v1/content/${source.Id}/cover`, version: 'sha256:' + hash(source) };
+      });
+      await context.check();
+      return descriptor(200, { data: { owner, sources } }, [owner.Id, ...ids]);
     }
     const imagePresentation = route.match(/^content\/(\d+)\/image-presentation(\/editor)?$/), imageSets = route.match(/^content\/(\d+)\/image-sets$/), imageRead = route.match(/^images\/(\d+)\/([0-9a-f-]{36})\/(w[1-9][0-9]{0,3})$/);
     if (imagePresentation && method === 'GET') {
@@ -154,19 +177,21 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
       }
       payload.requestHash = hash(payload);
       await observeHeldImage(context, payload, store, coordinator);
+      const imageRequestId = job?.requestId ?? randomUUID();
       return coordinator.run(async guard => {
-        context.repo.beforeWrite = async () => { await guard.assertOwner(); await context.check(); await guard.assertOwner(); };
+        context.repo.beforeWrite = async () => { await job?.assertOwner(); await guard.assertOwner(); await context.check(); await guard.assertOwner(); await job?.assertOwner(); };
         await context.check(); await context.journal.assertRecoveryBoundary([operationId]);
         const result = await context.journal.mutation(payload, transient);
-        if (!result?.ok) throw new DomainError(result?.code || 'image_write_failed', result?.message || 'Image write failed.', result?.status || 502, { uncertain: result?.uncertain === true });
+        if (!result?.ok) throw new DomainError(result?.code || 'image_write_failed', result?.message || 'Image write failed.', result?.status || 502, { uncertain: result?.uncertain === true, ...(result?.uncertain ? { operationId, stoppedRequestId: imageRequestId } : {}) });
         // A receipt is private state, never permission: current owner Save and
         // selected source Open is rechecked for draft receipts.
-        if (result.result?.setId && !result.result.deleted) await context.repo.images.set(result.result.setId, targetId);
-        else await context.repo.images.owner(targetId, { write: true });
+        const authorizedSet = result.result?.setId && !result.result.deleted ? await context.repo.images.set(result.result.setId, targetId) : null;
+        if (!authorizedSet) await context.repo.images.owner(targetId, { write: true });
         await context.check();
         const value = action === 'image-variant' ? result.result.variant : result.result;
-        return descriptor(action === 'image-draft' ? 201 : 200, { data: value }, [targetId]);
-      }, { requestId: randomUUID(), identity: context.identity.Id, principal: context.principal, operationId, waitMs: 5000 });
+        const sources = authorizedSet?.manifest.sourceIds ?? [];
+        return descriptor(action === 'image-draft' ? 201 : 200, { data: value }, [...new Set([targetId, ...sources])]);
+      }, { requestId: imageRequestId, ...(job ? { jobId: job.id } : {}), identity: context.identity.Id, principal: context.principal, operationId, waitMs: 5000 });
     }
     if (route==='plans' && method==='POST') { const input=await bodyJson(request); const plan=await preview(context,{...input,commands:await transfers.hydrateCommands(context,input.commands)},store); return descriptor(200,plan,plan.targets); }
     const applyRoute=route.match(/^plans\/([0-9a-f-]{36})\/apply$/);
@@ -188,7 +213,7 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
     }
     const content=route.match(/^content\/(\d+)$/),cover=route.match(/^content\/(\d+)\/cover$/);
     if (content && method==='GET') { requireScope(context,'content:read'); const data=await context.repo.read(assertId(Number(content[1])));return descriptor(200,{data},[data.Id]); }
-    if (cover && method==='GET') { requireScope(context,'content:read');const media=await context.repo.read(assertId(Number(cover[1]))),binary=await readCover(context,media);if(!binary)throw new DomainError('cover_unavailable','Binary cover is unavailable.',404);return {status:200,headers:{'Content-Type':binary.contentType},body:binary.data,readTargets:[media.Id]}; }
+    if (cover && method==='GET') { requireScope(context,'content:read');const media=await context.repo.imageSourceSnapshot(assertId(Number(cover[1]))),binary=await readCover(context,media);if(!binary)throw new DomainError('cover_unavailable','Binary cover is unavailable.',404);return {status:200,headers:{'Content-Type':binary.contentType},body:binary.data,readTargets:[media.Id]}; }
     if (route==='lookup' && method==='POST') { requireScope(context,'content:read');const input=await bodyJson(request);if(Object.keys(input).some(k=>!['target','parent'].includes(k)))throw new DomainError('invalid_input','Lookup accepts target and optional parent.');const data=await context.repo.read(input.target,{parent:input.parent===true});return descriptor(200,{data},[data.Id]); }
     if (route==='snapshots' && method==='POST') { requireScope(context,'content:read');const input=await bodyJson(request);if(!Array.isArray(input.ids)||input.ids.length>100||Object.keys(input).some(k=>k!=='ids'))throw new DomainError('invalid_input','Snapshot batch accepts at most 100 content IDs.');const ids=input.ids.map(id=>assertId(id)),data=await readSnapshots(context.repo,ids);return descriptor(200,{data},data.map(row=>row.Id)); }
     const type={timelines:'Timeline',media:'MediaItem',books:'BookMediaItem',entries:'TimelineEntry'}[route];
@@ -247,14 +272,14 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
       }
       if(route.startsWith('__verification/'))throw new DomainError('route_unavailable','Application route not found.',404);
       const revoke=route.match(/^grants\/([0-9a-f-]{36})\/revoke$/);
-      const publicRead=method==='GET' && (['timelines','media','books','entries','images/capabilities'].includes(route)||/^content\/\d+(\/(cover|image-presentation))?$/.test(route)||/^images\/\d+\/[0-9a-f-]{36}\/w[1-9][0-9]{0,3}$/.test(route)||/^downloads\/[0-9a-f-]{36}\/chunks\/\d+$/.test(route))||method==='POST'&&['lookup','snapshots'].includes(route);
+      const publicRead=method==='GET' && (['timelines','media','books','entries','images/capabilities'].includes(route)||/^content\/\d+(\/(cover|image-presentation))?$/.test(route)||/^images\/\d+\/[0-9a-f-]{36}\/w[1-9][0-9]{0,3}$/.test(route)||/^downloads\/[0-9a-f-]{36}\/chunks\/\d+$/.test(route))||method==='POST'&&['lookup','snapshots','images/preview-sources'].includes(route);
       const context=await authenticate(nodeHeaders(request),config,store,{session:['grants','recovery','images/recovery'].includes(route)||!!revoke&&!request.headers.get('authorization')?.startsWith('Bearer tta_'),anonymous:publicRead});
       let response;
       if(background)response=await jobs.run(request,context,({request,context,job})=>execute(request,context,job));
       else if(revoke && method==='POST'){if(Object.keys(await bodyJson(request)).length)throw new DomainError('invalid_input','Revoke accepts an empty object.');await context.check();if(context.grant&&revoke[1]!==context.grant.id)throw new DomainError('grant_admin_denied','A delegated grant may revoke only itself.',403);if(!await store.revoke(revoke[1],context.identity.Id))throw new DomainError('grant_unavailable','Grant is unavailable for this identity.',404);await store.audit(context.principal,'grant','revoked',[]);response=new Response(JSON.stringify({revoked:true}),{headers:{'Content-Type':'application/json'}});}
       else if(route==='grants' && method==='POST')response=await transfers.prepareResponse(descriptor(201,await issueGrant(context,await bodyJson(request),config,store)),context);
       else if(route==='recovery' && method==='POST')response=await transfers.prepareResponse(await recovery(request,context),context);
-      else if(route==='images/recovery' && method==='POST'){requireScope(context,'covers:write');const result=await recoverImage(context,await bodyJson(request,16384),request.headers.get('idempotency-key'),store,coordinator);response=await transfers.prepareResponse(descriptor(result.status,result.value),context);}
+      else if(route==='images/recovery' && method==='POST'){requireScope(context,'covers:write');const result=await recoverImage(context,await bodyJson(request,16384),request.headers.get('idempotency-key'),store,coordinator);await jobs.completeImageRecovery(context,result.value);response=await transfers.prepareResponse(descriptor(result.status,result.value),context);}
       else if(/^jobs\/[0-9a-f-]{36}(\/cancel)?$/.test(route)){const parts=route.split('/');if(parts.length===2&&method==='GET')response=await jobs.status(parts[1],context);else if(parts[2]==='cancel'&&method==='POST'){if(Object.keys(await bodyJson(request)).length)throw new DomainError('invalid_input','Cancellation accepts an empty object.');response=await jobs.cancel(parts[1],context);}else throw new DomainError('route_unavailable','Job route not found.',404);}
       else if(longRoute(method,route))response=await jobs.enqueue(request,context,await bytes(request),{requestId});
       else response=await transfers.handle(request,context) || await transfers.prepareResponse(await execute(request,context),context);

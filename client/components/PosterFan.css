@@ -41,7 +41,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   .poster-fan__card:hover {
-    z-index: 10;
+    z-index: 20;
   }
 
   .poster-fan__card:hover .poster-fan__surface {

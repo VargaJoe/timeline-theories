@@ -594,6 +594,7 @@ async function main() {
   await test('an image draft interrupted by Cloudflare retains its exact generation and never automatically uploads or restarts it', async () => {
     const f = await fixture({ discovery: 'ready' }), original = globalThis.fetch, drafts = [];
     const imageSource = read('client/services/imageVariantService.ts')
+      .replace("'../utils/posterStripLayout.mjs'", JSON.stringify(new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href))
       .replace("import { environment } from '../configuration';", 'const environment=globalThis.__availabilityEnvironment;')
       .replace("from './nativeApi'", 'from ' + JSON.stringify(f.nativeUrl))
       .replace("from './sensenet'", 'from ' + JSON.stringify(f.senseUrl));

@@ -5,7 +5,7 @@ import ts from '../client/node_modules/typescript/lib/typescript.js';
 
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const native = moduleUrl(`export const nativeRequest=(...args)=>globalThis.imagePublicationFixture.request(...args);
-export const nativeResponse=()=>{throw new Error('unexpected original download during publication')};
+export const nativeResponse=(...args)=>{if(globalThis.imagePublicationFixture.response)return globalThis.imagePublicationFixture.response(...args);throw new Error('unexpected original download during publication')};
 export const nativeSnapshot=async(...args)=>{globalThis.imagePublicationFixture.snapshots?.push(args);return globalThis.imagePublicationFixture.owner};
 export const nativeCoverPayload=async(file,fileName)=>({bytesBase64:Buffer.from(await file.arrayBuffer()).toString('base64'),mimeType:file.type,fileName});
 export const applyNativeCommands=async commands=>globalThis.imagePublicationFixture.apply(commands);
@@ -13,8 +13,39 @@ export const acknowledgeNativeCommands=()=>{};`);
 const context = moduleUrl(`export const captureOperationContext=()=>()=>{if(globalThis.imagePublicationFixture.changed)throw new Error('context changed')};export const assertOperations=async()=>{await globalThis.imagePublicationFixture.preflight?.()};`);
 const config = moduleUrl(`export const environment={projectRoot:'/Root/Fixture'};`);
 let source = ts.transpileModule(fs.readFileSync(new URL('../client/services/imageVariantService.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-for (const [from, to] of [['../configuration', config], ['./nativeApi', native], ['./sensenet', context]]) source = source.replaceAll(`'${from}'`, JSON.stringify(to));
+for (const [from, to] of [['../configuration', config], ['./nativeApi', native], ['./sensenet', context], ['../utils/posterStripLayout.mjs', new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href]]) source = source.replaceAll(`'${from}'`, JSON.stringify(to));
 const { ImagePublication, OriginalImageUpload, imageCapabilities, imagePresentation, sourceForGeneration } = await import(moduleUrl(source));
+
+test('uncertain image recovery retains its exact step key, requires explicit stopped confirmation and accepts only zero-write matching results', async () => {
+  const operationId = crypto.randomUUID(), stoppedRequestId = crypto.randomUUID(), calls = [];
+  const owner = { Id: 7, revision: 'sha256:' + 'a'.repeat(64) };
+  let recoveryReply;
+  globalThis.imagePublicationFixture = { owner, async request() { throw Object.assign(new Error('unconfirmed'), { details: { uncertain: true, operationId, stoppedRequestId } }); }, async response(path, init) {
+    calls.push({ path, body: JSON.parse(init.body), key: init.headers['Idempotency-Key'] });
+    return Response.json(recoveryReply, { status: recoveryReply.pending ? 409 : 200 });
+  } };
+  const generated = { sources: [{ id: 8, stamp: 'b'.repeat(64) }], recipe: { template: 'poster-strip-v1', sourceIds: [8] }, variants: [] };
+  const publication = new ImagePublication(7, generated, 'timeline-composite', owner), signal = new AbortController().signal;
+  await assert.rejects(publication.publish(signal, () => {}), /unconfirmed/);
+  assert.equal(publication.recovery.operationId, operationId);
+  await assert.rejects(publication.recover(signal, false, true), /explicit stopped confirmation/);
+  assert.equal(calls.length, 0);
+  recoveryReply = { operationId, pending: true, repositoryWrites: 0 };
+  assert.equal((await publication.recover(signal)).pending, true);
+  assert.deepEqual(calls[0], { path: '/images/recovery', body: { operationId }, key: publication.generationId + ':draft' });
+  recoveryReply = { operationId, confirmed: false, pending: false, abandoned: true, repositoryWrites: 0, failure: { code: 'image_publication_abandoned' } };
+  assert.equal((await publication.recover(signal, true, true)).abandoned, true);
+  assert.deepEqual(calls[1].body, { operationId, stoppedRequestId, confirmStopped: true, abandon: true });
+  assert.equal(calls[1].key, calls[0].key);
+  for (const invalid of [{ ...recoveryReply, operationId: crypto.randomUUID() }, { ...recoveryReply, repositoryWrites: 1 }, { ...recoveryReply, confirmed: true }, { ...recoveryReply, failure: { code: 'foreign' } }]) {
+    recoveryReply = invalid;
+    await assert.rejects(publication.recover(signal, true, true), /could not confirm/);
+  }
+  globalThis.imagePublicationFixture.changed = true;
+  const priorCalls = calls.length;
+  await assert.rejects(publication.recover(signal, true, true), /context changed/);
+  assert.equal(calls.length, priorCalls);
+});
 
 test('a stored generic MIME original reaches guarded byte decoding without changing original metadata', async () => {
   const owner = { Id: 8, CoverImageBin: { ContentType: 'application/octet-stream' } }, calls = [], snapshots = [];
@@ -26,6 +57,21 @@ test('a stored generic MIME original reaches guarded byte decoding without chang
     globalThis.imagePublicationFixture.owner = { Id: 8, CoverImageBin: { ContentType: contentType } };
     await assert.rejects(sourceForGeneration(8, new AbortController().signal), /Upload an original/);
   }
+});
+
+test('a confirmed image step cannot lend its recovery reference to a later failed upload', async () => {
+  const owner = { Id: 7, revision: 'sha256:' + 'a'.repeat(64) }; let draftConfirmed = false;
+  globalThis.imagePublicationFixture = { owner, async request(path) {
+    if (path === '/images/drafts' && !draftConfirmed) throw Object.assign(Error('unconfirmed draft'), { details: { operationId: crypto.randomUUID(), stoppedRequestId: crypto.randomUUID() } });
+    if (path === '/images/drafts') return { setId: 90, ownerRevision: 'sha256:' + 'b'.repeat(64) };
+    throw Error('lost upload connection');
+  } };
+  const generated = { sources: [{ id: 8, stamp: 'b'.repeat(64) }], recipe: { template: 'poster-strip-v1', sourceIds: [8] }, variants: [{ name: 'w400', width: 400, height: 200, mimeType: 'image/png', byteLength: 3, sha256: 'c'.repeat(64), blob: new Blob(['abc']) }] };
+  const publication = new ImagePublication(7, generated, 'timeline-composite', owner), signal = new AbortController().signal;
+  await assert.rejects(publication.publish(signal, () => {}), /unconfirmed draft/); assert.ok(publication.recovery);
+  draftConfirmed = true;
+  await assert.rejects(publication.publish(signal, () => {}), /lost upload connection/);
+  assert.equal(publication.recovery, undefined, 'a stale draft reference cannot close a different upload');
 });
 
 test('image publisher retries exact draft/upload/seal keys without staging binary bytes in a plan', async () => {

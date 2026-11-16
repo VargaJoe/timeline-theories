@@ -1,5 +1,7 @@
 # M1 operation parity and verification
 
+Latest local React+Functions acceptance and image-publication recovery: [2026-11-15/16 verification](agent-api-cover-publication-verification.md). Historical results below remain dated evidence.
+
 The native API runs in the existing Netlify app's Functions. UI and native clients share plans, validation, permission checks and receipts; SenseNet stores the content. Private app Blobs store grants, reviewed plans, jobs and durable results. All content-writing acceptance tests use the isolated M0 repository and owned UUID fixtures. Production SenseNet inspection is read-only.
 
 ## Operation map
@@ -25,9 +27,7 @@ Clone/fork, new account synchronization, universe models, trending/discovery and
 For an already provisioned/restored M0 repository, run one managed app:
 
 ```powershell
-npm ci
-npm ci --prefix client
-npm run dev:m0
+docker compose -f compose.local.yaml up -d --build app
 ```
 
 In a second terminal, run fixture gates sequentially:
@@ -47,19 +47,22 @@ node scripts/m1-browser-api-smoke.cjs
 node scripts/m0-browser-smoke.cjs
 ```
 
-Restart verification uses the exact managed Netlify CLI Node PID, keeps private app Blobs, and must resume before the printed saved-plan expiry:
+Restart verification uses the exact owned Docker app, keeps private app Blobs, and must resume before the printed saved-plan expiry:
 
 ```powershell
-node scripts/m1-restart-smoke.mjs --prepare --app-pid OWNED-CLI-PID
-# Restart only the owned app process tree, preserving deployment/.local.
-node scripts/m1-restart-smoke.mjs --resume --app-pid NEW-OWNED-CLI-PID
+node --dns-result-order=ipv4first scripts/m1-restart-smoke.mjs --prepare --app-container timeline-local-app-1
+docker compose -f compose.local.yaml restart app
+# Wait for the owned HTTPS app healthcheck before resuming.
+node --dns-result-order=ipv4first scripts/m1-restart-smoke.mjs --resume --app-container timeline-local-app-1
 ```
 
-For the readonly gate, stop only the owned managed app and restart it with `node scripts/m1-dev.mjs --local --readonly`; then run `node scripts/m1-readonly-smoke.mjs`. Restore the normal `--local` app afterwards. This checks actual HTTPS denial and unchanged content; handler tests separately verify zero write dispatch.
+The restart adapter verifies the exact Compose project/service, local image, loopback port and container ID/StartedAt; the older explicit managed-PID mode remains available for historical tests. Native gates capture the actual local record count and require exact equality after owned-UUID cleanup, preserving existing demos and user content. On Windows use `node --dns-result-order=ipv4first` for host-side local HTTPS gates.
 
-Ordinary configured dev is separately checked with `node scripts/m1-dev.mjs --readonly`, without `--local`, followed by `node scripts/m1-configured-dev-smoke.mjs`. The script compares discovery with the browser's public Vite profile, checks app storage and acknowledges a credential-free synthetic background HTTPS request. No authenticated job or repository write runs. It preserves the selected `.env`/mode/process targets, rather than assuming they point at production. Restore the explicit M0 app afterwards.
+For the readonly gate, use a temporary ignored Compose override with the `production-readonly` app profile and **explicitly the same M0 localhost repository/authority/project/client binding**, then run `node --dns-result-order=ipv4first scripts/m1-readonly-smoke.mjs`. The profile name does not choose a production repository. Verify discovery reports the exact local target and `readOnly:true` before testing, and restore normal Compose immediately afterwards. Do not edit `.env` or start a host app process. This checks actual HTTPS denial and unchanged content; handler tests separately verify zero write dispatch.
 
-For live providers, the explicit local `--production-provider-keys` launcher option reads exactly three existing production key nodes into local Function memory. It provides no production content credential to the app. Run `node scripts/m1-provider-live.mjs`; report provider failures separately. Do not create/link provider accounts during this gate.
+Historical configured-dev acceptance used the retained host launcher and `m1-configured-dev-smoke.mjs` to compare discovery with the public Vite profile, check private storage and acknowledge a credential-free background request. This dated gate was not rerun in the current slice; current local startup is Docker-only.
+
+Historical keyed-provider acceptance used an explicit production-key read helper. It was not used here: current local verification used keyless Open Library and no production credentials or provider-account actions. Optional provider configuration belongs in the existing private Docker `.env`, not a public Vite variable or tracked profile.
 
 The local Blobs SDK emulator needs documented compatibility fixes for conditional writes, ETags and Windows paths. Its tests do not prove cloud atomicity. `node scripts/m1-cloud-state-smoke.mjs --url VERIFIED-PR53-PREVIEW-ORIGIN` is restricted to the actual PR53 Deploy Preview. It sends public discovery GET and empty-JSON POST to `/__verification/storage`, with no credentials, MCP/config secret reads or SenseNet requests. The preview/development endpoint checks simultaneous first writes, strong reads, current/nonmatching/stale ETag conditions and cleanup of an internal UUID. One private claim/result per trusted deployment prevents repeated diagnostic writes. Callers cannot choose storage keys, values or ETags. Production exposes no verification endpoint.
 

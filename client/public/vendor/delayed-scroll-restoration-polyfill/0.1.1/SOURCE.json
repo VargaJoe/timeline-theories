@@ -1,0 +1,18 @@
+{
+  "package": "delayed-scroll-restoration-polyfill",
+  "version": "0.1.1",
+  "license": "MIT",
+  "repository": "git+https://github.com/brigade/delayed-scroll-restoration-polyfill.git",
+  "metadataUrl": "https://registry.npmjs.org/delayed-scroll-restoration-polyfill/0.1.1",
+  "tarballUrl": "https://registry.npmjs.org/delayed-scroll-restoration-polyfill/-/delayed-scroll-restoration-polyfill-0.1.1.tgz",
+  "previousScriptUrl": "https://unpkg.com/delayed-scroll-restoration-polyfill@0.1.1/index.js",
+  "fetchedAt": "2026-11-16T16:06:25.483Z",
+  "registryIntegrity": "sha512-DcDEi1224qIzuVKJrOelOZvJd3pKsxdiAiG0hVvti/CVXBbdRlqMDZigX1Wqx+jTj6kk0+TQT7fPK8I1khBvAQ==",
+  "registryShasum": "f770175da3f8e565fea993162b4c539e701f7a0f",
+  "archiveSha256": "43e025004fd2188ccc3e2689fe9888cdc7f1264cc78c40418b020ea80c8247e9",
+  "scriptFile": "index.js",
+  "licenseFile": "MIT-LICENSE",
+  "scriptSha256": "59ab8dba4f7253a01a022909c3889c5254eb371b6e7b258c1d35502b8fb1a349",
+  "licenseSha256": "9ce0ac72c71f1494a3b589466558ff771f17d0767f88377ea80ef1758a3837d0",
+  "previousCdnBytesIdentical": true
+}

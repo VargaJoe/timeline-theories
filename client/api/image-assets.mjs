@@ -2,10 +2,11 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { DomainError, assertId, assertObject } from '../domain/content.mjs';
 import { assertUuid, hash, stableJson } from './store.mjs';
 import { storedCoverMime } from './covers.mjs';
+import { MAX_POSTER_SOURCES } from '../utils/posterStripLayout.mjs';
 
 export const IMAGE_PROTOCOL = 'timeline-image-assets-v1';
 export const IMAGE_STORAGE_NAME = '(images)';
-export const IMAGE_LIMITS = Object.freeze({ variantBytes: 1024 * 1024, variants: 3, totalBytes: 3 * 1024 * 1024, manifestBytes: 16384 });
+export const IMAGE_LIMITS = Object.freeze({ sources: MAX_POSTER_SOURCES, variantBytes: 1024 * 1024, variants: 3, totalBytes: 3 * 1024 * 1024, manifestBytes: 16384 });
 const OWNER_TYPES = new Set(['Timeline', 'MediaItem', 'BookMediaItem']);
 const IMAGE_ACTIONS = new Set(['image-draft', 'image-variant', 'image-seal', 'image-delete']);
 const TRANSPORT_ERRORS = new Set(['repository_transport', 'repository_timeout', 'repository_limit', 'backend_failure', 'backend_contract']);
@@ -28,7 +29,7 @@ export function validateImageVariant(value, { withId = true } = {}) {
 export function validateImageManifest(value, { draft = false } = {}) {
   only(value, ['schemaVersion', 'kind', 'projectPath', 'ownerId', 'generationId', 'sourceIds', 'sourceStamps', 'recipe', 'variants']);
   assertId(value.ownerId); assertUuid(value.generationId, 'Image generation ID');
-  if (value.schemaVersion !== 1 || !['timeline-composite', 'media-sizes'].includes(value.kind) || typeof value.projectPath !== 'string' || !Array.isArray(value.sourceIds) || value.sourceIds.length < 1 || value.sourceIds.length > 4 || new Set(value.sourceIds).size !== value.sourceIds.length) fail('invalid_image_asset', 'Invalid image manifest binding.');
+  if (value.schemaVersion !== 1 || !['timeline-composite', 'media-sizes'].includes(value.kind) || typeof value.projectPath !== 'string' || !Array.isArray(value.sourceIds) || value.sourceIds.length < 1 || value.sourceIds.length > MAX_POSTER_SOURCES || new Set(value.sourceIds).size !== value.sourceIds.length) fail('invalid_image_asset', 'Invalid image manifest binding.');
   value.sourceIds.forEach(assertId);
   if (value.kind === 'media-sizes' && (value.sourceIds.length !== 1 || value.sourceIds[0] !== value.ownerId)) fail('invalid_image_asset', 'Media size variants must use exactly their own preserved original image.');
   only(value.recipe, ['template', 'sourceIds', 'seed']);
@@ -93,7 +94,7 @@ export class ImageAssets {
   async owner(id, { write = false } = {}) {
     const owner = await this.repo.read(assertId(id), { image: false });
     if (!OWNER_TYPES.has(owner.Type)) fail('invalid_cover_target', 'This content does not support image presentations.');
-    await this.repo.assert([{ target: owner.Id, action: write ? 'cover' : 'read' }]); return owner;
+    if (write) await this.repo.assert([{ target: owner.Id, action: 'cover' }]); return owner;
   }
   invalidate(id) { this.roots.delete(id); }
   async node(target) { return this.repo.api(target, null, { query: { '$select': projection, metadata: 'no' } }); }
@@ -164,6 +165,7 @@ export class ImageAssets {
   async assertSources(manifest, { stamps = false, publicOwner = false } = {}) {
     for (const source of manifest.sourceStamps) {
       const row = await this.repo.imageSourceSnapshot(source.id);
+      if (!['MediaItem', 'BookMediaItem'].includes(row.Type)) fail('invalid_image_source', 'Generated image sources must be media originals.', 403);
       if (!['image/png', 'image/jpeg', 'image/webp', 'application/octet-stream'].includes(row.CoverImageBin?.ContentType)) fail('image_original_required', 'Upload the original PNG, JPEG or WebP cover to SenseNet before generating variants.');
       if (stamps && digest(await this.repo.coverBytes(source.id, { image: false })) !== source.stamp) fail('image_source_changed', 'A selected original image changed. Generate a new preview.', 409);
       if (publicOwner) {
@@ -240,7 +242,7 @@ export class ImageAssets {
     if (set.root.value.activeSetId === set.Id) fail('image_reference_conflict', 'Clear the active image presentation before deleting this set.', 409);
     const rows = await this.entries(set.Path, 4, set.Id);
     if (rows.length > 3 || rows.some(row => row.Type !== 'File' || row.ParentId !== set.Id || row.Path !== set.Path + '/' + row.Name || !/^w[1-9][0-9]{0,3}\.(png|jpg|webp)$/.test(row.Name))) fail('unexpected_children', 'Only exact managed image files can be deleted.', 409);
-    await this.repo.assert([set, ...rows].flatMap(row => [{ target: row.Id, action: 'read' }, { target: row.Id, action: 'delete' }])); return set;
+    await this.repo.assert([{ target: set.Id, action: 'delete' }, ...rows.flatMap(row => [{ target: row.Id, action: 'read' }, { target: row.Id, action: 'delete' }])]); return set;
   }
   async managedTree(owner, rows, { deleting = false } = {}) {
     if (!rows.length) return [];
@@ -259,14 +261,13 @@ export class ImageAssets {
         const set = generations.get(row.ParentId);
         if (!set || row.Type !== 'File' || row.Path !== set.Path + '/' + row.Name || !/^w[1-9][0-9]{0,3}\.(png|jpg|webp)$/.test(row.Name) || rows.filter(item => item.ParentId === set.Id).length > 3) fail('unexpected_children', 'The owner contains unmanaged image descendants.', 409);
       }
-      await this.repo.assert([{ target: row.Id, action: 'read' }, ...(deleting ? [{ target: row.Id, action: 'delete' }] : [])]);
+      if (deleting) await this.repo.assert([{ target: row.Id, action: 'delete' }]);
       result.push({ id: row.Id, revision: hash(row) });
     }
     return result.sort((a, b) => a.id - b.id);
   }
   async ensureStorage(owner, onDispatch) {
     let root = await this.storage(owner, { force: true }); if (root) return root;
-    await this.addNew(owner.Id);
     // SystemFolder is a stock special type, but its CTD must still be visible
     // to this caller. Refuse before changing any owner child-type settings.
     await this.repo.assert([{ target: owner.Id, action: 'create', type: 'SystemFolder' }]);
@@ -288,7 +289,7 @@ export class ImageAssets {
       this.kind(owner, payload.manifest);
       this.repo.revisionMatches(owner, payload.expectedRevision);
       const root = await this.storage(owner, { force: true });
-      await this.addNew(root?.Id ?? owner.Id);
+      await this.addNew(root?.Id ?? owner.Id, root ? 'Folder' : 'SystemFolder');
       await this.assertSources(payload.manifest, { stamps: true, publicOwner: await this.isPublic(owner) });
       if (root) { try { await this.node(root.Path + '/' + payload.generationId); fail('image_generation_exists', 'Resume the original generation request.', 409); } catch (error) { if (error.status !== 404) throw error; } }
       return { owner };
@@ -298,7 +299,7 @@ export class ImageAssets {
     if (payload.action === 'image-seal') await this.assertSources(set.manifest, { stamps: true, publicOwner: await this.isPublic(owner) });
     return { setId: set.Id, manifest: set.manifest, sealed: set.Sealed };
   }
-  async addNew(id) { if (await this.repo.api(id, 'HasPermission', { query: { permissions: 'AddNew' } }) !== true) fail('permission_denied', 'The caller cannot create managed image storage here.', 403); }
+  async addNew(id, type) { await this.repo.assert([{ target: id, action: 'create', type }]); }
   async write(payload, transient) {
     if (!isImageMutation(payload)) fail('invalid_operation', 'Invalid image mutation.');
     let dispatched = false, acknowledged = false; const onDispatch = () => { dispatched = true; };

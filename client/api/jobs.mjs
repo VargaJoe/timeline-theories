@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { DomainError } from '../domain/content.mjs';
 import { ProviderError } from './providers.mjs';
 import { assertUuid, hash, openAppState } from './store.mjs';
+import { imageJobAction, imageJobInput, authorizeImageJobResult } from './image-jobs.mjs';
 
 const MAX_INPUT = 4 * 1024 * 1024;
 const MAX_RESPONSE = 4 * 1024 * 1024;
@@ -43,7 +44,7 @@ function longRoute(request, origin) {
   if (url.origin !== origin || url.search || url.hash) throw new DomainError('job_route_invalid', 'A background job must use an application API route.');
   const post = /^\/api\/v1\/(plans|plans\/[0-9a-f-]{36}\/apply|providers\/(books\/(search|details)|media\/lookup|trakt\/list)|exchange\/\d+\/preview)$/i;
   const get = /^\/api\/v1\/exchange\/\d+\/export$/;
-  if (!(request.method === 'POST' && post.test(url.pathname)) && !(request.method === 'GET' && get.test(url.pathname))) throw new DomainError('job_route_invalid', 'This API route does not support background execution.');
+  if (!(request.method === 'POST' && (post.test(url.pathname) || imageJobAction(url.pathname))) && !(request.method === 'GET' && get.test(url.pathname))) throw new DomainError('job_route_invalid', 'This API route does not support background execution.');
   return url.pathname;
 }
 /** Credentials travel only in this HTTPS request. Redirects are never followed,
@@ -87,10 +88,12 @@ export class JobService {
     const [claim, cancellation, dispatch, writer] = await Promise.all([this.read(id, 'claim'), this.read(id, 'cancel'), this.read(id, 'dispatch-unconfirmed'), this.blobs.getWithMetadata(this.prefix + 'writer', { type: 'json', consistency: 'strong' })]);
     let recovery;
     const held = writer?.data, current = held?.owner;
-    if (held?.binding === this.binding && held.state === 'held' && current?.jobId === id && current.principal === caller.principal && current.identity === caller.identity && saved.planId && current.planId === saved.planId) {
-      assertUuid(current.requestId, 'Stopped request ID'); assertUuid(current.planId, 'Plan ID');
-      recovery = { planId: current.planId, stoppedRequestId: current.requestId, requiresStoppedConfirmation: true };
+    if (held?.binding === this.binding && held.state === 'held' && current?.jobId === id && current.principal === caller.principal && current.identity === caller.identity && (saved.planId && current.planId === saved.planId || saved.image && current.operationId === saved.image.operationId)) {
+      assertUuid(current.requestId, 'Stopped request ID');
+      if (saved.image) assertUuid(current.operationId, 'Image operation ID'); else assertUuid(current.planId, 'Plan ID');
+      recovery = { ...(saved.image ? { operationId: current.operationId } : { planId: current.planId }), stoppedRequestId: current.requestId, requiresStoppedConfirmation: true };
     }
+    if (!recovery && saved.image && claim) recovery = { operationId: saved.image.operationId, stoppedRequestId: saved.requestId, requiresStoppedConfirmation: true };
     await context.check();
     return json(202, { job: { id, state: claim ? cancellation ? 'cancelling' : 'running' : cancellation ? 'cancelled' : dispatch ? 'dispatch_unconfirmed' : 'queued' }, pending: true, ...(recovery ? { recovery } : {}) });
   }
@@ -105,18 +108,21 @@ export class JobService {
     const bytes = input === undefined ? Buffer.from(await request.arrayBuffer()) : Buffer.isBuffer(input) || input instanceof Uint8Array ? Buffer.from(input) : Buffer.from(JSON.stringify(input));
     if (bytes.length > MAX_INPUT) throw new DomainError('job_input_limit', 'Prepare an app upload before queuing input larger than 4 MiB.', 413);
     if (request.method === 'GET' && bytes.length) throw new DomainError('job_input_invalid', 'An export job cannot have a request body.');
+    const image = imageJobInput(route, bytes, context, this.config.projectRoot, idempotencyKey);
     await context.check();
     const id = randomUUID(), headers = {};
     for (const name of inputHeaders) if (request.headers.has(name)) headers[name] = request.headers.get(name);
-    const row = { id, binding: this.prefix, ...caller, requestId, ...(planId ? { planId } : {}), method: request.method, path: route, headers, body: bytes.toString('base64'), createdAt: new Date().toISOString() };
+    const row = { id, binding: this.prefix, ...caller, requestId, ...(planId ? { planId } : {}), ...(image ? { image } : {}), method: request.method, path: route, headers, body: bytes.toString('base64'), createdAt: new Date().toISOString() };
     const saved = await this.blobs.setJSON(this.key(id, 'input'), row, { onlyIfNew: true });
     if (!saved.modified) throw new DomainError('job_conflict', 'The generated job already exists.', 409);
-    if (apply) {
-      const mappingKey = this.prefix + `job-operations/${hash({ principal: caller.principal, key: idempotencyKey })}`;
-      const reservation = await this.blobs.setJSON(mappingKey, { id, principal: caller.principal, identity: caller.identity, planId }, { onlyIfNew: true });
+    if (apply || image) {
+      const binding = image ? { image } : { planId };
+      const matches = data => data?.principal === caller.principal && data.identity === caller.identity && (image ? data.image && hash(data.image) === hash(image) : data.planId === planId);
+      const mappingKey = this.prefix + (image ? `image-job-operations/${image.operationId}` : `job-operations/${hash({ principal: caller.principal, key: idempotencyKey })}`);
+      const reservation = await this.blobs.setJSON(mappingKey, { id, ...caller, ...binding }, { onlyIfNew: true });
       if (!reservation.modified) {
         const previous = await this.blobs.getWithMetadata(mappingKey, { type: 'json', consistency: 'strong' });
-        if (!previous || previous.data.principal !== caller.principal || previous.data.identity !== caller.identity || previous.data.planId !== planId) throw new DomainError('idempotency_conflict', 'This application key already belongs to a different saved plan.', 409);
+        if (!matches(previous?.data)) throw new DomainError('idempotency_conflict', 'This application key already belongs to a different saved request.', 409);
         const previousResult = await this.read(previous.data.id, 'result');
         let final;
         try { final = previousResult && JSON.parse(Buffer.from(previousResult.data.body, 'base64').toString()); } catch { final = null; }
@@ -131,10 +137,10 @@ export class JobService {
         if (!previousResult || final?.error?.code === 'job_cancelled' || !(busy || uncertainReceipt || uncertainError)) return this.status(previous.data.id, context);
         if (!previous.etag) throw new DomainError('state_invalid', 'The saved job reservation ETag is unavailable.', 503);
         await context.check();
-        const replaced = await this.blobs.setJSON(mappingKey, { id, principal: caller.principal, identity: caller.identity, planId }, { onlyIfMatch: previous.etag });
+        const replaced = await this.blobs.setJSON(mappingKey, { id, ...caller, ...binding }, { onlyIfMatch: previous.etag });
         if (!replaced.modified) {
           const latest = await this.blobs.getWithMetadata(mappingKey, { type: 'json', consistency: 'strong' });
-          if (!latest || latest.data.principal !== caller.principal || latest.data.identity !== caller.identity || latest.data.planId !== planId) throw new DomainError('idempotency_conflict', 'The saved job reservation changed for a different caller or plan.', 409);
+          if (!matches(latest?.data)) throw new DomainError('idempotency_conflict', 'The saved job reservation changed for a different caller or request.', 409);
           return this.status(latest.data.id, context);
         }
       }
@@ -150,13 +156,64 @@ export class JobService {
     return this.descriptor(id, context);
   }
   async status(id, context) {
-    await this.owned(id, context);
+    const saved = await this.owned(id, context);
     const result = await this.read(id, 'result');
     if (!result) return this.descriptor(id, context);
     const final = result.data;
+    await authorizeImageJobResult(context, saved.image);
     if (final.readTargets?.length) await context.repo.assert(final.readTargets.map(target => ({ target, action: 'read' })));
     await context.check();
     return new Response([204, 205, 304].includes(final.status) ? null : Buffer.from(final.body, 'base64'), { status: final.status, headers: { ...final.headers, 'cache-control': 'no-store' } });
+  }
+  async completeImageRecovery(context, value, attempt = 0) {
+    if (value.pending !== false || value.repositoryWrites !== 0 || !(value.confirmed || value.failure || value.notPrepared)) return;
+    const mappingKey = this.prefix + `image-job-operations/${assertUuid(value.operationId, 'Image operation ID')}`;
+    const mapping = await this.blobs.getWithMetadata(mappingKey, { type: 'json', consistency: 'strong' });
+    if (!mapping) return; // Older synchronous publications have no job mapping.
+    const original = mapping.data, saved = (await this.read(original.id, 'input'))?.data;
+    if (!saved || original.identity !== context.identity.Id || saved.identity !== original.identity || saved.principal !== original.principal || saved.binding !== this.prefix || saved.image?.operationId !== value.operationId || hash(saved.image) !== hash(original.image)) throw new DomainError('job_binding_mismatch', 'The recovered image job differs from its original owner or application target.', 409);
+    const metadata = imageJobInput(saved.path, Buffer.from(saved.body, 'base64'), { ...context, principal: saved.principal }, this.config.projectRoot, saved.headers['idempotency-key']);
+    if (!metadata || hash(metadata) !== hash(saved.image)) throw new DomainError('job_binding_mismatch', 'The recovered image job differs from its exact saved request.', 409);
+    await authorizeImageJobResult(context, saved.image);
+    const existing = await this.read(saved.id, 'result');
+    let response;
+    if (value.failure || value.notPrepared) {
+      const failure = value.failure || { code: 'image_publication_not_prepared', message: 'The stopped image attempt prepared no mutation. Start a new preview.', status: 409 };
+      response = errorResponse(new DomainError(failure.code, failure.message, failure.status || 409, { uncertain: false, ...(value.notPrepared ? { notPrepared: true } : {}), ...(value.abandoned ? { abandoned: true } : {}) }));
+    } else {
+      const sources = value.result?.manifest?.sourceIds ?? [];
+      await context.repo.assert(sources.map(target => ({ target, action: 'read' })));
+      response = { status: saved.image.action === 'image-draft' ? 201 : 200, headers: { 'content-type': 'application/json' }, body: Buffer.from(JSON.stringify({ data: value.result })), readTargets: [saved.image.targetId, ...sources] };
+    }
+    await context.check();
+    // A confirmed journal outcome may finish a permanently claimed job whose
+    // worker stopped before saveResult. This never invokes that worker again.
+    let resultId = saved.id;
+    if (existing) {
+      let code;
+      try { code = JSON.parse(Buffer.from(existing.data.body, 'base64')).error?.code; } catch { /* A corrupt old error is not a native completion receipt. */ }
+      if (existing.data.status >= 200 && existing.data.status < 300) {
+        if (value.failure || value.notPrepared) throw new DomainError('job_recovery_conflict', 'The existing image job already reports a successful result.', 409);
+        return;
+      }
+      if (response.status === existing.data.status && code === (value.failure?.code || (value.notPrepared ? 'image_publication_not_prepared' : undefined))) return;
+      // Keep the old immutable error. Publish a completed receipt view via
+      // conditional mapping replacement, without queuing another invocation.
+      resultId = randomUUID();
+      const created = await this.blobs.setJSON(this.key(resultId, 'input'), { ...saved, id: resultId, recoveredFrom: saved.id }, { onlyIfNew: true });
+      if (!created.modified) throw new DomainError('job_conflict', 'The recovered receipt job ID already exists.', 409);
+    }
+    await this.saveResult(resultId, response, context);
+    if (existing) {
+      if (!mapping.etag) throw new DomainError('state_invalid', 'The image job mapping ETag is unavailable.', 503);
+      const replaced = await this.blobs.setJSON(mappingKey, { ...original, id: resultId }, { onlyIfMatch: mapping.etag });
+      if (replaced.modified) return;
+    } else {
+      const observed = await this.read(resultId, 'result');
+      if (observed?.data.status === response.status) return;
+    }
+    if (attempt >= 2) throw new DomainError('job_recovery_conflict', 'The image job changed during receipt recovery. Check the same saved operation again.', 409);
+    return this.completeImageRecovery(context, value, attempt + 1);
   }
   async cancel(id, context) {
     await this.owned(id, context);
@@ -203,7 +260,15 @@ export class JobService {
     try {
       await assertOwner();
       await this.saveResult(id, await execute({ request: originalRequest, context, job }), context);
-    } catch (error) { await this.saveResult(id, errorResponse(error), context); }
+    } catch (error) {
+      const response = errorResponse(error);
+      if (row.image) {
+        const failure = JSON.parse(response.body.toString());
+        failure.error.details = { ...failure.error.details, operationId: row.image.operationId, stoppedRequestId: row.requestId };
+        response.body = Buffer.from(JSON.stringify(failure));
+      }
+      await this.saveResult(id, response, context);
+    }
     return new Response(null, { status: 204 });
   }
 }

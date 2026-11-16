@@ -21,6 +21,25 @@ const resumeIndex = process.argv.indexOf('--resume');
 const resumePath = resumeIndex >= 0 ? process.argv[resumeIndex + 1] : undefined;
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
+// Observe the app's own poll; acceptance is the terminal job response, not 202.
+async function waitForImageCompletion(page, predicate, timeout = 15 * 60 * 1000) {
+  const completed = new Map(); let jobId, resolveFinal, rejectFinal, timer;
+  const onResponse = response => {
+    const url = new URL(response.url()), match = url.pathname.match(/^\/api\/v1\/jobs\/([0-9a-f-]{36})$/i);
+    if (url.origin !== FRONTEND || response.request().method() !== 'GET' || !match || response.status() === 202) return;
+    completed.set(match[1], response); if (match[1] === jobId) resolveFinal?.(response);
+  };
+  const onClose = () => rejectFinal?.(Error('Browser closed before the owned image job completed.'));
+  page.on('response', onResponse); page.on('close', onClose);
+  try {
+    const acknowledgement = await page.waitForResponse(predicate, { timeout });
+    if (acknowledgement.status() !== 202) return acknowledgement;
+    const value = await acknowledgement.json(); assert.equal(value.pending, true);
+    assert.match(value.job?.id || '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i); jobId = value.job.id;
+    return completed.get(jobId) || await new Promise((resolve, reject) => { resolveFinal = resolve; rejectFinal = reject; timer = setTimeout(() => reject(Error('The owned image job did not reach a terminal response.')), timeout); if (page.isClosed()) onClose(); });
+  } finally { clearTimeout(timer); page.off('response', onResponse); page.off('close', onClose); }
+}
+
 async function smoke() {
   local.assertLocal(local.REPOSITORY);
   if (resumeIndex >= 0 && !resumePath) throw new Error('--resume needs the absolute preserved report.json path.');
@@ -39,6 +58,7 @@ async function smoke() {
   fs.mkdirSync(output, { recursive: true });
   const report = { version: 3, storage: STORAGE, ranAt: new Date().toISOString(), fixturePrefix: prefix, frontend: FRONTEND, checks: [], passed: false, keepDemo, ...(previousPath ? { resumeOf: previousPath } : {}) };
   if (previousReport?.controlledLostResponse?.passed) report.controlledLostResponse = { ...previousReport.controlledLostResponse, carriedFrom: previousPath };
+  if (previousReport?.controlledLostDraftAcknowledgement?.passed) report.controlledLostDraftAcknowledgement = { ...previousReport.controlledLostDraftAcknowledgement, carriedFrom: previousPath };
   const secrets = Object.values(accounts).flatMap(account => [account.password, account.apiKey, account.token]).filter(value => typeof value === 'string' && value.length > 7);
   const redact = value => secrets.reduce((result, secret) => result.replaceAll(secret, '[redacted]'), String(value))
     .replace(/([?&](?:code|state|session_state|access_token|refresh_token|id_token)=)[^&"\s]+/gi, '$1[redacted]');
@@ -52,7 +72,11 @@ async function smoke() {
     const response = await local.request(local.REPOSITORY + '/OData.svc/Root/Content?' + new URLSearchParams({ query: '+InTree:' + ROOT + ' .AUTOFILTERS:OFF .LIFESPAN:OFF', $top: '1', $inlinecount: 'allpages', $select: 'Id', metadata: 'no' }), { account: accounts.admin });
     assert.equal(response.status, 200); return Number(response.value.d.__count);
   };
-  report.initialCount = await repositoryCount(); checkpoint();
+  const startingCount = await repositoryCount();
+  report.initialCount = previousReport ? previousReport.initialCount : startingCount;
+  assert(Number.isSafeInteger(report.initialCount) && report.initialCount > 0);
+  if (previousReport) report.resumeStartingCount = startingCount;
+  checkpoint();
   let browser, editor, visitor, timeline, media;
   const selected = target => local.api(target, { account: accounts.admin, query: { $select: 'Id,Name,Path,Type,IsSystemContent,Description', metadata: 'no' } });
   const queryContents = async (parentPath, query) => {
@@ -73,6 +97,15 @@ async function smoke() {
     const accepted = previousReport?.checks.find(check => check.name === name && check.passed);
     if (accepted && !name.startsWith('Real editor OIDC') && !name.startsWith('Reuse preserved')) {
       report.checks.push({ ...accepted, carriedFrom: previousPath }); console.log(JSON.stringify({ check: name, carriedFromVerifiedProof: true })); return accepted.detail;
+    }
+    // Each case has one actual authenticated session. Pause between cases,
+    // before writes, rather than crossing a silent-renew identity boundary.
+    if (editor && !name.startsWith('Real editor OIDC')) {
+      const expiresAt = await editor.page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('oidc.user:')).map(key => { try { return JSON.parse(localStorage.getItem(key)).expires_at; } catch { return undefined; } }).find(value => typeof value === 'number'));
+      if (expiresAt && expiresAt * 1000 - Date.now() < 180000) {
+        report.sessionRefreshRequired = true; report.sessionExpiry = new Date(expiresAt * 1000).toISOString();
+        throw Error('The real OIDC session is near expiry. Resume the preserved proof in a fresh authenticated browser session before starting this case.');
+      }
     }
     console.log(JSON.stringify({ check: name, state: 'running' }));
     try { const detail = await action(); report.checks.push({ name, passed: true, ...(detail ? { detail } : {}) }); console.log(JSON.stringify({ check: name, passed: true })); }
@@ -132,6 +165,15 @@ async function smoke() {
       }
     }
     report.resumeVerified = true;
+    const ownTree = new Map();
+    for (const owner of owners) {
+      const library = owner.Type === 'Timeline' ? ROOT + '/Timelines' : ROOT + '/MediaLibrary';
+      const rows = await queryContents(library, '+InTree:"' + owner.Path + '" .AUTOFILTERS:OFF .LIFESPAN:OFF');
+      assert(rows.some(row => row.Id === owner.Id));
+      for (const row of rows) { assert(row.Path === owner.Path || row.Path.startsWith(owner.Path + '/')); ownTree.set(row.Id, row); }
+    }
+    assert.equal(report.resumeStartingCount - ownTree.size, report.initialCount, 'Resume must preserve the original non-fixture source baseline.');
+    report.resumeOwnRecords = ownTree.size;
     return { timelineId: timeline.Id, mediaIds: media.map(item => item.Id), currentOriginalHashesVerified: originals.length, previousProof: previousPath };
   }
   async function session(viewport = { width: 1440, height: 1050 }, dpr = 1) {
@@ -201,6 +243,8 @@ async function smoke() {
     catch (error) { if (!error.message.includes('interrupted by another navigation to "' + target + '"')) throw error; await page.waitForURL(target); }
   }
   async function nativeRead(page, route) {
+    await page.waitForFunction(() => document.querySelector('#root')?.childElementCount > 0 && performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname === '/services/nativeApi.ts'));
+    if (page === editor?.page) await page.getByRole('button', { name: /^Logout/ }).waitFor();
     const moduleUrl = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name).reverse().find(url => new URL(url).pathname === '/services/nativeApi.ts'));
     assert(moduleUrl, 'Use the actual loaded native API module.');
     return page.evaluate(async ({ moduleUrl, route }) => (await import(moduleUrl)).nativeRequest(route), { moduleUrl, route });
@@ -335,6 +379,36 @@ async function smoke() {
       await panel.screenshot({ path: path.join(output, `timeline-${count}-published.png`) });
       return { generationId: presentation.generationId, forcedBrowserPngEncoder: count === 1, sizes: presentation.variants.map(({ width, byteLength, mimeType }) => ({ width, byteLength, mimeType })) };
     });
+    await checked('Lost draft-job acknowledgement resumes the same generation and creates no duplicate image set', async () => {
+      const previous = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`), beforeSets = await nativeRead(editor.page, `/content/${timeline.Id}/image-sets`);
+      const pattern = '**/api/v1/images/drafts', lost = {};
+      const drop = async route => {
+        const request = route.request(), response = await route.fetch({ timeout: 120000, maxRedirects: 0 });
+        assert.equal(response.status(), 202); const payload = await response.json();
+        assert.equal(payload.pending, true); lost.jobId = payload.job.id; lost.generationId = request.postDataJSON().generationId;
+        lost.requestHash = sha256(Buffer.from(request.postData())); lost.keyHash = sha256(Buffer.from(request.headers()['idempotency-key'])); lost.aborted = true;
+        await route.abort('failed');
+      };
+      await editor.page.route(pattern, drop);
+      try {
+        await assert.rejects(generateAndPublish(panel, 'Generate preview', timeline.Id), /gateway request failed|outcome|same image set/i);
+        assert.equal(lost.aborted, true); await editor.page.unroute(pattern, drop);
+        // Verify the owned background job actually completed before replaying
+        // only the deliberately discarded acknowledgement in this test.
+        const draft = await nativeRead(editor.page, `/jobs/${lost.jobId}`);
+        assert.equal(draft.generationId, lost.generationId);
+        const acknowledgement = editor.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/images/drafts' && response.request().method() === 'POST');
+        await panel.getByRole('button', { name: 'Retry publication', exact: true }).click();
+        const response = await acknowledgement; assert.equal(response.status(), 201);
+        assert.equal(sha256(Buffer.from(response.request().postData())), lost.requestHash); assert.equal(sha256(Buffer.from(response.request().headers()['idempotency-key'])), lost.keyHash);
+        assert.equal((await response.json()).data.setId, draft.setId);
+        const published = await waitForPublication(panel, timeline.Id, previous.generationId);
+        assert.equal(published.setId, draft.setId); assert.equal(published.generationId, lost.generationId);
+        const afterSets = await nativeRead(editor.page, `/content/${timeline.Id}/image-sets`); assert.equal(afterSets.length, beforeSets.length + 1);
+        report.controlledLostDraftAcknowledgement = { passed: true, jobId: lost.jobId, setId: draft.setId, sameGeneration: true, sameRequest: true, sameKey: true, newSets: 1 };
+        return report.controlledLostDraftAcknowledgement;
+      } finally { await editor.page.unroute(pattern, drop); }
+    });
     await checked('Reopening restores ordered selection; Random selection previews and publishes a saved recipe', async () => {
       const previous = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`);
       panel = await openTimelineEditor();
@@ -365,7 +439,7 @@ async function smoke() {
       const direct = await children(timeline.Id), entries = direct.filter(item => item.Type === 'TimelineEntry');
       assert.equal(entries.length, 4); assert.deepEqual(entries.map(item => item.Id).sort((a, b) => a - b), fixtures.filter(item => item.Type === 'TimelineEntry').map(item => item.Id).sort((a, b) => a - b));
       const imageRoot = direct.find(item => item.Name === '(images)'); assert.equal(imageRoot?.Type, 'SystemFolder'); assert.equal(imageRoot.Path, timeline.Path + '/(images)'); assert.equal(imageRoot.IsSystemContent, true);
-      const treeQuery = '+InTree:' + timeline.Path;
+      const treeQuery = '+InTree:' + JSON.stringify(timeline.Path);
       const defaults = await queryContents(timeline.Path, treeQuery), unfiltered = await queryContents(timeline.Path, treeQuery + ' .AUTOFILTERS:OFF .LIFESPAN:OFF');
       const generated = unfiltered.filter(item => item.Path === imageRoot.Path || item.Path.startsWith(imageRoot.Path + '/'));
       assert(generated.some(item => item.Id === imageRoot.Id)); assert(generated.some(item => item.Type === 'Folder')); assert(generated.some(item => item.Type === 'File'));
@@ -384,7 +458,7 @@ async function smoke() {
         panel = await openTimelineEditor();
         const boxes = panel.locator('input[type="checkbox"]'); for (let index = 0; index < 4; index++) await boxes.nth(index).setChecked(index === 0);
         await panel.getByRole('button', { name: 'Generate preview', exact: true }).click(); await panel.getByRole('img', { name: 'Generated image preview', exact: true }).waitFor();
-        const denied = editor.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/images/drafts' && response.request().method() === 'POST');
+        const denied = waitForImageCompletion(editor.page, response => new URL(response.url()).pathname === '/api/v1/images/drafts' && response.request().method() === 'POST');
         await panel.getByRole('button', { name: 'Publish', exact: true }).click(); const response = await denied;
         assert.equal(response.status(), 403); assert.equal((await response.json()).error.code, 'image_source_not_public'); await panel.getByRole('alert').waitFor();
         const after = await nativeRead(editor.page, `/content/${timeline.Id}/image-presentation/editor`); assert.equal(after.setId, before.setId); assert.equal(after.generationId, before.generationId);
@@ -451,11 +525,13 @@ async function smoke() {
       assert.equal(ownImages().length, 1);
       const width = (await image.boundingBox()).width;
       const chosenWidth = Number(ownImages()[0].path.match(/w(\d+)$/)[1]);
-      assert.equal(chosenWidth, [400, 800, 1200].find(value => value >= width * 2) || 1200);
+      const atlasPixels = await image.locator('.poster-fan__surface').evaluateAll(elements => Math.max(...elements.map(element => element.clientWidth * parseFloat(getComputedStyle(element).backgroundSize) / 100)) * Math.min(window.devicePixelRatio, 2));
+      assert(Number.isFinite(atlasPixels) && atlasPixels > 0);
+      assert.equal(chosenWidth, [400, 800, 1200].find(value => value >= atlasPixels) || 1200, 'Choose the smallest adequate atlas for the actual cropped poster faces, not the old flat composite.');
       assert.equal(visitor.requests.filter(request => request.origin === local.REPOSITORY && decodeURIComponent(request.path).includes(timeline.Name)).length, 0, 'Active card must not request its legacy OData entry-cover pool.');
       assert.equal(visitor.requests.filter(request => media.some(item => request.path === `/api/v1/content/${item.Id}/cover` || request.query.includes('nodeid=' + item.Id))).length, 0, 'Active card must not fetch original source images.');
       await visitor.page.screenshot({ path: path.join(output, 'visitor-timeline-desktop.png') });
-      return { slotWidth: width, dpr: 2, selectedWidth: chosenWidth, imageFetches: 1, originalFetches: 0, entryPoolFetches: 0 };
+      return { slotWidth: width, atlasPixels, dpr: 2, selectedWidth: chosenWidth, imageFetches: 1, originalFetches: 0, entryPoolFetches: 0 };
     });
     await checked('Visitor media library chooses the thumbnail variant and detail chooses the larger needed variant', async () => {
       await visitor.page.setViewportSize({ width: 1280, height: 900 });
@@ -485,18 +561,18 @@ async function smoke() {
       await visitor.page.screenshot({ path: path.join(output, 'visitor-timeline-mobile.png') });
       return { viewport: 390, slotWidth: box.width, objectFit: 'contain' };
     });
-    await checked('Published static copy survives source ACL changes while owner revocation masks loaded bytes', async () => {
+    await checked('Focus sends no refresh; published static copy survives source ACL changes and a fresh page enforces owner revocation', async () => {
       const card = visitor.page.locator(`a[href="/timelines/${timeline.Name}"]`), image = card.locator('[data-image-state]');
       await image.scrollIntoViewIfNeeded(); await card.locator('[data-image-state="loaded"]').waitFor();
       const byteRequests = () => visitor.requests.filter(request => request.path.startsWith(`/api/v1/images/${timeline.Id}/`)).length;
       const before = byteRequests();
-      const unchanged = visitor.page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/content/${timeline.Id}/image-presentation`);
-      await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus'))); assert.equal((await unchanged).status(), 200);
+      const imageReads = () => visitor.requests.filter(request => request.path === `/api/v1/content/${timeline.Id}/image-presentation`).length;
+      const beforeReads = imageReads();
+      await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus'))); await sleep(350); assert.equal(imageReads(), beforeReads, 'Focus must not refresh this content page.');
       await card.locator('[data-image-state="loaded"]').waitFor(); assert.equal(byteRequests(), before);
       await permissions(media[0].Id, [{ identity: VISITOR, Open: 'deny', OpenMinor: 'deny' }]);
       try {
-        const unchangedSource = visitor.page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/content/${timeline.Id}/image-presentation`);
-        await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus'))); assert.equal((await unchangedSource).status(), 200);
+        await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus'))); await sleep(350); assert.equal(imageReads(), beforeReads);
         await card.locator('[data-image-state="loaded"]').waitFor(); assert.equal(byteRequests(), before, 'Static publication follows owner visibility, without source re-fetches.');
         await goto(visitor.page, '/timelines?filter=q'); await image.scrollIntoViewIfNeeded(); await card.locator('[data-image-state="loaded"]').waitFor();
         await visitor.page.screenshot({ path: path.join(output, 'visitor-static-copy-source-private.png') });
@@ -505,7 +581,7 @@ async function smoke() {
       const fileId = generation.manifest.variants.find(variant => variant.name === 'w400').id;
       const beforeOwnerDenial = byteRequests(); await permissions(timeline.Id, [{ identity: VISITOR, Open: 'deny', OpenMinor: 'deny' }]);
       try {
-        await visitor.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await visitor.page.reload({ waitUntil: 'networkidle' });
         await visitor.page.waitForFunction(selector => !document.querySelector(selector) || document.querySelector(selector)?.dataset.imageState === 'blocked', `a[href="/timelines/${timeline.Name}"] [data-image-state]`);
         assert.equal(await card.locator('img').count(), 0); assert.equal(byteRequests(), beforeOwnerDenial);
         const binary = await local.request(local.REPOSITORY + '/binaryhandler.ashx?' + new URLSearchParams({ nodeid: String(fileId), propertyname: 'Binary' }));
@@ -545,9 +621,9 @@ async function smoke() {
     if (browser) await browser.close();
     report.fixtureOwners = owners.map(({ Id, Name, Path }) => ({ Id, Name, Path })); report.cleanup = [];
     const preserveUncertain = !report.passed && sessions.some(session => session.uncertainWrite || session.pendingWrites.size);
-    if (preserveUncertain || previousReport && !report.passed) {
+    if (report.sessionRefreshRequired || preserveUncertain || previousReport && !report.passed) {
       report.cleanupDeferred = true; report.preservedForRecovery = true;
-      report.recoveryReason = preserveUncertain ? 'An exact application write has an uncertain outcome. Preserve its UUID fixtures until its saved journal request has been durably reconciled; do not replay it with a new key.' : 'Focused continuation stopped. Preserve the verified owned fixtures and prior proof for the next reviewed continuation.';
+      report.recoveryReason = report.sessionRefreshRequired ? 'Paused between cases before another write to obtain a fresh real OIDC session. Resume verified owned fixtures and proof; no authentication lifetime or application behavior was changed.' : preserveUncertain ? 'An exact application write has an uncertain outcome. Preserve its UUID fixtures until its saved journal request has been durably reconciled; do not replay it with a new key.' : 'Focused continuation stopped. Preserve the verified owned fixtures and prior proof for the next reviewed continuation.';
     } else if (!keepDemo) {
       try {
         for (const owner of owners) {

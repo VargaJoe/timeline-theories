@@ -206,3 +206,13 @@ deployment/.local/
 client/profiles/*.override.json
 deployment/extensions/**/bin/
 deployment/extensions/**/obj/
+# Only this reviewed, pinned browser dependency is public source; keep other
+# previously ignored public assets private unless explicitly tracked.
+!client/public/
+/client/public/**
+!client/public/vendor/
+!client/public/vendor/delayed-scroll-restoration-polyfill/
+!client/public/vendor/delayed-scroll-restoration-polyfill/0.1.1/
+!client/public/vendor/delayed-scroll-restoration-polyfill/0.1.1/index.js
+!client/public/vendor/delayed-scroll-restoration-polyfill/0.1.1/MIT-LICENSE
+!client/public/vendor/delayed-scroll-restoration-polyfill/0.1.1/SOURCE.json

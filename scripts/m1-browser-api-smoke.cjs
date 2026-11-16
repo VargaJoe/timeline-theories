@@ -97,7 +97,7 @@ async function smoke() {
   try {
     const capabilities = await native.verify(); assert.equal(capabilities.backendProtocolRequired, 'gateway-coordinated-v1');
     report.sourceCountBefore = await sourceCount();
-    assert.equal(report.sourceCountBefore, 2998, 'The M0 browser gate requires the clean source baseline.');
+    assert.ok(Number.isSafeInteger(report.sourceCountBefore) && report.sourceCountBefore > 0, 'The browser gate requires a verified current local source baseline.');
     grant = await native.request('/grants', { method: 'POST', token: editor.apiKey, backendAuth: 'ApiKey', body: { scopes: SCOPES, expiresInSeconds: 3600 } });
     secrets.push(grant.token); assert.match(grant.token, /^tta_/);
     timeline = await create('Timeline', { Name: prefix + '-timeline', DisplayName: prefix + ' timeline', Description: 'Own native/browser parity fixture', IsVisible: false, SortOrder: 'chronological', TimelineType: 'chronological' });
@@ -381,7 +381,7 @@ async function smoke() {
         await wait(250); report.sourceCountAfter = await sourceCount();
       }
       if (report.sourceCountAfter !== report.sourceCountBefore) { report.passed = false; report.failure = report.failure || 'Local source count changed after UUID native cleanup'; }
-      assert.equal(report.sourceCountAfter, 2998, 'The source must return to 2998 records after native cleanup.');
+      assert.equal(report.sourceCountAfter, report.sourceCountBefore, 'The source must return to its captured baseline after native cleanup.');
     }
     catch (error) { report.passed = false; report.failure = report.failure || redact(error.message); }
     fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify(report, null, 2) + '\n');

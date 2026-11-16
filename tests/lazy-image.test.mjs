@@ -25,7 +25,7 @@ export const captureOperationContext=()=>{const state=globalThis.__lazyState,epo
 const config = moduleUrl("export const repositoryUrl='https://repository.fixture.invalid'; export const siteConfig={imageCache:{concurrencyLimit:2}};");
 const native = moduleUrl('export const nativeResponse=(...args)=>globalThis.__lazyState.fetch(...args);');
 const loading = compile('utils/imageLoading.ts', { '../configuration': config, '../services/nativeApi': native });
-const variants = compile('utils/imageVariants.ts', {});
+const variants = compile('utils/imageVariants.ts', { './posterStripLayout.mjs': new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href });
 const { LazyImage } = await import(compile('components/LazyImage.tsx', {
   react, 'react/jsx-runtime': jsx, '../services/sensenet': sensenet,
   '../context/useSharedAuth': moduleUrl('export const useSharedAuth=()=>globalThis.__lazyState.auth;'),

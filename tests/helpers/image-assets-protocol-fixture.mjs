@@ -16,10 +16,15 @@ export function imageProtocolFixture(projectRoot, contents, send, host = {}) {
   const namesFor = row => (Array.isArray(row?.AllowedChildTypes) ? row.AllowedChildTypes.map(type => typeof type === 'string' ? type : type.Name) : row?.AllowedChildTypes?.results?.map(type => type.Name)) || (['Folder', 'SystemFolder'].includes(row?.Type) ? namesFor(contents.get(row.ParentId)) : row?.Type === 'Timeline' ? ['TimelineEntry'] : []);
   const systemContent = row => !!row && (row.IsSystemContent === true || row.Type === 'SystemFolder' || systemContent(contents.get(row.ParentId)));
   const update = row => { row.VersionId = (row.VersionId || 1) + 1; row.Version = 'V' + row.VersionId + '.0'; row.ModificationDate = new Date().toISOString(); };
+  const descriptor = row => ({ ...row, Actions: ['Add', 'StartBlobUploadToParent', 'Edit', 'Delete'].filter(Name => Name !== 'Add' || row.IsFolder !== false).map(Name => ({ Name, Forbidden: ['Add', 'StartBlobUploadToParent'].includes(Name) ? host.allowAddNew === false || state.revokeAtUpload : host.allowSave === false })), EffectiveAllowedChildTypes: [...new Set([...namesFor(row), 'SystemFolder'])].map(Name => ({ Name })) });
   async function handle(req, res, url) {
     const id = Number(url.pathname.match(/content\((\d+)\)/)?.[1]), row = contents.get(id) || byPath(pathOf(url));
     if (/\/(EffectiveAllowedChildTypes|AllowedChildTypes)$/.test(url.pathname) && contents.has(id)) { const target = contents.get(id), names = namesFor(target), effective = url.pathname.endsWith('/EffectiveAllowedChildTypes'); send(res, 200, { results: [...new Set([...names, ...(effective ? ['SystemFolder'] : [])])].map(Name => ({ Name })) }); return true; }
-    if (url.pathname.endsWith('/HasPermission') && managed(contents.get(id))) { const permission = url.searchParams.get('permissions'); send(res, 200, readable(contents.get(id), req) && (permission !== 'Save' || host.allowSave !== false) && (permission !== 'AddNew' || !state.revokeAtUpload)); return true; }
+    if (req.method === 'GET' && row && url.searchParams.get('$expand')?.split(',').includes('Actions')) {
+      if (!readable(row, req)) { send(res, 403, null); return true; }
+      if (host.onSave) { const callback = host.onSave; host.onSave = null; await callback(); }
+      send(res, 200, descriptor(row)); return true;
+    }
     if (url.pathname.endsWith('/Upload') && managed(contents.get(id))) {
       const set = contents.get(id); if (!readable(set, req) || host.allowSave === false || state.revokeAtUpload) { send(res, 403, null); return true; }
       const parts = []; for await (const part of req) parts.push(part); const body = Buffer.concat(parts), text = body.toString('latin1'), match = /filename="(w\d+\.(?:png|jpg|webp))"\r\nContent-Type: (image\/[a-z]+)\r\n\r\n/.exec(text);
@@ -52,10 +57,12 @@ export function imageProtocolFixture(projectRoot, contents, send, host = {}) {
       for (const [nodeId, item] of contents) if (nodeId === row.Id || item.Path.startsWith(row.Path + '/')) { contents.delete(nodeId); state.files.delete(nodeId); state.sets.delete(nodeId); }
       state.deletions++; if (state.interruptDeleteOnce) { state.interruptDeleteOnce = false; res.destroy(); } else send(res, 200, {}); return true;
     }
-    if (req.method === 'GET' && url.searchParams.has('query') && !/\/content\(\d+\)/.test(url.pathname) && byPath(pathOf(url))) {
-      const parent = byPath(pathOf(url)), top = Number(url.searchParams.get('$top')) || 201, query = url.searchParams.get('query'), tree = query.match(/\+?InTree:(?:"([^"]+)"|([^\s]+))/), parentId = Number(query.match(/\+?ParentId:(\d+)/)?.[1]) || parent.Id;
-      const rows = [...contents.values()].filter(value => (tree ? value.Path === (tree[1] || tree[2]) || value.Path.startsWith((tree[1] || tree[2]) + '/') : value.ParentId === parentId) && (/\.AUTOFILTERS:OFF\b/.test(query) || !systemContent(value)) && readable(value, req));
-      send(res, 200, { results: rows.slice(0, top) }); return true;
+    if (req.method === 'GET' && url.searchParams.has('query') && !/\/content\(\d+\)/.test(url.pathname) && (byPath(pathOf(url)) || url.searchParams.get('$expand')?.split(',').includes('Actions'))) {
+      const parent = byPath(pathOf(url)), top = Number(url.searchParams.get('$top')) || 201, query = url.searchParams.get('query'), tree = query.match(/\+?InTree:(?:"([^"]+)"|([^\s]+))/), parentId = Number(query.match(/\+?ParentId:(\d+)/)?.[1]) || parent?.Id;
+      const actionRead = url.searchParams.get('$expand')?.split(',').includes('Actions'), requested = actionRead ? [...query.matchAll(/(?:\s|\()Id:(\d+)/g)].map(match => Number(match[1])) : [];
+      if (actionRead && host.onSave) { const callback = host.onSave; host.onSave = null; await callback(); }
+      const rows = [...contents.values()].filter(value => (tree ? value.Path === (tree[1] || tree[2]) || value.Path.startsWith((tree[1] || tree[2]) + '/') : value.ParentId === parentId) && (!requested.length || requested.includes(value.Id)) && (/\.AUTOFILTERS:OFF\b/.test(query) || !systemContent(value)) && readable(value, req));
+      send(res, 200, { results: rows.slice(0, top).map(value => actionRead ? descriptor(value) : value) }); return true;
     }
     if (req.method === 'GET' && (managed(row) || managedPath(pathOf(url)) || state.enabled && row && !readable(row, req))) { send(res, row ? readable(row, req) ? 200 : 403 : 404, row || null); return true; }
     return false;

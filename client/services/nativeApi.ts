@@ -224,24 +224,30 @@ async function stageNativeInput(path: string, init: RequestInit, send: SendNativ
   }
   return init;
 }
-async function followNativeBrowserResponse(initial: Response, send: SendNativeRoute, subject: string, originalHeaders: Headers): Promise<Response> {
+async function followNativeBrowserResponse(initial: Response, send: SendNativeRoute, subject: string, originalHeaders: Headers, imageJob: boolean): Promise<Response> {
   let response = initial; const deadline = Date.now() + 15 * 60 * 1000; let jobId: string | undefined;
+  let imageRecovery: { operationId: string; stoppedRequestId: string } | undefined;
   for (;;) {
     assertNativeIdentity(subject);
     const payload = response.headers.get('content-type')?.toLowerCase().includes('application/json') ? await responseJson(response.clone()) : undefined;
     const job = payload?.job as Record<string, unknown> | undefined;
     if (response.status === 202 && payload?.pending === true) {
       if (!job || !generatedId(job.id) || jobId !== undefined && job.id !== jobId) throw new NativeApiError('The gateway returned an invalid pending job.', 502, 'native_job_invalid');
+      const recovery = payload?.recovery as Record<string, unknown> | undefined;
+      if (imageJob && recovery?.requiresStoppedConfirmation === true && generatedId(recovery.operationId) && generatedId(recovery.stoppedRequestId)) {
+        if (imageRecovery && (imageRecovery.operationId !== recovery.operationId || imageRecovery.stoppedRequestId !== recovery.stoppedRequestId)) throw new NativeApiError('The pending image job changed its saved recovery reference.', 502, 'native_job_invalid');
+        imageRecovery = { operationId: recovery.operationId, stoppedRequestId: recovery.stoppedRequestId };
+      }
       jobId = job.id; activeJobs.set(jobId, { identity: subject, headers: new Headers(originalHeaders) });
       if (Date.now() >= deadline) {
         const failure = new NativeApiError('The job is still pending. Retry the same saved plan and apply key to recover its receipt.', 504, 'native_job_pending');
-        failure.jobId = jobId; failure.recoverable = true; throw failure;
+        failure.jobId = jobId; failure.recoverable = true; if (imageRecovery) failure.details = { ...imageRecovery, uncertain: true }; throw failure;
       }
       const retryAfter = Number(response.headers.get('retry-after') || 1);
       const delay = Math.min(5000, Math.max(250, Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000));
       await new Promise(resolve => setTimeout(resolve, delay)); assertNativeIdentity(subject);
       try { response = await send(`/jobs/${jobId}`, { method: 'GET' }); }
-      catch (error) { if (error instanceof NativeApiError) { error.jobId = jobId; error.recoverable = true; } throw error; }
+      catch (error) { if (error instanceof NativeApiError) { error.jobId = jobId; error.recoverable = true; if (imageRecovery) error.details = { ...(error.details && typeof error.details === 'object' ? error.details : {}), ...imageRecovery, uncertain: true }; } throw error; }
       continue;
     }
     if (jobId) activeJobs.delete(jobId);
@@ -267,8 +273,24 @@ async function followNativeBrowserResponse(initial: Response, send: SendNativeRo
   }
 }
 
+function isPendingImageRecovery(value: unknown, operationId: unknown): boolean {
+  if (!generatedId(operationId) || !value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const payload = value as Record<string, unknown>;
+  const allowed = ['operationId', 'pending', 'repositoryWrites', 'confirmed', 'notPrepared', 'operatorMustConfirmStopped', 'stoppedRequestId', 'outcome', 'result', 'error'];
+  if (Object.keys(payload).some(key => !allowed.includes(key)) || payload.operationId !== operationId || payload.pending !== true || payload.repositoryWrites !== 0) return false;
+  if (payload.confirmed !== undefined && payload.confirmed !== false || payload.notPrepared !== undefined && payload.notPrepared !== true || payload.operatorMustConfirmStopped !== undefined && payload.operatorMustConfirmStopped !== true) return false;
+  if (payload.stoppedRequestId !== undefined && !generatedId(payload.stoppedRequestId) || payload.outcome !== undefined && payload.outcome !== 'confirmed' && payload.outcome !== 'unknown') return false;
+  if (payload.result !== undefined && (!payload.result || typeof payload.result !== 'object' || Array.isArray(payload.result))) return false;
+  if (payload.error !== undefined) {
+    if (!payload.error || typeof payload.error !== 'object' || Array.isArray(payload.error)) return false;
+    const error = payload.error as Record<string, unknown>;
+    if (Object.keys(error).some(key => !['code', 'message'].includes(key)) || typeof error.code !== 'string' || !error.code || typeof error.message !== 'string') return false;
+  }
+  return true;
+}
+
 /** Bearer and binding headers are supplied only to the configured gateway. */
-export async function nativeResponse(path: string, init: RequestInit = {}): Promise<Response> {
+export async function nativeResponse(path: string, init: RequestInit = {}, options: { pendingImageRecoveryId?: string } = {}): Promise<Response> {
   const startedIdentity = currentIdentity(), token = getToken(), headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   headers.set('X-Timeline-Repository', environment.repositoryUrl);
@@ -295,11 +317,13 @@ export async function nativeResponse(path: string, init: RequestInit = {}): Prom
     assertNativeIdentity(startedIdentity); return result;
   };
   const staged = await stageNativeInput(path, init, send);
-  const response = await followNativeBrowserResponse(await send(path, staged), send, startedIdentity, headers);
+  const imageJob = (init.method || 'GET').toUpperCase() === 'POST' && /^\/(?:api\/v1\/)?images\/drafts(?:\/[1-9][0-9]*\/(?:seal|delete))?$/.test(path);
+  const response = await followNativeBrowserResponse(await send(path, staged), send, startedIdentity, headers, imageJob);
   if (!response.ok) {
     let errorPayload: unknown;
-    try { errorPayload = await response.json(); } catch { /* A failed transport may return a non-JSON error. */ }
+    try { errorPayload = await response.clone().json(); } catch { /* A failed transport may return a non-JSON error. */ }
     assertNativeIdentity(startedIdentity);
+    if (path === '/images/recovery' && (init.method || 'GET').toUpperCase() === 'POST' && response.status === 409 && response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'application/json' && isPendingImageRecovery(errorPayload, options.pendingImageRecoveryId)) return response;
     throw responseError(errorPayload, response.status, /(?:^|\/)plans\/[A-Za-z0-9_-]+\/apply$/.test(path));
   }
   return response;
