@@ -35,6 +35,9 @@ test('image presentation commands reference a sealed set or explicit legacy rese
   assert.equal(spec.paths['/images/drafts/{setId}/variants/{name}'].post.requestBody['x-max-bytes'], 1500000);
   assert.equal(spec.paths['/images/{ownerId}/{generationId}/{name}'].parameters[0].schema.type, 'integer');
   assert.ok(spec.paths['/images/drafts'].post.responses[201]);
+  for (const route of ['/images/drafts', '/images/drafts/{setId}/seal', '/images/drafts/{setId}/delete']) assert.ok(spec.paths[route].post.responses[202]);
+  assert.equal(spec.paths['/images/drafts/{setId}/variants/{name}'].post.responses[202], undefined, 'image bytes cannot enter a background job');
+  assert.equal(spec.paths['/images/recovery'].post.requestBody.content['application/json'].schema.properties.abandon.const, true);
   assert.equal(spec.paths['/images/recovery'].post.requestBody['x-max-bytes'], 16384);
   assert.ok(spec.paths['/images/recovery'].post.parameters.some(parameter => parameter.name === 'Idempotency-Key' && parameter.required));
 });

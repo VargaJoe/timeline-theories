@@ -33,6 +33,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
   const previewUrl = preview?.set === generated ? preview?.url : undefined;
   const [busy, setBusy] = useState(false), [status, setStatus] = useState(''), [error, setError] = useState('');
   const [terminal, setTerminal] = useState(false);
+  const [stoppedConfirmed, setStoppedConfirmed] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined), intent = useRef<ImagePublication | undefined>(undefined);
   const previewOwner = useRef<NativeSnapshot | undefined>(undefined);
   const originalIntent = useRef<OriginalImageUpload | undefined>(undefined);
@@ -89,7 +90,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
     const abort = new AbortController(); controller.current = abort;
     if (!previewOwner.current) { setError('Prepare a new preview before publishing.'); return; }
     intent.current ??= new ImagePublication(ownerId, generated, kind, previewOwner.current);
-    setBusy(true); setError(''); setTerminal(false);
+    setBusy(true); setError(''); setTerminal(false); setStoppedConfirmed(false);
     try {
       const owner = await intent.current.publish(abort.signal, setStatus);
       const image = await imagePresentation(ownerId, abort.signal, true);
@@ -99,13 +100,28 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
       const beforeDispatch = !intent.current?.hasStartedMutation;
       const uncertain = caught instanceof NativeApiError && caught.details && typeof caught.details === 'object' && 'uncertain' in caught.details && caught.details.uncertain === true;
       const confirmed = caught instanceof NativeApiError && [400, 403, 409].includes(caught.status) && !uncertain && !caught.transportFailure &&
-        ['revision_conflict', 'image_source_changed', 'image_source_not_public', 'image_owner_privacy_conflict', 'image_storage_collision', 'image_set_state', 'image_stale', 'image_draft_changed', 'permission_denied', 'backend_denied', 'image_integrity', 'invalid_image_asset', 'function_deadline'].includes(caught.code) && !caught.applyResult?.retrySamePlan && !caught.applyResult?.uncertainTargets?.length;
+        ['revision_conflict', 'image_source_changed', 'image_source_not_public', 'image_owner_privacy_conflict', 'image_storage_collision', 'image_set_state', 'image_stale', 'image_draft_changed', 'permission_denied', 'backend_denied', 'image_integrity', 'invalid_image_asset', 'function_deadline', 'image_publication_abandoned', 'image_publication_not_prepared'].includes(caught.code) && !caught.applyResult?.retrySamePlan && !caught.applyResult?.uncertainTargets?.length;
       if (beforeDispatch) intent.current = undefined;
       const next = beforeDispatch ? ' No image changes were sent. You can retry or change the selection.'
         : confirmed ? ' Prepare a new preview with the current images.'
         : ' Retry publication checks and continues this same image set. Selection stays locked until the saved outcome is resolved.';
       setTerminal(confirmed); setError((caught instanceof Error ? caught.message : 'Publication could not finish.') + next); setStatus('');
     } }
+    finally { if (!abort.signal.aborted) setBusy(false); }
+  }
+  async function recoverPublication(abandon = false) {
+    const publication = intent.current;
+    if (!publication?.recovery || busy || abandon && !stoppedConfirmed) return;
+    const abort = new AbortController(); controller.current = abort;
+    setBusy(true); setError(''); setStatus('Checking the saved publication…');
+    try {
+      const result = await publication.recover(abort.signal, stoppedConfirmed, abandon);
+      if (abort.signal.aborted) return;
+      if (!result.pending && (result.abandoned || result.failure || result.notPrepared)) {
+        setTerminal(true); setStatus('The previous attempt is closed. Original images, published images and unfinished copies are preserved. Start a new preview to continue.');
+      } else if (!result.pending && result.confirmed) setStatus('The saved step is confirmed. Retry publication to continue the same image set.');
+      else setError('The outcome is still unconfirmed. No repository write was repeated. Verify the original request has stopped before closing this attempt.');
+    } catch (caught) { if (!abort.signal.aborted) { setError(caught instanceof Error ? caught.message : 'Publication recovery could not finish.'); setStatus(''); } }
     finally { if (!abort.signal.aborted) setBusy(false); }
   }
   async function restore() {
@@ -172,6 +188,12 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
       {generated && <ul className="image-editor-sizes">{generated.variants.map(variant => <li key={variant.name}>{variant.width} × {variant.height} · {variant.mimeType.replace('image/', '')} · {size(variant.byteLength)}</li>)}</ul>}
       <div className="image-editor-actions"><button type="button" disabled={busy || !!intent.current || !selected.length || media && !originalStored} onClick={() => void prepare()}>{media ? 'Prepare sizes' : 'Generate preview'}</button><button type="button" className="primary" disabled={busy || !generated} onClick={() => void publish()}>{intent.current ? 'Retry publication' : 'Publish'}</button>{current?.state !== 'legacy' && current?.state !== undefined && <button type="button" disabled={busy || !!intent.current} onClick={() => void restore()}>Use original presentation</button>}</div>
       {terminal && <button type="button" disabled={busy} onClick={() => { intent.current = undefined; previewOwner.current = undefined; setGenerated(undefined); setTerminal(false); setError(''); setStatus('Choose the current images and prepare a new preview. Unpublished copies can be removed with Delete unused copies.'); void imageSets(ownerId).then(setSets).catch(() => {}); }}>Start a new preview</button>}
+      {!terminal && intent.current?.recovery && <div className="image-editor-recovery">
+        <p>Check the saved outcome before starting another image set. Closing a failed attempt keeps all existing images and does not repeat the upload.</p>
+        <details><summary>Request reference for the operator</summary><code>{intent.current.recovery.stoppedRequestId}</code></details>
+        <label><input type="checkbox" checked={stoppedConfirmed} disabled={busy} onChange={event => setStoppedConfirmed(event.target.checked)} /> I verified this exact server request has stopped. A timeout alone does not confirm it.</label>
+        <div className="image-editor-actions"><button type="button" disabled={busy} onClick={() => void recoverPublication()}>Check saved outcome</button><button type="button" disabled={busy || !stoppedConfirmed} onClick={() => void recoverPublication(true)}>Close failed attempt</button></div>
+      </div>}
       {!!sets.filter(set => set.deletable).length && <div className="image-editor-toolbar"><button type="button" disabled={busy || !!intent.current} onClick={() => void cleanup()}>Delete unused copies</button><span>{sets.filter(set => set.deletable).length} inactive image set(s). Published and original images are kept.</span></div>}
     </>}
     {status && <p role="status">{status}</p>}{error && <p role="alert" className="image-editor-error">{error}</p>}

@@ -18,9 +18,10 @@ import { verifyAppStorage } from './storage-selftest.mjs';
 import { IMAGE_PROTOCOL, IMAGE_LIMITS, imageOperationId, validateImageManifest, validateImageVariant, decodeImageVariant } from './image-assets.mjs';
 import { hash, assertUuid } from './store.mjs';
 import { observeHeldImage, recoverImage } from './image-recovery.mjs';
+import { imageJobAction } from './image-jobs.mjs';
 
 const routes = ['capabilities','openapi.json','schemas/{type}','lookup','snapshots','content/{id}','content/{id}/cover','content/{id}/image-presentation','content/{id}/image-presentation/editor','content/{id}/image-sets','images/capabilities','images/recovery','images/drafts','images/drafts/{setId}/variants/{name}','images/drafts/{setId}/seal','images/drafts/{setId}/delete','images/{ownerId}/{generationId}/{name}','timelines','media','books','entries','plans','plans/{id}/apply','recovery','providers/books/search','providers/books/details','providers/media/lookup','providers/trakt/list','exchange/{timelineId}/export','exchange/{timelineId}/preview','grants','grants/{id}/revoke','jobs/{id}','jobs/{id}/cancel','uploads','uploads/{id}/chunks/{index}','uploads/{id}/complete','downloads/{id}/chunks/{index}'];
-const longRoute = (method, route) => method === 'POST' && (route === 'plans' || /^plans\/[0-9a-f-]{36}\/apply$/.test(route) || route.startsWith('providers/') || /^exchange\/\d+\/preview$/.test(route)) || method === 'GET' && /^exchange\/\d+\/export$/.test(route);
+const longRoute = (method, route) => method === 'POST' && (imageJobAction(route) || route === 'plans' || /^plans\/[0-9a-f-]{36}\/apply$/.test(route) || route.startsWith('providers/') || /^exchange\/\d+\/preview$/.test(route)) || method === 'GET' && /^exchange\/\d+\/export$/.test(route);
 const descriptor = (status, value, readTargets = []) => ({ status, headers: {'Content-Type':'application/json; charset=utf-8'}, body: Buffer.from(JSON.stringify(value)), readTargets });
 function failure(error, requestId) {
   const recognized = error instanceof DomainError || error?.code?.startsWith('provider_') || error?.code === 'invalid_provider_input';
@@ -154,19 +155,21 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
       }
       payload.requestHash = hash(payload);
       await observeHeldImage(context, payload, store, coordinator);
+      const imageRequestId = job?.requestId ?? randomUUID();
       return coordinator.run(async guard => {
-        context.repo.beforeWrite = async () => { await guard.assertOwner(); await context.check(); await guard.assertOwner(); };
+        context.repo.beforeWrite = async () => { await job?.assertOwner(); await guard.assertOwner(); await context.check(); await guard.assertOwner(); await job?.assertOwner(); };
         await context.check(); await context.journal.assertRecoveryBoundary([operationId]);
         const result = await context.journal.mutation(payload, transient);
-        if (!result?.ok) throw new DomainError(result?.code || 'image_write_failed', result?.message || 'Image write failed.', result?.status || 502, { uncertain: result?.uncertain === true });
+        if (!result?.ok) throw new DomainError(result?.code || 'image_write_failed', result?.message || 'Image write failed.', result?.status || 502, { uncertain: result?.uncertain === true, ...(result?.uncertain ? { operationId, stoppedRequestId: imageRequestId } : {}) });
         // A receipt is private state, never permission: current owner Save and
         // selected source Open is rechecked for draft receipts.
-        if (result.result?.setId && !result.result.deleted) await context.repo.images.set(result.result.setId, targetId);
-        else await context.repo.images.owner(targetId, { write: true });
+        const authorizedSet = result.result?.setId && !result.result.deleted ? await context.repo.images.set(result.result.setId, targetId) : null;
+        if (!authorizedSet) await context.repo.images.owner(targetId, { write: true });
         await context.check();
         const value = action === 'image-variant' ? result.result.variant : result.result;
-        return descriptor(action === 'image-draft' ? 201 : 200, { data: value }, [targetId]);
-      }, { requestId: randomUUID(), identity: context.identity.Id, principal: context.principal, operationId, waitMs: 5000 });
+        const sources = authorizedSet?.manifest.sourceIds ?? [];
+        return descriptor(action === 'image-draft' ? 201 : 200, { data: value }, [...new Set([targetId, ...sources])]);
+      }, { requestId: imageRequestId, ...(job ? { jobId: job.id } : {}), identity: context.identity.Id, principal: context.principal, operationId, waitMs: 5000 });
     }
     if (route==='plans' && method==='POST') { const input=await bodyJson(request); const plan=await preview(context,{...input,commands:await transfers.hydrateCommands(context,input.commands)},store); return descriptor(200,plan,plan.targets); }
     const applyRoute=route.match(/^plans\/([0-9a-f-]{36})\/apply$/);
@@ -254,7 +257,7 @@ export function createFunctionApp(config, { store = new Store(config), coordinat
       else if(revoke && method==='POST'){if(Object.keys(await bodyJson(request)).length)throw new DomainError('invalid_input','Revoke accepts an empty object.');await context.check();if(context.grant&&revoke[1]!==context.grant.id)throw new DomainError('grant_admin_denied','A delegated grant may revoke only itself.',403);if(!await store.revoke(revoke[1],context.identity.Id))throw new DomainError('grant_unavailable','Grant is unavailable for this identity.',404);await store.audit(context.principal,'grant','revoked',[]);response=new Response(JSON.stringify({revoked:true}),{headers:{'Content-Type':'application/json'}});}
       else if(route==='grants' && method==='POST')response=await transfers.prepareResponse(descriptor(201,await issueGrant(context,await bodyJson(request),config,store)),context);
       else if(route==='recovery' && method==='POST')response=await transfers.prepareResponse(await recovery(request,context),context);
-      else if(route==='images/recovery' && method==='POST'){requireScope(context,'covers:write');const result=await recoverImage(context,await bodyJson(request,16384),request.headers.get('idempotency-key'),store,coordinator);response=await transfers.prepareResponse(descriptor(result.status,result.value),context);}
+      else if(route==='images/recovery' && method==='POST'){requireScope(context,'covers:write');const result=await recoverImage(context,await bodyJson(request,16384),request.headers.get('idempotency-key'),store,coordinator);await jobs.completeImageRecovery(context,result.value);response=await transfers.prepareResponse(descriptor(result.status,result.value),context);}
       else if(/^jobs\/[0-9a-f-]{36}(\/cancel)?$/.test(route)){const parts=route.split('/');if(parts.length===2&&method==='GET')response=await jobs.status(parts[1],context);else if(parts[2]==='cancel'&&method==='POST'){if(Object.keys(await bodyJson(request)).length)throw new DomainError('invalid_input','Cancellation accepts an empty object.');response=await jobs.cancel(parts[1],context);}else throw new DomainError('route_unavailable','Job route not found.',404);}
       else if(longRoute(method,route))response=await jobs.enqueue(request,context,await bytes(request),{requestId});
       else response=await transfers.handle(request,context) || await transfers.prepareResponse(await execute(request,context),context);

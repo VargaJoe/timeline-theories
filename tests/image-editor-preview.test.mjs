@@ -18,7 +18,7 @@ export const imagePresentation=async()=>globalThis.__editorPreviewState.current;
 export const imageSets=async()=>[];
 export const sourceForGeneration=async id=>({id});
 export const originalImageBlob=${forbidden},deleteImageSet=${forbidden},restoreOriginalPresentation=${forbidden};
-export class ImagePublication{constructor(){throw Error('Publication is forbidden in preview tests');}}
+export class ImagePublication{constructor(){const publication=globalThis.__editorPreviewState.publication;if(!publication)throw Error('Publication is forbidden in preview tests');return publication;}}
 export class OriginalImageUpload{constructor(){throw Error('Upload is forbidden in preview tests');}}
 `);
 const imports = {
@@ -82,6 +82,31 @@ function fixture() {
   globalThis.__editorPreviewState = state;
   return state;
 }
+
+test('pending notPrepared recovery keeps selection locked until explicit stopped recovery is terminal', async () => {
+  const state = fixture(), calls = [];
+  const rawButton = (tree, label) => find(tree, node => node.type === 'button' && node.props.children === label);
+  state.recoveryReply = { notPrepared: true, pending: true, repositoryWrites: 0 };
+  state.publication = { hasStartedMutation: true, recovery: { operationId: crypto.randomUUID(), stoppedRequestId: crypto.randomUUID() }, async publish() { throw Error('Unconfirmed publication'); }, async recover(_signal, stopped, abandon) { calls.push({ stopped, abandon }); return state.recoveryReply; } };
+  const ui = host({ ownerId: 90, kind: 'timeline-composite', candidates: [11, 12].map(id => ({ id, title: 'Poster ' + id, url: '/original/' + id })), onSaved: () => { throw Error('Recovery must not publish'); } });
+  try {
+    ui.flush(); await tick(); let tree = ui.flush();
+    button(tree, 'Generate preview').props.onClick(); await tick(); state.generations[0].resolve(state.result(0)); await tick();
+    button(ui.flush(), 'Publish').props.onClick(); await tick(); tree = ui.flush();
+    button(tree, 'Check saved outcome').props.onClick(); await tick(); tree = ui.flush();
+    assert.equal(rawButton(tree, 'Start a new preview'), undefined);
+    assert.equal(rawButton(tree, 'Generate preview').props.disabled, true);
+    assert.equal(rawButton(tree, 'Close failed attempt').props.disabled, true);
+    assert.deepEqual(calls, [{ stopped: false, abandon: false }]);
+    const recovery = find(tree, node => node.props?.className === 'image-editor-recovery');
+    find(recovery, node => node.type === 'input').props.onChange({ target: { checked: true } });
+    state.recoveryReply = { notPrepared: true, pending: false, repositoryWrites: 0 };
+    button(ui.flush(), 'Check saved outcome').props.onClick(); await tick(); tree = ui.flush();
+    assert.deepEqual(calls[1], { stopped: true, abandon: false });
+    button(tree, 'Start a new preview').props.onClick(); tree = ui.flush();
+    assert.equal(button(tree, 'Generate preview').props.disabled, false);
+  } finally { ui.unmount(); state.restore(); }
+});
 
 for (const kind of ['timeline-composite', 'media-sizes']) test(`${kind}: new generated sets mask the previous preview before effects and release its Blob`, async () => {
   const state = fixture(), media = kind === 'media-sizes', generatedType = media ? 'img' : 'PosterFan', publishedType = media ? 'LazyImage' : 'TimelineCover';

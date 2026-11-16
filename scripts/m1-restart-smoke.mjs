@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { createClient, followNativeResponse } from './m1-client.mjs';
 
 const require = createRequire(import.meta.url), local = require('./m0-local-api.cjs');
-const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines', SOURCE_COUNT = 2998;
+const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines';
 const STATE = path.join(local.ROOT,'m1-restart-state.json'), REPORT = path.join(local.ROOT,'m1-restart-report.json');
 const SCOPES = ['content:read','timelines:write','media:write','entries:write'];
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -38,8 +38,18 @@ function loadState() {
   assert.equal(state.version,3);assert.equal(state.gateway,GATEWAY);assert.equal(state.repository,local.REPOSITORY);assert.equal(state.project,PROJECT);
   assert.match(state.prefix,/^m1-restart-[0-9a-f-]{36}$/);assert.ok(Array.isArray(state.fixtures)&&Array.isArray(state.reservations)&&Array.isArray(state.operations));return state;
 }
-/** Verify the explicitly supplied managed CLI tree owns the HTTPS app listener; never stop it here. */
+/** Verify the exact owned Compose app or managed CLI tree; never stop a runtime here. */
 function processIdentity(pid) {
+  if (typeof pid === 'string') {
+    assert.equal(pid, 'timeline-local-app-1', 'Supply only the owned local Compose app container.');
+    const template = '{"containerId":"{{.Id}}","startedAt":"{{.State.StartedAt}}","status":"{{.State.Status}}","project":"{{index .Config.Labels "com.docker.compose.project"}}","service":"{{index .Config.Labels "com.docker.compose.service"}}","image":"{{.Config.Image}}","imageId":"{{.Image}}","ports":{{json .NetworkSettings.Ports}}}';
+    const value = JSON.parse(execFileSync('docker', ['inspect', '--type', 'container', '--format', template, pid], { encoding: 'utf8', windowsHide: true }).trim());
+    assert.match(value.containerId, /^[0-9a-f]{64}$/); assert.ok(Number.isFinite(Date.parse(value.startedAt)));
+    assert.equal(value.status, 'running'); assert.equal(value.project, 'timeline-local'); assert.equal(value.service, 'app');
+    assert.equal(value.image, 'timeline-theories-app:local');
+    assert.ok(value.ports?.['8080/tcp']?.some(binding => binding.HostIp === '127.0.0.1' && binding.HostPort === '8080'), 'Owned app does not publish localhost:8080.');
+    return { kind: 'compose-container', container: pid, containerId: value.containerId, startedAt: value.startedAt, project: value.project, service: value.service, image: value.image, imageId: value.imageId, ownsAppListener: true };
+  }
   assert.ok(Number.isSafeInteger(pid)&&pid>0,'Supply the explicitly tracked Netlify CLI Node PID.');
   const command = `$taskRestartProcess=Get-Process -Id ${pid} -ErrorAction Stop; if($taskRestartProcess.ProcessName -ne 'node'){throw 'Tracked app process is not Node'}; $taskRestartCli=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if($taskRestartCli.CommandLine -notmatch 'netlify'){throw 'Tracked process is not the managed Netlify CLI'}; $taskRestartListeners=@(Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique); $taskRestartOwnsListener=$false; foreach($taskRestartListener in $taskRestartListeners){$taskRestartCursor=[int]$taskRestartListener;for($taskRestartDepth=0;$taskRestartDepth -lt 10;$taskRestartDepth++){if($taskRestartCursor -eq ${pid}){$taskRestartOwnsListener=$true;break};$taskRestartAncestor=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$taskRestartCursor);if(!$taskRestartAncestor -or $taskRestartAncestor.ParentProcessId -eq 0){break};$taskRestartCursor=[int]$taskRestartAncestor.ParentProcessId}};if(!$taskRestartOwnsListener){throw 'Tracked Netlify tree does not own localhost 8080'};@{pid=$taskRestartProcess.Id;startedAt=$taskRestartProcess.StartTime.ToUniversalTime().ToString('o');ownsAppListener=$true}|ConvertTo-Json -Compress`;
   const value=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',command],{encoding:'utf8',windowsHide:true}).trim());
@@ -113,7 +123,7 @@ export async function prepare(pid) {
   const state={version:3,architecture:'one-netlify-app-private-blobs-restart',phase:'preparing',preparedAt:new Date().toISOString(),gateway:GATEWAY,repository:local.REPOSITORY,project:PROJECT,prefix:'m1-restart-'+randomUUID(),processBefore:processIdentity(pid),fixtures:[],reservations:[],operations:[],checks:[]};
   saveState(state);const api=client();
   try {
-    await assertApp(api);protectedIds();state.initialCount=await sourceCount();assert.equal(state.initialCount,SOURCE_COUNT,'Other owned fixture phases must finish first.');saveState(state);
+    await assertApp(api);protectedIds();state.initialCount=await sourceCount();saveState(state);
     state.grant=await api.request('/grants',{method:'POST',token:local.readAccounts().editor.apiKey,backendAuth:'ApiKey',body:{scopes:SCOPES,expiresInSeconds:3600}});saveState(state);
     const timelineName=state.prefix+'-timeline',timeline=await create(api,state,'Timeline',{Name:timelineName,DisplayName:'Owned Netlify restart timeline',Description:'Own UUID fixture',IsVisible:false},undefined,PROJECT+'/Timelines');
     state.timelineId=timeline.Id;saveState(state);
@@ -147,14 +157,14 @@ export async function prepare(pid) {
     await apply(api,state,operation(state,'setup-competing-edit',competingPlan));
     state.baseline={};for(const fixture of state.fixtures.filter(row=>!row.deleted)){const current=await read(api,state,fixture.id);state.baseline[fixture.id]={revision:current.revision,name:current.Name,path:current.Path};}
     assert.equal((await list(api,state)).length,2);assert.equal((await read(api,state,first.Id)).Position,2);assert.equal((await read(api,state,second.Id)).Position,1);
-    assert.equal(await sourceCount(),SOURCE_COUNT+4);state.phase='prepared';state.resumeBefore=stalePlan.expiresAt;state.preparedAt=new Date().toISOString();saveState(state);
-    console.log(JSON.stringify({phase:state.phase,stateFile:STATE,lostCompletedBodies:state.operations.filter(row=>row.lost).length,activeOwnedFixtures:4,sourceCount:SOURCE_COUNT,readyForManagedAppRestart:true,resumeBefore:state.resumeBefore}));return state;
+    assert.equal(await sourceCount(),state.initialCount+4);state.phase='prepared';state.resumeBefore=stalePlan.expiresAt;state.preparedAt=new Date().toISOString();saveState(state);
+    console.log(JSON.stringify({phase:state.phase,stateFile:STATE,lostCompletedBodies:state.operations.filter(row=>row.lost).length,activeOwnedFixtures:4,sourceCount:state.initialCount,readyForManagedAppRestart:true,resumeBefore:state.resumeBefore}));return state;
   }catch(error){state.phase='prepare_failed';state.error=errorInfo(error);saveState(state);throw error;}
 }
 
 /** All fixture discovery and deletion uses the scoped application API, with no raw cleanup fallback. */
 export async function cleanup(state=loadState()) {
-  const api=client(),results=[];await assertApp(api);
+  const api=client(),results=[];assert.ok(Number.isSafeInteger(state.initialCount)&&state.initialCount>=0,'Saved fixture baseline is required before cleanup.');await assertApp(api);
   if(state.grant?.token) {
     for(const reservation of state.reservations) {
       let content;try{content=await lookup(api,state,reservation.path);}catch(error){if(error.status===404)continue;throw error;}
@@ -172,15 +182,15 @@ export async function cleanup(state=loadState()) {
       await apply(api,state,step);await assert.rejects(read(api,state,fixture.id),error=>error.status===404);
       fixture.deleted=true;results.push({id:fixture.id,deleted:true,via:'native-app'});state.cleanup=results;saveState(state);
     }
-    assert.equal(await sourceCount(),SOURCE_COUNT,'Restored source count changed after cleanup.');
+    assert.equal(await sourceCount(),state.initialCount,'Restored source count changed after cleanup.');
     await api.request('/grants/'+state.grant.id+'/revoke',{method:'POST',token:state.grant.token,body:{}});state.grant.token=null;
   }
-  assert.equal(await sourceCount(),SOURCE_COUNT);state.phase='cleaned';state.cleanup=results;saveState(state);return results;
+  assert.equal(await sourceCount(),state.initialCount);state.phase='cleaned';state.cleanup=results;saveState(state);return results;
 }
 
 /** Resume after the parent actually restarts its managed CLI, preserving the private app Blobs store. */
 export async function resume(pid) {
-  const state=loadState();assert.equal(state.phase,'prepared');const processAfter=processIdentity(pid);assert.notDeepEqual(processAfter,state.processBefore,'The managed Netlify app process did not restart.');
+  const state=loadState();assert.equal(state.phase,'prepared');const processAfter=processIdentity(pid);assert.equal(processAfter.kind,state.processBefore.kind,'Resume using the original runtime mode.');assert.equal(processAfter.container,state.processBefore.container,'Resume using the original app container.');assert.equal(processAfter.imageId,state.processBefore.imageId,'Restart must preserve the original app image.');assert.notDeepEqual(processAfter,state.processBefore,'The managed Netlify app process did not restart.');
   const report={version:3,architecture:state.architecture,ranAt:new Date().toISOString(),gateway:GATEWAY,repository:local.REPOSITORY,project:PROJECT,fixturePrefix:state.prefix,processBefore:state.processBefore,processAfter,lostCompletedBodies:state.operations.filter(row=>row.lost).length,initialCount:state.initialCount,checks:[],cleanup:[],passed:false,
     limitation:'Real completed HTTP bodies are consumed and discarded, then the managed Netlify CLI is restarted with its normal app Blobs preserved. This proves completed receipt/job durability; it does not inject an unknown upstream commit or recover an interrupted writer.'};
   const api=client();let failure;
@@ -201,13 +211,13 @@ export async function resume(pid) {
     const entries=await list(api,state);assert.equal(entries.length,2);assert.equal(new Set(entries.map(row=>row.Id)).size,2);assert.ok(entries.every(row=>referenceId(row.MediaItem)===state.mediaId));
     assert.equal((await read(api,state,state.entryIds[0])).Notes,'Notes survive discarded job response and Netlify restart');assert.equal((await read(api,state,state.entryIds[0])).Position,2);assert.equal((await read(api,state,state.entryIds[1])).Position,1);
     const oldMediaPath=state.reservations.find(row=>row.type==='MediaItem'&&row.name===state.prefix+'-media').path;await assert.rejects(lookup(api,state,oldMediaPath),error=>error.status===404);
-    assert.equal(await sourceCount(),SOURCE_COUNT+4);
+    assert.equal(await sourceCount(),state.initialCount+4);
     record('One creation retains its renamed ID; revisions, two shared-media occurrences, order and deletion remain unchanged');
     const stale=await request(api,state,'/plans/'+state.stale.plan.id+'/apply',{method:'POST',body:{},idempotencyKey:state.stale.key});assert.equal(stale.status,409);assert.equal(stale.value?.error?.code,'revision_conflict');
     assert.equal((await read(api,state,state.entryIds[1])).Notes,'Competing app update survives Netlify restart');
     record('Saved stale revision fails after restart with 409 and preserves the competing app update');
   }catch(error){failure=error;report.error=errorInfo(error);}
-  try{report.cleanup=await cleanup(state);report.finalCount=await sourceCount();assert.equal(report.finalCount,SOURCE_COUNT);state.phase=failure?'cleaned':'completed';state.processAfter=processAfter;saveState(state);}
+  try{report.cleanup=await cleanup(state);report.finalCount=await sourceCount();assert.equal(report.finalCount,state.initialCount);state.phase=failure?'cleaned':'completed';state.processAfter=processAfter;saveState(state);}
   catch(error){failure ||= error;report.cleanupError=errorInfo(error);state.phase='cleanup_failed';saveState(state);}
   report.passed=!failure;fs.writeFileSync(REPORT,JSON.stringify(report,null,2));
   console.log(JSON.stringify({passed:report.passed,checks:report.checks.length,actualManagedAppRestart:true,lostCompletedBodies:report.lostCompletedBodies,cleaned:report.cleanup.length,sourceCountBefore:report.initialCount,sourceCountAfter:report.finalCount,report:REPORT}));
@@ -215,8 +225,10 @@ export async function resume(pid) {
 }
 async function main() {
   const args=process.argv.slice(2),phase=args[0];
-  if(phase==='--cleanup'&&args.length===1){const rows=await cleanup();console.log(JSON.stringify({phase:'cleaned',cleaned:rows.length,sourceCount:SOURCE_COUNT}));return;}
-  if(!['--prepare','--resume'].includes(phase)||args.length!==3||!['--app-pid','--gateway-pid'].includes(args[1])||!/^\d+$/.test(args[2]))throw new Error('Use --prepare or --resume --app-pid <managed Netlify CLI Node PID>, or --cleanup.');
-  if(phase==='--prepare')await prepare(Number(args[2]));else await resume(Number(args[2]));
+  if(phase==='--cleanup'&&args.length===1){const rows=await cleanup();console.log(JSON.stringify({phase:'cleaned',cleaned:rows.length,sourceCount:await sourceCount()}));return;}
+  const container = args[1] === '--app-container';
+  if(!['--prepare','--resume'].includes(phase)||args.length!==3||!(container ? args[2] === 'timeline-local-app-1' : ['--app-pid','--gateway-pid'].includes(args[1])&&/^\d+$/.test(args[2])))throw new Error('Use --prepare or --resume with --app-pid <managed Netlify CLI Node PID> or --app-container timeline-local-app-1, or --cleanup.');
+  const runtime = container ? args[2] : Number(args[2]);
+  if(phase==='--prepare')await prepare(runtime);else await resume(runtime);
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(error=>{console.error(error.code||'netlify_restart_failed');process.exitCode=1;});

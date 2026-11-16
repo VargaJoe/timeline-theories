@@ -49,10 +49,35 @@ export class ImagePublication {
   private sealed = false;
   private completed?: NativeSnapshot;
   private mutationStarted = false;
+  private recoveryStep?: { key: string; operationId: string; stoppedRequestId: string };
   get hasStartedMutation(): boolean { return this.mutationStarted; }
+  get recovery(): Readonly<{ operationId: string; stoppedRequestId: string }> | undefined { return this.recoveryStep && { operationId: this.recoveryStep.operationId, stoppedRequestId: this.recoveryStep.stoppedRequestId }; }
   private readonly checkContext = captureOperationContext();
   constructor(ownerId: number, generated: GeneratedImageSet, kind: 'timeline-composite' | 'media-sizes', owner: NativeSnapshot) {
     this.ownerId = ownerId; this.generated = generated; this.kind = kind; this.owner = owner;
+  }
+
+  private async write<T>(path: string, body: unknown, key: string, signal: AbortSignal): Promise<T> {
+    if (this.recoveryStep?.key !== key) this.recoveryStep = undefined;
+    try { const result = await post<T>(path, body, key, signal); this.recoveryStep = undefined; return result; }
+    catch (error) {
+      const details = error && typeof error === 'object' && 'details' in error ? error.details as Record<string, unknown> | undefined : undefined;
+      const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+      if (details && uuid(details.operationId) && uuid(details.stoppedRequestId)) this.recoveryStep = { key, operationId: details.operationId, stoppedRequestId: details.stoppedRequestId };
+      throw error;
+    }
+  }
+
+  async recover(signal: AbortSignal, confirmStopped = false, abandon = false): Promise<{ operationId: string; confirmed?: boolean; pending: boolean; notPrepared?: boolean; abandoned?: boolean; failure?: { code: string; message?: string }; repositoryWrites: number }> {
+    this.checkContext(); signal.throwIfAborted();
+    const step = this.recoveryStep;
+    if (!step || abandon && !confirmStopped) throw new Error('Recovery needs the original failed request and explicit stopped confirmation.');
+    const input = { operationId: step.operationId, ...(confirmStopped ? { stoppedRequestId: step.stoppedRequestId, confirmStopped: true } : {}), ...(abandon ? { abandon: true } : {}) };
+    const response = await nativeResponse('/images/recovery', { method: 'POST', body: JSON.stringify(input), headers: { 'Idempotency-Key': step.key }, signal }, { pendingImageRecoveryId: step.operationId });
+    const result = await response.json();
+    this.checkContext(); signal.throwIfAborted();
+    if (!result || result.operationId !== step.operationId || result.repositoryWrites !== 0 || typeof result.pending !== 'boolean' || result.abandoned && (result.pending || result.confirmed || result.failure?.code !== 'image_publication_abandoned') || !response.ok && !(response.status === 409 && result.pending)) throw new Error('Image recovery could not confirm this request. Keep the original publication.');
+    return result;
   }
 
   async publish(signal: AbortSignal, progress: (message: string) => void): Promise<NativeSnapshot> {
@@ -70,7 +95,7 @@ export class ImagePublication {
       // From this point a lost response may follow committed repository work.
       // Preflight failures above it do not need to lock the source selection.
       this.mutationStarted = true;
-      const draft = await post<{ setId: number; ownerRevision: string }>('/images/drafts', { ownerId: this.ownerId, generationId: this.generationId, expectedRevision: this.owner.revision, manifest }, `${this.generationId}:draft`, signal);
+      const draft = await this.write<{ setId: number; ownerRevision: string }>('/images/drafts', { ownerId: this.ownerId, generationId: this.generationId, expectedRevision: this.owner.revision, manifest }, `${this.generationId}:draft`, signal);
       if (!Number.isSafeInteger(draft.setId) || draft.setId < 1 || typeof draft.ownerRevision !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(draft.ownerRevision)) throw new Error('The image service returned an invalid draft. Retry this same publication.');
       this.setId = draft.setId;
       this.owner = { ...this.owner, revision: draft.ownerRevision };
@@ -79,7 +104,7 @@ export class ImagePublication {
       check();
       const { blob, ...variant } = this.generated.variants[index];
       progress(`Uploading image ${index + 1} of ${this.generated.variants.length}…`);
-      const file = await post<Record<string, unknown>>(`/images/drafts/${this.setId}/variants/${variant.name}`, {
+      const file = await this.write<Record<string, unknown>>(`/images/drafts/${this.setId}/variants/${variant.name}`, {
         ownerId: this.ownerId, variant, bytesBase64: await base64(blob),
       }, `${this.generationId}:${variant.name}`, signal);
       this.uploaded.push(file);
@@ -87,14 +112,14 @@ export class ImagePublication {
     if (!this.sealed) {
       check();
       progress('Checking the complete image set…');
-      await post(`/images/drafts/${this.setId}/seal`, { ownerId: this.ownerId, variants: this.uploaded }, `${this.generationId}:seal`, signal);
+      await this.write(`/images/drafts/${this.setId}/seal`, { ownerId: this.ownerId, variants: this.uploaded }, `${this.generationId}:seal`, signal);
       this.sealed = true;
     }
     check(); progress('Publishing…');
     const commands = [{ action: 'cover-presentation', targetId: this.ownerId, expectedRevision: this.owner.revision, setId: this.setId }];
     await applyNativeCommands(commands, check);
     const current = await nativeSnapshot(this.ownerId, { refresh: true });
-    check(); this.completed = current; acknowledgeNativeCommands(commands);
+    check(); this.completed = current; this.recoveryStep = undefined; acknowledgeNativeCommands(commands);
     return current;
   }
 }

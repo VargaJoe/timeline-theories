@@ -38,6 +38,8 @@ Minden eredeti és új képbyte SenseNetben marad. A meglévő app-journal a ké
 
 ## Szerkesztői folyamat
 
+Az előkészítés, a lezárás és az inaktív készlet törlése az alkalmazás meglévő Netlify háttérfeladataiban fut. A HTTP `202` csak átvétel: a kliens az adott feladat végleges eredményét várja meg. Azonos kéréskulcsú ismétlés ugyanahhoz a folyamatban lévő feladathoz kapcsolódik; a runtime automatikus újrakézbesítése nem futtatja újra az írást. A képfájlok feltöltése továbbra is átmeneti byte-okkal, közvetlenül a Functions és SenseNet között történik; a háttérfeladat-tároló kizárólag ellenőrzött metaadatot kap.
+
 1. Timeline: **Edit Timeline → List cover**, legfeljebb négy kép kijelölése és rendezése, vagy **Random selection**.
 2. **Generate preview**: a böngésző letölti az engedélyezett eredetiket, ellenőrzi/dekódolja őket, elkészíti a méreteket és a források SHA-256 hash-ét.
 3. **Publish**: standard Folder/File létrehozás és Upload, visszaolvasás/byte-hash ellenőrzés, alkalmazási lezárás, majd az aktív készlet kiválasztása. Nincs natív SenseNet seal vagy aktiváló művelet.
@@ -48,6 +50,10 @@ Médiánál **Image sizes → Prepare sizes → Publish**. URL-only tartalomnál
 A **Use original presentation** visszavált az eredeti megjelenésre. A **Delete unused copies** külön megerősítéssel csak az inaktív generációkat törli. Az eredetiket egyik művelet sem cseréli le.
 
 Ha a publikálás kimenetele bizonytalan, a panel megtartja az adott generációt, előnézetet és kéréskulcsokat. Amíg ez a függő publikálás megvan, a képválasztás, sorrend és Random módosítása szünetel; a **Retry publication** ugyanazt a generációt és ugyanazokat a kulcsokat folytatja. Elveszett válasz vagy időtúllépés miatt ne készíts helyette új képet, és ne használd az oldalfrissítést helyreállításként. A helyi Functions-időtúllépés külön felismerhető hibaüzenetet kap, nem általános gateway-elutasításként jelenik meg.
+
+Ha az eredeti kérés helyreállítási referenciája elérhető, a **Check saved outcome** írás megismétlése nélkül ellenőrzi az eredményt. Igazolt eredménynél a **Retry publication** folytathatja ugyanazt a készletet akkor is, ha a háttérfolyamat az eredmény mentése előtt megszakadt. Egy korábbi, változtathatatlan jobhiba megmarad; az alkalmazás szükség esetén kizárólag a már igazolt nyugtából készít új eredménynézetet, háttérfolyamat indítása nélkül.
+
+Le nem zárt próbát csak az operátor által ellenőrzött, **pontosan azonos szerverkérés leállása** után lehet kifejezetten lezárni. A referenciát a panel megmutatja; az időtúllépés vagy a hiányzó generáció önmagában nem leállási bizonyíték. A jelölőnégyzet után a **Close failed attempt** nulla SenseNet-írással archiválhatja a bizonytalan eredményt sikertelen próbának. A korábbi aktív kép, eredetik és részleges másolatok megmaradnak; sikeres vagy már lezárt nyugta nem írható felül. Csak a `pending:false` helyreállítás után jelenik meg a **Start a new preview**. A pontos tulajdonosi kötés, kéréskulcs, leállási nyilatkozat vagy aktuális jogosultság hiányában a lezárás tiltva marad.
 
 A képművelet előtti gateway-/jogosultsági előellenőrzés hibája nem tart meg függő publikálást, ezért ilyenkor a kijelölés szerkeszthető marad. Sikeres publikálás után is újra szerkeszthető a panel: módosítsd a kijelölést vagy sorrendet, készíts új **Generate preview** előnézetet, majd publikáld azt.
 

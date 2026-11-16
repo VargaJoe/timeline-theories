@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { createClient, followNativeResponse } from './m1-client.mjs';
 
 const require = createRequire(import.meta.url), local = require('./m0-local-api.cjs');
-const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines', SOURCE_COUNT = 2998;
+const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines';
 const REPORT = path.join(local.ROOT, 'm1-concurrency-report.json'), STATE = path.join(local.ROOT, 'm1-concurrency-state.json');
 const SCOPES = ['content:read','media:write'];
 const client = () => createClient({ baseUrl: GATEWAY + '/api/v1', repository: local.REPOSITORY, authority: local.AUTHORITY, project: PROJECT, caFile: path.join(local.ROOT, 'certificates/localhost.pem') });
@@ -61,6 +61,7 @@ const apply = (api,state,plan,key) => request(api,'/plans/'+plan.id+'/apply',{me
 /** Public app API only for writes. Preserve private state if native cleanup needs recovery. */
 export async function cleanup(state = loadState()) {
   const api = client(), results = [];
+  assert.ok(Number.isSafeInteger(state.initialCount) && state.initialCount >= 0, 'Saved fixture baseline is required before cleanup.');
   await api.verify();
   if (state.grant?.token) {
     try {
@@ -83,11 +84,11 @@ export async function cleanup(state = loadState()) {
       await assert.rejects(read(api,state,fixture.id), error => error.status === 404);
       results.push({id:fixture.id,deleted:true,via:'native-app'}); state.cleanup = results; saveState(state);
     }
-    assert.equal(await sourceCount(),SOURCE_COUNT,'Restored source count changed after native cleanup.');
+    assert.equal(await sourceCount(),state.initialCount,'Restored source count changed after native cleanup.');
     await api.request('/grants/'+state.grant.id+'/revoke',{method:'POST',token:state.grant.token,body:{}});
     state.grant.token = null;
   }
-  assert.equal(await sourceCount(),SOURCE_COUNT); state.phase = 'cleaned'; state.cleanup = results; saveState(state); return results;
+  assert.equal(await sourceCount(),state.initialCount); state.phase = 'cleaned'; state.cleanup = results; saveState(state); return results;
 }
 
 /** Two independent simultaneous HTTPS callers exercise the one Netlify application. */
@@ -105,7 +106,7 @@ export async function run() {
   try {
     const capabilities = await a.verify(); await b.verify();
     assert.equal(capabilities.runtime,'Netlify Functions in the Timeline app'); assert.equal(capabilities.backendProtocolRequired,'gateway-coordinated-v1');
-    protectedIds(); report.initialCount = await sourceCount(); assert.equal(report.initialCount,SOURCE_COUNT,'Run only after other owned fixture phases finish.');
+    protectedIds(); report.initialCount = state.initialCount = await sourceCount(); saveState(state);
     state.grant = await a.request('/grants',{method:'POST',token:local.readAccounts().editor.apiKey,backendAuth:'ApiKey',body:{scopes:SCOPES,expiresInSeconds:3600}}); saveState(state);
     state.createPlan = await preview(a,state,[{action:'create',type:'MediaItem',fields:{Name:state.reservation.name,DisplayName:'Owned app concurrency fixture',Title:'Owned concurrent media',MediaType:'movie',Description:'Before concurrent updates'}}]);
     state.createKey = randomUUID(); saveState(state);
@@ -119,7 +120,7 @@ export async function run() {
     const creates = finalized.map(success); assert.deepEqual(creates[0],creates[1]);
     const id = creates[0].completed[0].result.id; assert.ok(Number.isSafeInteger(id));
     const content = assertOwned(state,await read(a,state,id)); state.fixtures.push({id,name:content.Name,path:content.Path}); saveState(state);
-    assert.equal(await sourceCount(),SOURCE_COUNT+1);
+    assert.equal(await sourceCount(),state.initialCount+1);
     record('Two simultaneous same-plan/key HTTP callers share one durable job and exactly one content ID',{callers:2,jobId:state.createJobId,ownedContents:1});
 
     state.competing = [
@@ -136,12 +137,12 @@ export async function run() {
     const loserReplay = await apply([a,b][loser],state,state.competing[loser].plan,state.competing[loser].key);
     assert.equal(loserReplay.status,409); assert.equal(loserReplay.value?.error?.code,'revision_conflict');
     const winnerReplay = success(await apply([a,b][loser],state,state.competing[winner].plan,state.competing[winner].key));
-    assert.deepEqual(winnerReplay,responses[winner].value); assert.equal((await read(a,state,id)).revision,current.revision); assert.equal(await sourceCount(),SOURCE_COUNT+1);
+    assert.deepEqual(winnerReplay,responses[winner].value); assert.equal((await read(a,state,id)).revision,current.revision); assert.equal(await sourceCount(),state.initialCount+1);
     record('Competing keys pinned to one revision yield one save and a 409; explicit same-key retry confirms the stale revision',{winner: winner === 0 ? 'A':'B',initialLoserCode:responses[loser].value?.error?.code,staleStatus:409});
     record('Committed winner receipt replays through the other HTTP caller without another save');
   } catch (error) { failure=error; report.error=errorInfo(error); state.phase='failed'; saveState(state); }
   finally {
-    try { report.cleanup = await cleanup(state); report.finalCount = await sourceCount(); assert.equal(report.finalCount,SOURCE_COUNT); }
+    try { report.cleanup = await cleanup(state); report.finalCount = await sourceCount(); assert.equal(report.finalCount,state.initialCount); }
     catch (error) { failure ||= error; report.cleanupError=errorInfo(error); state.phase='cleanup_failed'; saveState(state); }
     report.passed=!failure; if(report.passed){state.phase='completed';saveState(state);} fs.writeFileSync(REPORT,JSON.stringify(report,null,2));
   }
@@ -151,6 +152,6 @@ export async function run() {
 if(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args=process.argv.slice(2);
   if(args.length===1 && args[0]==='--run')run().catch(()=>{console.error('netlify_concurrency_failed');process.exitCode=1;});
-  else if(args.length===1 && args[0]==='--cleanup')cleanup().then(result=>console.log(JSON.stringify({cleaned:result.length,sourceCount:SOURCE_COUNT}))).catch(()=>{console.error('netlify_concurrency_cleanup_failed');process.exitCode=1;});
+  else if(args.length===1 && args[0]==='--cleanup')cleanup().then(async result=>console.log(JSON.stringify({cleaned:result.length,sourceCount:await sourceCount()}))).catch(()=>{console.error('netlify_concurrency_cleanup_failed');process.exitCode=1;});
   else {console.error('Use --run after the managed Netlify app is ready, or --cleanup for a retained owned fixture.');process.exitCode=1;}
 }

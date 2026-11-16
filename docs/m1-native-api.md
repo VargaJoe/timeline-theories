@@ -7,18 +7,18 @@ The React UI and an independent HTTPS client use the same `/api/v1` routes, appl
 Requires Node 22.21 or newer, the existing isolated M0 repository and its trusted localhost certificate. Preserve existing volumes, accounts and snapshots. For an already provisioned M0 runtime:
 
 ```powershell
-npm ci
-npm ci --prefix client
+npm ci --legacy-peer-deps
+npm ci --prefix client --legacy-peer-deps
 ./deployment/scripts/m0-runtime.ps1 -Action start
-node scripts/m1-local-inventory-setup.cjs
-npm run dev:m0
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
+docker compose -f compose.local.yaml up -d --build app
 ```
 
-The explicit setup command creates one owned read-only inventory user and API key, grants only that identity read rights and explicit write denies at existing inheritance boundaries, verifies every project target, and stores its bound credential in ignored `deployment/.local/m1-inventory.json`. Reuse rechecks rights without writes. No startup, browsing, 404, authentication or transport failure provisions content. Production has no automatic provisioning.
+Only when inventory has not yet been provisioned, explicitly run `node scripts/m1-local-inventory-setup.cjs` once. It creates one owned read-only inventory user and API key, grants only that identity read rights and explicit write denies at existing inheritance boundaries, verifies every project target, and stores its bound credential in ignored `deployment/.local/m1-inventory.json`. Reuse rechecks rights without writes. No startup, browsing, 404, authentication or transport failure provisions content. Production has no automatic provisioning.
 
 UI: `https://localhost:8080`. API: `https://localhost:8080/api/v1`. Repository: `https://localhost:41016`; authority: `https://localhost:41017`; project: `/Root/Content/timelines`. The managed launcher runs one offline Netlify Dev app with its UI and Functions. Vite is the internal HTTP server on 5173; Netlify Dev terminates the public localhost HTTPS connection. There is no standalone application API to start.
 
-Ordinary `npm run dev` and builds retain standard Vite `.env` precedence and configured hosting variables. Only `--local` selects M0 and its existing CA. For the local read-only smoke, stop the owned managed app and restart it with `node scripts/m1-dev.mjs --local --readonly`; discovery must report `readOnly: true` before that smoke proceeds. `npm run dev:readonly` selects the configured remote read-only profile without changing its repository or authority. TLS verification stays enabled.
+The current local app always runs in Docker; do not start a parallel host Vite/Netlify process. The private root `.env` selects the profile, and existing values are preserved. Read-only acceptance uses a temporary ignored Compose override with explicit localhost M0 bindings; see [verification](m1-verification.md) and [local Docker](local-docker.md). Discovery must report the exact target and `readOnly:true` before that gate. Normal Compose is restored afterwards; TLS verification stays enabled. The internal/historical dev launchers retain their Vite env precedence but are not the current local startup workflow.
 
 Every dev launch keeps app state in ignored `deployment/.local/netlify-app-blobs` through the real Blobs SDK's local HTTP emulator, using a stable local site identifier and isolated repository/auth/project binding prefixes. App development is independent of the selected content repository: its origin remains HTTPS localhost8080, with dedicated app-only CA trust for background requests. Ordinary repository trust and any existing `NODE_EXTRA_CA_CERTS` remain unchanged. The helper corrects SDK emulator ETag, conditional-write and listing behavior; actual Deploy Preview testing separately verifies cloud semantics. Deployment uses Netlify's managed private Blobs store, with no local filesystem persistence in a Function.
 
@@ -58,6 +58,12 @@ Long plan previews, saved-plan applies, provider requests and ZIP export/import 
 Dates use real ISO calendar dates or timestamps with at most millisecond precision. Date-only and unzoned form input use UTC; zoned timestamps normalize to UTC in the reviewed plan. Unsupported year zero, midnight rollover and invalid calendar/clock values fail the entire preview before any write.
 
 ## Plans, conflicts and recovery
+
+Image draft preparation, seal and inactive-set deletion use metadata-only background jobs. Retain the original `Idempotency-Key`; HTTP202 is not completion. Follow the owned `/jobs/{id}` response to its terminal status. Generated variant bytes still use the synchronous bounded upload endpoint and are never persisted in the job input. Current owner Save and selected-source Open are rechecked before returning stored image results.
+
+`POST /images/recovery` uses the original image operation/key and a current backend owner session. Successful reconciliation can finalize a stopped metadata job from its verified journal receipt without another worker or repository write. A transient stored job error remains immutable; a conditional mapping may point the same operation at a completed receipt view instead. Before journal preparation, a claimed job can be closed as `notPrepared` only using exact bound job provenance and explicit stopped-request confirmation. `notPrepared:true,pending:true` is a discovery result and does not authorize a new attempt.
+
+Optional `abandon:true` additionally requires `confirmStopped:true` and the exact `stoppedRequestId`. This explicitly archives an unresolved, stopped image attempt as `image_publication_abandoned`, preserves all native partial files and sends zero repository writes. A strong historical request record proves provenance only; the operator must still attest actual stop. A different held writer, absent binding/stop confirmation, revoked permission or failed inspection stays denied. The original operation is not silently retried with a new key. This is an operator recovery operation, not an automatic timeout policy.
 
 `POST /plans` accepts create/update/delete/order/metadata/cover commands. It validates the whole batch, target membership, actual ACL, full children/references and revisions, stores a private 15-minute plan, and returns a field diff, sources, delete effects and counts with `repositoryWrites: 0`. `POST /plans/{id}/apply` accepts an empty JSON object and required Idempotency-Key. The caller cannot replace approved fields at apply time.
 

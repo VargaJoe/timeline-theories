@@ -11,7 +11,7 @@ import { createClient } from './m1-client.mjs';
 import { decodeArchive } from '../client/api/exchange.mjs';
 
 const require = createRequire(import.meta.url), local = require('./m0-local-api.cjs');
-const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines', SOURCE_COUNT = 2998;
+const GATEWAY = 'https://localhost:8080', PROJECT = '/Root/Content/timelines';
 const CHUNK_BYTES = 2 * 1024 * 1024, INLINE_BYTES = 3 * 1024 * 1024, WIRE_BYTES = 4 * 1024 * 1024;
 const STATE = path.join(local.ROOT,'m1-large-transfer-state.json'), REPORT = path.join(local.ROOT,'m1-large-transfer-report.json');
 const SCOPES = ['content:read','timelines:write','media:write','entries:write','covers:write','exchange:read','exchange:write'];
@@ -111,7 +111,7 @@ function exactBytes(actual,expected){assert.equal(actual.length,expected.length,
 
 /** Only own reserved UUIDs are discovered/deleted, through the scoped API. No raw write fallback. */
 export async function cleanup(state=loadState()) {
-  const api=client(),results=[];await assertApp(api);
+  const api=client(),results=[];assert.ok(Number.isSafeInteger(state.initialCount)&&state.initialCount>=0,'Saved fixture baseline is required before cleanup.');await assertApp(api);
   if(state.grant?.token) {
     for(const reservation of state.reservations){let content;try{content=await lookup(api,state,reservation.path);}catch(error){if(error.status===404)continue;throw error;}assert.equal(content.Name,reservation.name);assert.equal(content.Path,reservation.path);assert.equal(content.Type,reservation.type);remember(state,content);}
     const sorted=[...state.fixtures].sort((a,b)=>({TimelineEntry:0,Timeline:1,MediaItem:2}[a.type]-{TimelineEntry:0,Timeline:1,MediaItem:2}[b.type]));
@@ -121,9 +121,9 @@ export async function cleanup(state=loadState()) {
       let step=state.operations.find(row=>row.kind==='cleanup'&&row.targetId===fixture.id&&!row.completed);if(!step)step=operation(state,'cleanup',await preview(api,state,[{action:'delete',targetId:fixture.id,expectedRevision:current.revision}]),fixture.id);
       await apply(api,state,step);await assert.rejects(read(api,state,fixture.id),error=>error.status===404);fixture.deleted=true;results.push({id:fixture.id,deleted:true,via:'native-app'});state.cleanup=results;saveState(state);
     }
-    assert.equal(await sourceCount(),SOURCE_COUNT);await api.request('/grants/'+state.grant.id+'/revoke',{method:'POST',token:state.grant.token,body:{}});state.grant.token=null;
+    assert.equal(await sourceCount(),state.initialCount);await api.request('/grants/'+state.grant.id+'/revoke',{method:'POST',token:state.grant.token,body:{}});state.grant.token=null;
   }
-  assert.equal(await sourceCount(),SOURCE_COUNT);state.phase='cleaned';state.cleanup=results;saveState(state);return results;
+  assert.equal(await sourceCount(),state.initialCount);state.phase='cleaned';state.cleanup=results;saveState(state);return results;
 }
 
 export async function run() {
@@ -136,7 +136,7 @@ export async function run() {
   const record=(name,details={})=>{report.checks.push({name,...details,passed:true});console.log(JSON.stringify(report.checks.at(-1)));};
   const phase=name=>{state.phase=name;trace.setPhase(name);saveState(state);};
   try {
-    await assertApp(api);protectedIds();report.initialCount=await sourceCount();assert.equal(report.initialCount,SOURCE_COUNT,'Other owned fixture phases must finish first.');
+    await assertApp(api);protectedIds();report.initialCount=state.initialCount=await sourceCount();saveState(state);
     state.grant=await api.request('/grants',{method:'POST',token:local.readAccounts().editor.apiKey,backendAuth:'ApiKey',body:{scopes:SCOPES,expiresInSeconds:3600}});saveState(state);
     record('Deterministic fixture is a complete RGB PNG with valid chunk CRCs, zlib and decoded scanlines',{bytes:png.length,width:image.width,height:image.height,sha256:image.sha256});
     const timeline=await create(api,state,'Timeline',{Name:state.prefix+'-timeline',DisplayName:'Owned large transfer timeline',IsVisible:true},PROJECT+'/Timelines');state.timelineId=timeline.Id;saveState(state);
@@ -144,7 +144,7 @@ export async function run() {
     const names=[state.prefix+'-first',state.prefix+'-second'];names.forEach(name=>reserve(state,'TimelineEntry',name,timeline.Path));
     const entriesPlan=await preview(api,state,names.map((Name,index)=>({action:'create',type:'TimelineEntry',parentId:timeline.Id,fields:{Name,DisplayName:'Own large transfer occurrence '+(index+1),MediaItem:media.Id,Position:index+1,Notes:'Large transfer occurrence '+(index+1)+'\nTab\tand backslash \\',ChronologicalDate:index===0?'2024-01-01':'2024-02-02',ChronologicalDescription:'Own chronology '+(index+1),EntryLabel:index===0?'mainstory':'flashback',Importance:index===0?'essential':'optional'}})));
     await apply(api,state,operation(state,'setup-entries',entriesPlan));const originals=await list(api,state);assert.equal(originals.length,2);for(const entry of originals)remember(state,entry);state.originalEntryIds=originals.map(row=>row.Id);state.expected=Object.fromEntries(originals.map(row=>[row.Name,fields(row)]));saveState(state);
-    assert.equal(await sourceCount(),SOURCE_COUNT+4);
+    assert.equal(await sourceCount(),state.initialCount+4);
 
     phase('cover-preview');const beforeCover=media;
     const coverPlan=await preview(api,state,[{action:'cover',targetId:media.Id,expectedRevision:media.revision,bytesBase64:png.toString('base64'),mimeType:'image/png',fileName:'large-valid.png'}]);
@@ -161,14 +161,14 @@ export async function run() {
     record('Real large ZIP export follows private chunks and decodes both exact covers for one shared media ID',{...report.archive,downloadChunks:exportChunks});
 
     phase('entries-clear');const currentEntries=await list(api,state),clearPlan=await preview(api,state,currentEntries.map(entry=>({action:'delete',targetId:entry.Id,expectedRevision:entry.revision})));await apply(api,state,operation(state,'clear-occurrences',clearPlan));
-    assert.equal((await list(api,state)).length,0);for(const entry of currentEntries){await assert.rejects(read(api,state,entry.Id),error=>error.status===404);state.fixtures.find(row=>row.id===entry.Id).deleted=true;}saveState(state);assert.equal(await sourceCount(),SOURCE_COUNT+2);
+    assert.equal((await list(api,state)).length,0);for(const entry of currentEntries){await assert.rejects(read(api,state,entry.Id),error=>error.status===404);state.fixtures.find(row=>row.id===entry.Id).deleted=true;}saveState(state);assert.equal(await sourceCount(),state.initialCount+2);
 
     phase('zip-import-preview');const beforeImport=await read(api,state,media.Id);
     const importPlan=await api.request('/exchange/'+timeline.Id+'/preview',{method:'POST',token:state.grant.token,body:archiveBytes,contentType:'application/zip'});assert.equal(importPlan.repositoryWrites,0);assert.equal(importPlan.archive.entriesCount,2);assert.equal(importPlan.archive.coversCount,2);
     const importChunks=assertChunks(trace,'zip-import-preview','uploads',archiveBytes.length);assert.equal((await list(api,state)).length,0);assert.equal((await read(api,state,media.Id)).revision,beforeImport.revision);
     phase('zip-import-apply');await apply(api,state,operation(state,'import',importPlan));const imported=await list(api,state);assert.equal(imported.length,2);assert.equal(new Set(imported.map(row=>row.Id)).size,2);
     for(const entry of imported){remember(state,entry);assert.ok(!state.originalEntryIds.includes(entry.Id));assert.deepEqual(fields(entry),state.expected[entry.Name]);assert.equal(referenceId(entry.MediaItem),media.Id);}
-    assert.equal(await sourceCount(),SOURCE_COUNT+4);assert.equal((await read(api,state,media.Id)).Id,state.mediaId);
+    assert.equal(await sourceCount(),state.initialCount+4);assert.equal((await read(api,state,media.Id)).Id,state.mediaId);
     phase('cover-readback');const readback=await api.request('/content/'+media.Id+'/cover',{token:state.grant.token,binary:true});exactBytes(readback,png);const readbackChunks=assertChunks(trace,'cover-readback','downloads',png.length);
     record('Native ZIP preview stages the complete archive without writes; apply restores two occurrences referencing the existing media and exact cover bytes',{archiveUploadChunks:importChunks,coverReadbackChunks:readbackChunks,existingMediaId:media.Id,occurrences:imported.length});
     assert.ok(trace.jobs.size>=6);assert.ok(trace.rows.every(row=>row.requestBytes<=WIRE_BYTES&&row.responseBytes<=WIRE_BYTES));
@@ -176,7 +176,7 @@ export async function run() {
   }catch(error){failure=error;report.error=errorInfo(error);state.phase='failed';saveState(state);}
   finally {
     trace.setPhase('cleanup');
-    try{report.cleanup=await cleanup(state);report.finalCount=await sourceCount();assert.equal(report.finalCount,SOURCE_COUNT);}
+    try{report.cleanup=await cleanup(state);report.finalCount=await sourceCount();assert.equal(report.finalCount,state.initialCount);}
     catch(error){failure ||= error;report.cleanupError=errorInfo(error);state.phase='cleanup_failed';saveState(state);}
     report.traffic={requests:trace.rows,jobIds:[...trace.jobs],uploadChunkRequests:trace.rows.filter(row=>/\/uploads\/[^/]+\/chunks\//.test(row.route)).length,downloadChunkRequests:trace.rows.filter(row=>/\/downloads\/[^/]+\/chunks\//.test(row.route)).length,rawRepositoryMethods:[...trace.repositoryMethods],maxRequestBytes:Math.max(0,...trace.rows.map(row=>row.requestBytes)),maxResponseBytes:Math.max(0,...trace.rows.map(row=>row.responseBytes))};trace.close();
     report.passed=!failure;if(report.passed){state.phase='completed';saveState(state);}fs.writeFileSync(REPORT,JSON.stringify(report,null,2));
@@ -187,6 +187,6 @@ export async function run() {
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   const args=process.argv.slice(2);
   if(args.length===1&&args[0]==='--run')run().catch(()=>{console.error('netlify_large_transfer_failed');process.exitCode=1;});
-  else if(args.length===1&&args[0]==='--cleanup')cleanup().then(rows=>console.log(JSON.stringify({cleaned:rows.length,sourceCount:SOURCE_COUNT}))).catch(()=>{console.error('netlify_large_transfer_cleanup_failed');process.exitCode=1;});
+  else if(args.length===1&&args[0]==='--cleanup')cleanup().then(async rows=>console.log(JSON.stringify({cleaned:rows.length,sourceCount:await sourceCount()}))).catch(()=>{console.error('netlify_large_transfer_cleanup_failed');process.exitCode=1;});
   else{console.error('Use --run after other fixture gates finish, or --cleanup for a retained owned fixture.');process.exitCode=1;}
 }

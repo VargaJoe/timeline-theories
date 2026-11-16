@@ -57,6 +57,12 @@ export function openApi(capabilities) {
   }
   paths['/images/recovery'].post.parameters=[...binding,{name:'Idempotency-Key',in:'header',required:true,schema:{type:'string',pattern:'^[A-Za-z0-9_.:-]{8,128}$'}}];
   paths['/images/drafts'].post.responses={...responses,201:{description:'Caller-owned SenseNet draft metadata',...json({type:'object',required:['data'],properties:{data:{type:'object',required:['setId','generationId','manifest','sealed','ownerRevision'],properties:{setId:{type:'integer',minimum:1},generationId:{type:'string',format:'uuid'},manifest:{$ref:'#/components/schemas/ImageManifest'},sealed:{const:false},ownerRevision:{type:'string',pattern:'^sha256:[0-9a-f]{64}$'}}}}})}};
+  for (const route of ['/images/drafts', '/images/drafts/{setId}/seal', '/images/drafts/{setId}/delete']) {
+    const operation = paths[route].post;
+    operation.responses = { ...operation.responses, 202: pending };
+    operation.description += ' Metadata-only background work: retain the same Idempotency-Key and poll the owned job. An identical retry shares its in-flight job; a platform retry never repeats execution. Image bytes are not stored in the app job journal.';
+  }
+  paths['/images/recovery'].post.requestBody.content['application/json'].schema.properties.abandon = { const: true, description: 'Explicitly close an unconfirmed stopped attempt without repository writes. Requires confirmStopped and the exact stoppedRequestId. Partial files are preserved; a successful or terminal receipt is never overwritten.' };
   paths['/exchange/{timelineId}/preview'].post.requestBody.content['application/json']={schema:{type:'object',additionalProperties:false,required:['uploadId'],properties:{uploadId:{type:'string',format:'uuid'}}}};
   for (const route of ['timelines','media','books','entries']) paths['/'+route]={get:{...get('Stable ID pagination and ACL-filtered application search.'),parameters:[...binding,...['skip','top','timelineId'].map(name=>({name,in:'query',schema:{type:'integer',minimum:name==='skip'?0:1,maximum:name==='top'?100:undefined}})),{name:'search',in:'query',schema:{type:'string',maxLength:200}},{name:'includeHidden',in:'query',schema:{type:'boolean'}}]}};
   for (const [route,item] of Object.entries(paths)) for(const method of ['get','post']) {
