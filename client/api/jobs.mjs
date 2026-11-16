@@ -264,7 +264,19 @@ export class JobService {
       const response = errorResponse(error);
       if (row.image) {
         const failure = JSON.parse(response.body.toString());
-        failure.error.details = { ...failure.error.details, operationId: row.image.operationId, stoppedRequestId: row.requestId };
+        const details = failure.error.details;
+        const explicitReference = details && (Object.hasOwn(details, 'operationId') || Object.hasOwn(details, 'stoppedRequestId'));
+        const matchingReference = details?.operationId === row.image.operationId && typeof details.stoppedRequestId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(details.stoppedRequestId);
+        if (failure.error.code === 'pending_recovery_required' || explicitReference && !matchingReference) {
+          // The global fence belongs to an older operation. This rejected
+          // job's IDs cannot identify or recover that blocking dispatch.
+          if (details) {
+            delete details.operationId;
+            delete details.stoppedRequestId;
+          }
+        } else if (!explicitReference) failure.error.details = { ...details, operationId: row.image.operationId, stoppedRequestId: row.requestId };
+        // A matching held invocation may be older than this retrying job.
+        // Preserve its exact request reference instead of substituting ours.
         response.body = Buffer.from(JSON.stringify(failure));
       }
       await this.saveResult(id, response, context);

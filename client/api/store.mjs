@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID, createCipheriv, createDecipheriv, 
 import { DomainError } from '../domain/content.mjs';
 
 export const hash = value => createHash('sha256').update(typeof value === 'string' ? value : stableJson(value)).digest('hex');
+export const WRITER_REQUEST_DISCOVERY_LIMIT = 200;
 export function stableJson(value) {
   if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
   if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}';
@@ -162,6 +163,30 @@ export class Store {
     return (await this.read('pending-mutations'))?.data.entries?.[slot] ?? null;
   }
   async pendingMutations() { return Object.values((await this.read('pending-mutations'))?.data.entries ?? {}); }
+  async writerRequestRegistrations() {
+    const prefix = this.prefix + 'writer-requests/', keys = []; let pages = 0;
+    // Listing only finds candidates. Exact strong reads below establish each
+    // immutable registration; a partial scan never supplies a guessed request.
+    for await (const page of this.blobs.list({ prefix, paginate: true })) {
+      if (++pages > WRITER_REQUEST_DISCOVERY_LIMIT || !Array.isArray(page.blobs) || page.blobs.length > WRITER_REQUEST_DISCOVERY_LIMIT - keys.length) return { complete: false, registrations: [] };
+      for (const item of page.blobs) {
+        if (typeof item.key !== 'string' || !item.key.startsWith(prefix) || !uuidPattern.test(item.key.slice(prefix.length))) return { complete: false, registrations: [] };
+        keys.push(item.key.slice(this.prefix.length));
+      }
+    }
+    const registrations = [];
+    for (let offset = 0; offset < keys.length; offset += 4) {
+      const rows = await Promise.all(keys.slice(offset, offset + 4).map(key => this.read(key)));
+      for (let index = 0; index < rows.length; index++) {
+        const value = rows[index]?.data, requestId = keys[offset + index].slice('writer-requests/'.length);
+        if (!value || value.requestId !== requestId || typeof value.principal !== 'string' || !value.principal || value.principal.length > 256 || !Number.isSafeInteger(value.identity) || value.identity < 1) return { complete: false, registrations: [] };
+        if (value.operationId === undefined) continue; // Plan registrations are unrelated.
+        if (!uuidPattern.test(value.operationId)) return { complete: false, registrations: [] };
+        registrations.push({ requestId, principal: value.principal, identity: value.identity, operationId: value.operationId });
+      }
+    }
+    return { complete: true, registrations };
+  }
   async updatePending(change) {
     for (let attempt = 0; attempt < 40; attempt++) {
       const previous = await this.read('pending-mutations');
@@ -183,7 +208,7 @@ export class Store {
     }
     const row = { principal, operation_id: payload.operationId, request_hash: payload.requestHash, payload: JSON.stringify(payload), before_state: JSON.stringify(before), state: 'pending', result: null, started: Date.now() };
     let created = false;
-    await this.updatePending(state => {
+    try { await this.updatePending(state => {
       created = false;
       const current = state.entries[slot];
       if (current) {
@@ -192,7 +217,14 @@ export class Store {
       }
       if (Object.keys(state.entries).length) throw new DomainError('pending_recovery_required', 'A previous application write has an uncertain outcome. Its original caller must recover the saved operation before preparing another dispatch.', 409);
       state.entries[slot] = row; created = true; return state;
-    });
+    }); } catch (error) {
+      // Recheck receipts as well as pending state before promising that this
+      // operation has never prepared a dispatch. A failed read stays closed.
+      if (error instanceof DomainError && error.code === 'pending_recovery_required' && !await this.mutationRow(principal, payload.operationId)) {
+        throw new DomainError(error.code, error.message, error.status, { blockedBeforeWrite: true });
+      }
+      throw error;
+    }
     return { row: await this.mutationRow(principal, payload.operationId), created };
   }
   async terminalMutation(principal, payload, result, state) {

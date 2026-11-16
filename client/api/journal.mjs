@@ -11,7 +11,14 @@ export class MutationJournal {
   async isPending(payload){return (await this.store.pendingMutations()).some(row=>row.principal===this.principal&&row.operation_id===payload.operationId);}
   async assertRecoveryBoundary(operationIds){
     const pending=await this.store.pendingMutations();
-    if(pending.some(row=>row.principal!==this.principal||!operationIds.includes(row.operation_id)))throw new DomainError('pending_recovery_required','A previous application write has an uncertain outcome. Its original caller must retry the saved plan/key before another application write.',409);
+    if(pending.some(row=>row.principal!==this.principal||!operationIds.includes(row.operation_id))){
+      // A saved current receipt/intent can outlive its invocation. Only an
+      // absent current operation proves this rejection preceded its dispatch.
+      // Keep this guarantee scoped to one step; a multi-step plan may already
+      // have applied members and does not need thousands of extra state reads.
+      const blockedBeforeWrite=operationIds.length===1&&!await this.store.mutationRow(this.principal,operationIds[0]);
+      throw new DomainError('pending_recovery_required','A previous application write has an uncertain outcome. Its original caller must retry the saved plan/key before another application write.',409,blockedBeforeWrite?{blockedBeforeWrite:true}:undefined);
+    }
   }
   async receipt(payload) {
     const row=await this.row(payload);

@@ -42,6 +42,17 @@ test('image presentation commands reference a sealed set or explicit legacy rese
   assert.ok(spec.paths['/images/recovery'].post.parameters.some(parameter => parameter.name === 'Idempotency-Key' && parameter.required));
 });
 
+test('owner pending image discovery documents its exact read-only metadata and bounded request references', () => {
+  const operation=spec.paths['/images/recovery/pending'].get;
+  assert.equal(operation.requestBody,undefined);assert.equal(operation.responses[202],undefined);
+  assert.match(operation.description,/read-only/);assert.match(operation.description,/delegated grants are rejected/);assert.match(operation.description,/never evidence/);
+  const output=ajv.compile(operation.responses[200].content['application/json'].schema), generationId=randomUUID();
+  const item={operationId:randomUUID(),ownerId:90,title:'Owned draft',action:'image-draft',idempotencyKey:generationId+':draft',requestIds:[randomUUID()]};
+  assert.equal(output({data:[item]}),true);
+  assert.equal(output({data:[{...item,requestIds:[],requestReferenceRequired:true}],unsupportedPending:true}),true);
+  for(const invalid of [{data:[{...item,principal:'private-principal'}]},{data:[{...item,requestReferenceRequired:true}]},{data:[{...item,requestIds:Array.from({length:201},()=>randomUUID())}]},{data:[{...item,action:'image-seal'}]},{data:[],unsupportedPending:false},{download:{id:randomUUID()}}])assert.equal(output(invalid),false);
+});
+
 test('image manifest schema exposes the twelve-poster bound for all ordered source arrays', () => {
   const manifestValid = validate('ImageManifest');
   for (const count of [1, 4, 5, 8, 12, 13]) {

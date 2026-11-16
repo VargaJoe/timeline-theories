@@ -13,6 +13,7 @@ import { loadConfig } from '../client/api/config.mjs';
 import { invokeBackground } from '../client/api/jobs.mjs';
 import { imageProtocolFixture } from './helpers/image-assets-protocol-fixture.mjs';
 import { StockRepository } from '../client/api/stock-repository.mjs';
+import { imageOperationId } from '../client/api/image-assets.mjs';
 import rasterFixture from '../scripts/helpers/image-variant-fixture.cjs';
 
 // Function routing and ACL-flow tests only. Blobs uses its real SDK/HTTP/file
@@ -693,6 +694,28 @@ async function queuedImageDraft(t, config = {}) {
   return { ...f, body, input: (value = body, key = 'background-image-draft') => f.request('images/drafts', { method: 'POST', body: value, headers: { 'Idempotency-Key': key } }) };
 }
 
+test('pending image discovery is an explicit owner-session-only read with current Save and no application state writes', async t => {
+  const f=await queuedImageDraft(t), principal='session:42:historical-owner-session', key=f.body.generationId+':draft', requestId=randomUUID();
+  const original={operationId:imageOperationId(principal,key,'image-draft'),action:'image-draft',targetId:20,generationId:f.body.generationId,expectedRevision:f.body.expectedRevision,manifest:f.body.manifest}, payload={...original,requestHash:hash(original)};
+  await f.app.store.prepareMutation(principal,payload,{private:'original before-state'});
+  await f.app.store.immutable('writer-requests/'+requestId,{requestId,identity:42,principal,operationId:payload.operationId,nonce:randomUUID()});
+  const grant=await f.app.store.issue({id:randomUUID(),identity:42,binding:f.app.store.binding,scopes:['covers:write'],credential:{mode:'Bearer',value:'owner-user'},expires:Date.now()+60000});
+  const before=await f.app.store.pendingMutations(), originalSet=f.app.store.blobs.setJSON;
+  f.app.store.blobs.setJSON=()=>{throw Error('Read-only discovery cannot write aliases, transfers or other state.');};
+  try {
+    const capabilities=await (await f.app.handleRequest(f.request('capabilities',{token:null}))).json();
+    assert.ok(capabilities.operations.includes('images/recovery/pending'));assert.equal(capabilities.images.recoveryDiscovery.requestRegistrationLimit,200);
+    const response=await f.app.handleRequest(f.request('images/recovery/pending'));assert.equal(response.status,200,await response.clone().text());assert.equal(response.headers.get('cache-control'),'no-store');
+    const value=await response.json();assert.deepEqual(value,{data:[{operationId:payload.operationId,ownerId:20,title:'Fixture media',action:'image-draft',idempotencyKey:key,requestIds:[requestId]}]});
+    assert.equal(JSON.stringify(value).includes(principal),false);assert.equal(JSON.stringify(value).includes('before-state'),false);
+    const delegated=await f.app.handleRequest(f.request('images/recovery/pending',{token:grant.token}));assert.equal(delegated.status,403);assert.equal((await delegated.json()).error.code,'session_required');
+    assert.equal((await f.app.handleRequest(f.request('images/recovery/pending',{token:null}))).status,401);
+    assert.deepEqual(await (await f.app.handleRequest(f.request('images/recovery/pending',{token:'other-user'}))).json(),{data:[]});
+    f.state.allowSave=false;assert.deepEqual(await (await f.app.handleRequest(f.request('images/recovery/pending'))).json(),{data:[]});
+    assert.deepEqual(await f.app.store.pendingMutations(),before);assert.equal(f.state.patches,0);assert.equal(f.state.images.uploads,0);assert.equal(f.invocations.length,0);
+  } finally {f.app.store.blobs.setJSON=originalSet;}
+});
+
 test('image preparation returns a job before repository work, concurrent retries share it and automatic delivery never creates twice', async t => {
   const f = await queuedImageDraft(t), originalCount = f.contents.size;
   const [first, second] = await Promise.all([f.app.handleRequest(f.input()), f.app.handleRequest(f.input())]);
@@ -715,6 +738,58 @@ test('image preparation returns a job before repository work, concurrent retries
   assert.equal((await f.app.store.pendingMutations()).length, 0);
   const changed = await f.app.handleRequest(f.input({ ...f.body, expectedRevision: 'sha256:' + 'a'.repeat(64) }));
   assert.equal(changed.status, 409); assert.equal((await changed.json()).error.code, 'idempotency_conflict');
+});
+
+test('an older global pending write rejects a new image job before dispatch without lending current recovery IDs or retrying it', async t => {
+  const f = await queuedImageDraft(t), count = f.contents.size, olderPrincipal = 'session:99:private-original-caller';
+  const original = { operationId: randomUUID(), action: 'update', targetId: 10, type: 'MediaItem', fields: { Title: 'Private older write' } };
+  const older = { ...original, requestHash: hash(original) };
+  await f.app.store.prepareMutation(olderPrincipal, older, { snapshot: { Id: 10, revision: 'private-before' } });
+  const before = await f.app.store.pendingMutations();
+  const queued = await f.app.handleRequest(f.input()); assert.equal(queued.status, 202);
+  const id = (await queued.json()).job.id, saved = (await f.app.jobs.read(id, 'input')).data;
+  const sent = await f.runNext();
+  const blocked = await f.app.handleRequest(f.request(`jobs/${id}`));
+  assert.equal(blocked.status, 409);
+  const value = await blocked.json();
+  assert.equal(value.error.code, 'pending_recovery_required'); assert.deepEqual(value.error.details, { blockedBeforeWrite: true });
+  for (const privateValue of [olderPrincipal, older.operationId, older.fields.Title, saved.image.operationId, saved.requestId]) assert.equal(JSON.stringify(value).includes(privateValue), false);
+  assert.equal(await f.app.store.mutationRow(saved.principal, saved.image.operationId), null);
+  assert.deepEqual(await f.app.store.pendingMutations(), before);
+  assert.equal(f.contents.size, count, 'The rejected step performs no repository mutation.');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const retry = await f.app.handleRequest(f.input()); assert.equal(retry.status, 409); assert.deepEqual(await retry.json(), value);
+    assert.equal((await f.app.handleBackgroundRequest(f.background(sent))).status, 204);
+  }
+  assert.equal(f.invocations.length, 0, 'The permanently failed job is never requeued or automatically repeated.');
+  assert.deepEqual(await f.app.store.pendingMutations(), before); assert.equal(f.contents.size, count);
+  // Model the original caller reaching its real terminal receipt. Its recovery
+  // does not rewrite the rejected job's immutable result or restart that job.
+  await f.app.store.completeMutation(olderPrincipal, older, { id: 10, revision: 'original-confirmed' });
+  const oldRetry = await f.app.handleRequest(f.input()); assert.equal(oldRetry.status, 409); assert.deepEqual(await oldRetry.json(), value);
+  const generationId = randomUUID(), body = { ...f.body, generationId, manifest: { ...f.body.manifest, generationId } };
+  assert.equal((await f.app.handleRequest(f.input(body, 'fresh-after-original-recovery'))).status, 202);
+  await f.runNext();
+  const fresh = await f.app.handleRequest(f.input(body, 'fresh-after-original-recovery')); assert.equal(fresh.status, 201);
+  assert.deepEqual(await f.app.store.pendingMutations(), []);
+});
+
+test('a matching held image operation retains its actual original request reference when a new job observes it', async t => {
+  const f = await queuedImageDraft(t), count = f.contents.size;
+  const queued = await f.app.handleRequest(f.input()), id = (await queued.json()).job.id, saved = (await f.app.jobs.read(id, 'input')).data;
+  const originalRequestId = randomUUID();
+  const held = await f.app.coordinator.acquire({ requestId: originalRequestId, identity: saved.identity, principal: saved.principal, operationId: saved.image.operationId });
+  try {
+    await f.runNext();
+    const response = await f.app.handleRequest(f.request(`jobs/${id}`)); assert.equal(response.status, 409);
+    const value = await response.json(); assert.equal(value.error.code, 'coordinator_busy');
+    assert.equal(value.error.details.operationId, saved.image.operationId);
+    assert.equal(value.error.details.stoppedRequestId, originalRequestId);
+    assert.notEqual(value.error.details.stoppedRequestId, saved.requestId);
+    assert.equal(value.error.details.blockedBeforeWrite, undefined);
+    assert.equal((await f.app.coordinator.inspect()).owner.requestId, originalRequestId);
+    assert.equal(f.contents.size, count); assert.equal(await f.app.store.mutationRow(saved.principal, saved.image.operationId), null);
+  } finally { await f.app.coordinator.releaseOwned(held); }
 });
 
 test('queued image preparation rechecks Save, and a revoked owner cannot read its stored image result', async t => {

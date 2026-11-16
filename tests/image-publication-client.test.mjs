@@ -27,6 +27,7 @@ test('uncertain image recovery retains its exact step key, requires explicit sto
   const generated = { sources: [{ id: 8, stamp: 'b'.repeat(64) }], recipe: { template: 'poster-strip-v1', sourceIds: [8] }, variants: [] };
   const publication = new ImagePublication(7, generated, 'timeline-composite', owner), signal = new AbortController().signal;
   await assert.rejects(publication.publish(signal, () => {}), /unconfirmed/);
+  assert.equal(publication.blockedBeforeWrite, false);
   assert.equal(publication.recovery.operationId, operationId);
   await assert.rejects(publication.recover(signal, false, true), /explicit stopped confirmation/);
   assert.equal(calls.length, 0);
@@ -45,6 +46,34 @@ test('uncertain image recovery retains its exact step key, requires explicit sto
   const priorCalls = calls.length;
   await assert.rejects(publication.recover(signal, true, true), /context changed/);
   assert.equal(calls.length, priorCalls);
+});
+
+test('a proven older-write rejection cannot become recovery for the rejected current publication', async () => {
+  const owner = { Id: 7, revision: 'sha256:' + 'a'.repeat(64) }, calls = [];
+  const generated = { sources: [{ id: 8, stamp: 'b'.repeat(64) }], recipe: { template: 'poster-strip-v1', sourceIds: [8] }, variants: [] };
+  globalThis.imagePublicationFixture = { owner, async request(path, init) {
+    calls.push({ path, key: init.headers['Idempotency-Key'] });
+    throw Object.assign(Error('Recover the previous application write'), { status: 409, code: 'pending_recovery_required', details: { blockedBeforeWrite: true, operationId: crypto.randomUUID(), stoppedRequestId: crypto.randomUUID() } });
+  } };
+  const publication = new ImagePublication(7, generated, 'timeline-composite', owner), signal = new AbortController().signal;
+  await assert.rejects(publication.publish(signal, () => {}), /previous application write/);
+  assert.equal(publication.hasStartedMutation, true, 'Sending the API request alone does not prove a repository dispatch.');
+  assert.equal(publication.blockedBeforeWrite, true); assert.equal(publication.recovery, undefined);
+  await assert.rejects(publication.recover(signal), /original failed request/);
+  assert.equal(calls.length, 1, 'A blocked response must not trigger recovery or another request automatically.');
+  const fresh = new ImagePublication(7, generated, 'timeline-composite', owner);
+  await assert.rejects(fresh.publish(signal, () => {}), /previous application write/);
+  assert.notEqual(calls[1].key, calls[0].key, 'A fresh preview cannot reuse the permanently failed job key.');
+});
+
+test('missing, malformed or uncertain before-write claims retain exact own-step recovery', async () => {
+  const owner = { Id: 7, revision: 'sha256:' + 'a'.repeat(64) }, operationId = crypto.randomUUID(), stoppedRequestId = crypto.randomUUID();
+  for (const details of [{}, { blockedBeforeWrite: 'true' }, { blockedBeforeWrite: true, uncertain: true }]) {
+    globalThis.imagePublicationFixture = { owner, async request() { throw Object.assign(Error('Unconfirmed own image operation'), { status: 409, code: 'pending_recovery_required', details: { ...details, operationId, stoppedRequestId } }); } };
+    const publication = new ImagePublication(7, { sources: [], recipe: { sourceIds: [] }, variants: [] }, 'timeline-composite', owner);
+    await assert.rejects(publication.publish(new AbortController().signal, () => {}), /Unconfirmed own/);
+    assert.equal(publication.blockedBeforeWrite, false); assert.deepEqual(publication.recovery, { operationId, stoppedRequestId });
+  }
 });
 
 test('a stored generic MIME original reaches guarded byte decoding without changing original metadata', async () => {

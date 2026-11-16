@@ -47,6 +47,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.2.0",
     "netlify-cli": "^27.16.0",
+    "node-forge": "1.4.3",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.71.2",
     "vite": "^7.3.7"
