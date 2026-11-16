@@ -26,6 +26,7 @@ export interface GenerateImageVariantsOptions {
   signal?: AbortSignal;
   fetchSource: (source: ImageGenerationSource, signal: AbortSignal) => Promise<Blob>;
   assertContext?: () => void;
+  onProgress?: (message: string) => void;
 }
 
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
@@ -229,20 +230,25 @@ export async function generateImageVariants(options: GenerateImageVariantsOption
   const decoded: DecodedImage[] = [];
   try {
     check();
+    let loaded = 0;
+    options.onProgress?.(`Loading selected images (0/${sources.length})…`);
     const pending = sources.map(source => imageRequestQueue.run(async () => {
       check(); const blob = await fetchSource(source, controller.signal); check();
       const image = await decodeImage(blob, check, controller.signal); decoded.push(image);
       const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()); check();
       const stamp = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+      options.onProgress?.(`Loading selected images (${++loaded}/${sources.length})…`);
       return { image, source: { ...source, stamp } };
     }, controller.signal));
     let prepared: { image: DecodedImage; source: GeneratedImageSource }[];
     try { prepared = await Promise.all(pending); }
-    catch (error) { controller.abort(); await Promise.allSettled(pending); throw error; }
+    catch (error) { controller.abort(error); await Promise.allSettled(pending); throw error; }
     const images = prepared.map(item => item.image);
     const variants: GeneratedImageVariant[] = [];
-    for (const size of imageOutputSizes(kind, images)) {
+    const sizes = imageOutputSizes(kind, images);
+    for (const size of sizes) {
       check();
+      options.onProgress?.(`Creating image sizes (${variants.length + 1}/${sizes.length})…`);
       const canvas = document.createElement('canvas'); canvas.width = size.width; canvas.height = size.height;
       try {
         renderImage(canvas, kind, images);

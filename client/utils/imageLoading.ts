@@ -1,5 +1,6 @@
 import { repositoryUrl, siteConfig } from '../configuration';
 import { nativeResponse } from '../services/nativeApi';
+import { readImage } from './imageReadRetry';
 import type { ImageDescriptor } from './imageVariants';
 
 const abortError = () => new DOMException('Image loading was cancelled.', 'AbortError');
@@ -62,10 +63,11 @@ export async function readNativeImagePresentation(path: string, { signal, assert
   if (!/^\/content\/[1-9][0-9]*\/image-presentation$/.test(path)) throw new Error('Invalid image presentation target.');
   const check = () => { if (signal.aborted) throw abortError(); assertContext(); };
   check();
-  const response = await nativeResponse(path, { signal, cache: 'no-store' });
-  check();
-  if (!response.ok) throw new Error('Image presentation is unavailable.');
-  const payload = await response.json() as { data?: ImageDescriptor };
+  const payload = await readImage(async requestSignal => {
+    const response = await nativeResponse(path, { signal: requestSignal, cache: 'no-store' });
+    if (!response.ok) throw Object.assign(new Error('Image presentation is unavailable.'), { status: response.status });
+    return response.json() as Promise<{ data?: ImageDescriptor }>;
+  }, { signal, assertContext });
   check();
   if (!payload.data || !['active', 'blocked', 'stale', 'missing', 'legacy'].includes(payload.data.state)) throw new Error('Invalid image presentation response.');
   return payload.data;
@@ -77,19 +79,21 @@ export async function fetchImageBlob(source: string, { signal, accessToken, asse
   check();
   const url = new URL(source, window.location.origin);
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('Unsupported image URL.');
-  let response: Response;
-  if (url.origin === window.location.origin && url.pathname.startsWith('/api/v1/')) {
-    if (url.search || url.hash) throw new Error('Native image URLs cannot contain query parameters or fragments.');
-    response = await nativeResponse(url.pathname, { signal, cache: 'no-store', headers: { Accept: 'image/webp,image/png,image/jpeg' } });
-  } else {
-    const headers: Record<string, string> = {};
-    const repositorySource = url.origin === new URL(repositoryUrl).origin;
-    if (accessToken && url.protocol === 'https:' && repositorySource) headers.Authorization = `Bearer ${accessToken}`;
-    response = await fetch(url.href, { headers, credentials: 'omit', redirect: 'error', cache: repositorySource ? 'no-store' : 'default', signal });
-  }
-  check();
-  if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-  const blob = await response.blob();
+  const native = url.origin === window.location.origin && url.pathname.startsWith('/api/v1/');
+  if (native && (url.search || url.hash)) throw new Error('Native image URLs cannot contain query parameters or fragments.');
+  const blob = await readImage(async requestSignal => {
+    let response: Response;
+    if (native) {
+      response = await nativeResponse(url.pathname, { signal: requestSignal, cache: 'no-store', headers: { Accept: 'image/webp,image/png,image/jpeg' } });
+    } else {
+      const headers: Record<string, string> = {};
+      const repositorySource = url.origin === new URL(repositoryUrl).origin;
+      if (accessToken && url.protocol === 'https:' && repositorySource) headers.Authorization = `Bearer ${accessToken}`;
+      response = await fetch(url.href, { headers, credentials: 'omit', redirect: 'error', cache: repositorySource ? 'no-store' : 'default', signal: requestSignal });
+    }
+    if (!response.ok) throw Object.assign(new Error(`Failed to fetch image: ${response.status}`), { status: response.status });
+    return response.blob();
+  }, { signal, assertContext });
   check();
   return blob;
 }

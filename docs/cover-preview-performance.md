@@ -61,3 +61,9 @@ node --dns-result-order=ipv4first scripts/m0-multi-poster-smoke.cjs
 ```
 
 Manual check: Timeline → Edit → List cover → select/order more than four posters → Generate preview twice → Publish → reopen. In a Visitor window, verify the card faces and one `/images/.../wN` resource. Media → Image sizes still prepares the original's smaller sizes. See [publication verification and rollout boundaries](agent-api-cover-publication-verification.md) for the retained recovery and production limits.
+
+## Transient gateway read recovery
+
+The follow-up [image-read-resilience.md](image-read-resilience.md) records the
+measured production HTTP520/edge-delay case and bounded read retry, source-cache
+retention, explicit card retry and cancellable preview behavior.

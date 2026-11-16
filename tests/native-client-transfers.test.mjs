@@ -161,3 +161,77 @@ test('browser native binary helper reconstructs download manifest and preserves 
   globalThis.fetch = async () => web(receipt, 409);
   await assert.rejects(browser.nativeResponse(`/plans/${randomUUID()}/apply`, { method: 'POST', body: '{}' }), error => error.applyResult?.uncertainTargets[0] === 11 && error.status === 409);
 });
+
+test('image GETs retain their caller signal across large downloads and reconstruct the exact original body', async () => {
+  const previousFetch = globalThis.fetch, generation = randomUUID(), bytes = Buffer.alloc(3 * 1024 * 1024 + 31, 57);
+  const paths = ['/content/8/cover', '/content/8/image-presentation', `/images/8/${generation}/w320`];
+  browser.configureNativeAuth(() => 'image-read-token');
+  try {
+    for (const initial of paths.flatMap(route => [route, '/api/v1' + route])) {
+      const controller = new AbortController(), manifest = download(bytes, { contentType: 'image/png', headers: {} }), routes = [];
+      globalThis.fetch = async (url, init) => {
+        const route = new URL(url).pathname; routes.push(route);
+        assert.equal(init.signal, controller.signal, 'Both the initial read and every download chunk share the bounded image caller signal.');
+        assert.equal(new Headers(init.headers).get('authorization'), 'Bearer image-read-token');
+        assert.equal(init.credentials, 'omit'); assert.equal(init.redirect, 'error');
+        if (routes.length === 1) return web({ download: manifest });
+        const index = Number(route.split('/').at(-1)), part = bytes.subarray(index * CHUNK, (index + 1) * CHUNK);
+        return new Response(part, { headers: { 'Content-Type': 'application/octet-stream', 'X-Content-SHA256': sha256(part) } });
+      };
+      const response = await browser.nativeResponse(initial, { signal: controller.signal });
+      assert.equal(response.headers.get('content-type'), 'image/png'); assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+      assert.deepEqual(routes, [initial.startsWith('/api/v1/') ? initial : '/api/v1' + initial, `/api/v1/downloads/${manifest.id}/chunks/0`, `/api/v1/downloads/${manifest.id}/chunks/1`]);
+    }
+  } finally { globalThis.fetch = previousFetch; browser.invalidateNativeSnapshots(); }
+});
+
+test('cancelling a large image GET aborts a waiting chunk body and never requests the next chunk, with either API path form', async () => {
+  const previousFetch = globalThis.fetch, bytes = Buffer.alloc(3 * 1024 * 1024 + 31, 61);
+  browser.configureNativeAuth(() => 'image-read-token');
+  try {
+    for (const initial of ['/content/8/cover', '/api/v1/content/8/cover']) {
+      const controller = new AbortController(), manifest = download(bytes, { contentType: 'image/png', headers: {} }), routes = [];
+      let readingBody, bodyAborted = false;
+      const bodyStarted = new Promise(resolve => { readingBody = resolve; });
+      globalThis.fetch = async (url, init) => {
+        const route = new URL(url).pathname; routes.push(route);
+        if (routes.length === 1) return web({ download: manifest });
+        assert.equal(route, `/api/v1/downloads/${manifest.id}/chunks/0`); assert.equal(init.signal, controller.signal);
+        const stream = new ReadableStream({ start(target) {
+          init.signal.addEventListener('abort', () => { bodyAborted = true; target.error(init.signal.reason); }, { once: true });
+        } });
+        const response = new Response(stream, { headers: { 'Content-Type': 'application/octet-stream', 'X-Content-SHA256': sha256(bytes.subarray(0, CHUNK)) } });
+        const readBody = response.arrayBuffer.bind(response);
+        response.arrayBuffer = () => { readingBody(); return readBody(); };
+        return response;
+      };
+      const reading = browser.nativeResponse(initial, { signal: controller.signal });
+      const reason = new DOMException('The image attempt was cancelled.', 'AbortError'), rejected = assert.rejects(reading, error => error === reason);
+      await bodyStarted; controller.abort(reason); await rejected;
+      assert.equal(bodyAborted, true); assert.equal(routes.length, 2);
+      assert.equal(routes.some(route => route.endsWith('/chunks/1')), false);
+    }
+  } finally { globalThis.fetch = previousFetch; browser.invalidateNativeSnapshots(); }
+});
+
+test('publication, upload, recovery and unrelated GET continuations retain their existing independent signals', async () => {
+  const previousFetch = globalThis.fetch, bytes = Buffer.alloc(20, 3);
+  browser.configureNativeAuth(() => 'unchanged-lifetime-token');
+  try {
+    for (const [initial, method] of [
+      ['/images/drafts', 'POST'], [`/plans/${randomUUID()}/apply`, 'POST'], ['/uploads', 'POST'], ['/images/recovery', 'POST'],
+      ['/exchange/20/export', 'GET'], ['/content/8/image-presentation/editor', 'GET'], ['/content/8/cover', 'POST'],
+    ]) {
+      const controller = new AbortController(), manifest = download(bytes), signals = [];
+      globalThis.fetch = async (_url, init) => {
+        signals.push(init.signal);
+        if (signals.length === 1) { assert.equal(init.signal, controller.signal); return web({ download: manifest }); }
+        assert.notEqual(init.signal, controller.signal, 'Only allowlisted initial image GETs inherit their caller lifetime into continuations.');
+        controller.abort(); assert.equal(init.signal.aborted, false);
+        return new Response(bytes, { headers: { 'X-Content-SHA256': sha256(bytes) } });
+      };
+      const response = await browser.nativeResponse(initial, { method, signal: controller.signal, ...(method === 'POST' ? { body: '{}' } : {}) });
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes); assert.equal(signals.length, 2);
+    }
+  } finally { globalThis.fetch = previousFetch; browser.invalidateNativeSnapshots(); }
+});

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from '../client/node_modules/typescript/lib/typescript.js';
+import { imageReadRetryModuleUrl } from './helpers/image-read-retry-module.mjs';
 
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 function compile(path, imports) {
@@ -24,7 +25,9 @@ export const captureOperationContext=()=>{const state=globalThis.__lazyState,epo
 `);
 const config = moduleUrl("export const repositoryUrl='https://repository.fixture.invalid'; export const siteConfig={imageCache:{concurrencyLimit:2}};");
 const native = moduleUrl('export const nativeResponse=(...args)=>globalThis.__lazyState.fetch(...args);');
-const loading = compile('utils/imageLoading.ts', { '../configuration': config, '../services/nativeApi': native });
+const loading = compile('utils/imageLoading.ts', { '../configuration': config, '../services/nativeApi': native, './imageReadRetry': imageReadRetryModuleUrl });
+const { imageRequestQueue } = await import(loading), queueRun = imageRequestQueue.run.bind(imageRequestQueue);
+imageRequestQueue.run = (work, signal) => { globalThis.__lazyState.queueSignals.push(signal); return queueRun(work, signal); };
 const variants = compile('utils/imageVariants.ts', { './posterStripLayout.mjs': new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href });
 const { LazyImage } = await import(compile('components/LazyImage.tsx', {
   react, 'react/jsx-runtime': jsx, '../services/sensenet': sensenet,
@@ -77,7 +80,7 @@ function fixture() {
   const add = (events, name, listener) => { if (!events.has(name)) events.set(name, new Set()); events.get(name).add(listener); };
   const remove = (events, name, listener) => events.get(name)?.delete(listener);
   const state = {
-    epoch: 0, listeners: new Set(), requests: [], observers: [], resizes: [], created: [], revoked: [],
+    epoch: 0, listeners: new Set(), requests: [], queueSignals: [], observers: [], resizes: [], created: [], revoked: [],
     auth: { accessToken: 'owner-one', user: { sub: 'owner-one' }, isLoading: false },
     target: { width: 120, getBoundingClientRect() { return { width: this.width, top: 0, left: 0, right: this.width, bottom: 180 }; } },
     fetch(path, options) { const pending = deferred(); this.requests.push({ path, options, ...pending }); return pending.promise; },
@@ -123,7 +126,7 @@ test('offscreen images never enqueue; first intersection chooses one DPR variant
     state.requests[1].resolve(new Response('larger variant')); await settle(ui);
     state.target.width = 60; state.resizes[0].callback(); await settle(ui); assert.equal(state.requests.length, 2);
     state.target.width = 1500; state.resizes[0].callback(); await settle(ui); assert.equal(state.requests.length, 2);
-    ui.unmount(); assert.deepEqual(state.revoked, state.created); assert(state.requests[0].options.signal.aborted);
+    ui.unmount(); assert.deepEqual(state.revoked, state.created); assert(state.queueSignals.every(signal => signal.aborted));
   } finally { ui.unmount(); state.restore(); }
 });
 
@@ -205,7 +208,7 @@ test('explicit permission invalidation revokes cached bytes and a denied fresh i
   try {
     ui.flush(); state.visible(); await settle(ui); state.requests[0].resolve(new Response('private-image')); await settle(ui);
     state.invalidate(); assert.equal(find(ui.render(), 'img'), undefined); ui.flush();
-    assert(state.requests[0].options.signal.aborted); assert.deepEqual(state.revoked, state.created);
+    assert(state.queueSignals[0].aborted); assert.deepEqual(state.revoked, state.created);
     assert.equal(state.requests.length, 1, 'invalidation requires a fresh viewport observation before another image fetch');
     state.visible(); await settle(ui); assert.equal(state.requests.length, 2);
     assert.equal(state.requests[1].path, state.requests[0].path); assert.equal(state.requests[1].options.cache, 'no-store');
@@ -224,7 +227,7 @@ test('an explicit blocked, stale or missing descriptor masks and revokes a loade
       image = { ...descriptor, state: status };
       assert.equal(find(ui.render(), 'img'), undefined); const tree = await settle(ui);
       assert.equal(find(tree, 'img'), undefined); assert.deepEqual(state.revoked, state.created); assert.equal(state.requests.length, 1);
-      assert(state.requests[0].options.signal.aborted); assert.equal(tree.props['data-image-state'], status);
+      assert(state.queueSignals[0].aborted); assert.equal(tree.props['data-image-state'], status);
     } finally { ui.unmount(); state.restore(); }
   }
 });
@@ -237,7 +240,7 @@ test('an explicit replacement generation requires fresh viewport loading and nev
     const nextGeneration = '87654321-1234-4123-8123-123456789abc';
     image = { ...descriptor, generationId: nextGeneration, variants: descriptor.variants.map(variant => ({ ...variant, url: variant.url.replace(generationId, nextGeneration) })) };
     assert.equal(find(ui.render(), 'img'), undefined); ui.flush();
-    assert.deepEqual(state.revoked, state.created); assert(state.requests[0].options.signal.aborted);
+    assert.deepEqual(state.revoked, state.created); assert(state.queueSignals[0].aborted);
     assert.equal(state.requests.length, 1);
     state.visible(); await settle(ui); assert.equal(state.requests.length, 2); assert(state.requests[1].path.includes(nextGeneration));
     state.requests[1].resolve(new Response('new-composite')); const tree = await settle(ui);
@@ -316,5 +319,63 @@ test('stale Blob events cannot reveal or hide a replacement fan during a same-ke
     assert.equal(find(tree, 'CardFan').props.source, replacement.props.src);
     assert.equal(loads, 3);
     assert.equal(state.requests.length, 2);
+  } finally { ui.unmount(); state.restore(); }
+});
+
+test('a failed image GET offers one explicit retry without navigating its card or adding automatic refreshes', async () => {
+  const state = fixture(), ui = host(() => LazyImage({ image: descriptor, alt: 'Timeline cover' }), state.target);
+  let prevented = 0, stopped = 0;
+  const click = { preventDefault() { prevented++; }, stopPropagation() { stopped++; } };
+  try {
+    ui.flush(); state.visible(); await settle(ui);
+    state.requests[0].resolve(new Response('{}', { status: 403 })); let tree = await settle(ui);
+    const retry = find(tree, 'button'); assert.equal(retry.props.children, 'Retry image'); assert.equal(retry.props.type, 'button');
+    state.focus(); state.poll(); state.documentVisibility('hidden'); state.documentVisibility('visible'); await settle(ui);
+    assert.equal(state.requests.length, 1, 'Failure must wait for an explicit click.');
+    retry.props.onClick(click); tree = ui.render();
+    assert.equal(find(tree, 'button'), undefined); assert.equal(tree.props['data-image-state'], 'pending');
+    tree = await settle(ui); assert.equal(state.requests.length, 2); assert.equal(state.requests[1].path, state.requests[0].path);
+    assert(state.queueSignals[0].aborted); assert.equal(state.queueSignals[1].aborted, false); assert.equal(prevented, 1); assert.equal(stopped, 1);
+    retry.props.onClick(click); await settle(ui); assert.equal(state.requests.length, 2, 'A stale click cannot start another in-flight attempt.');
+    state.requests[1].resolve(new Response('current authorized raster')); tree = await settle(ui);
+    find(tree, 'img').props.onLoad({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'loaded'); assert.equal(find(tree, 'button'), undefined);
+    state.focus(); state.poll(); await settle(ui); assert.equal(state.requests.length, 2); assert.equal(state.timers.size, 0);
+    ui.unmount(); assert.deepEqual(state.revoked, state.created);
+  } finally { ui.unmount(); state.restore(); }
+});
+
+test('retrying a failed decode releases its Blob and ignores stale image events after replacement', async () => {
+  const state = fixture(), ui = host(() => LazyImage({ image: descriptor, renderImage: source => ({ type: 'CardFan', props: { source } }) }), state.target);
+  const click = { preventDefault() {}, stopPropagation() {} };
+  try {
+    ui.flush(); state.visible(); await settle(ui); state.requests[0].resolve(new Response('undecodable raster')); let tree = await settle(ui);
+    const failed = find(tree, 'img'); failed.props.onError({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'error'); assert.equal(find(tree, 'CardFan'), undefined);
+    const retry = find(tree, 'button'); retry.props.onClick(click); await settle(ui);
+    assert.deepEqual(state.revoked, [failed.props.src]); assert.equal(state.requests.length, 2);
+    failed.props.onLoad({}); failed.props.onError({}); tree = ui.flush();
+    assert.equal(tree.props['data-image-state'], 'pending'); assert.equal(find(tree, 'button'), undefined);
+    state.requests[1].resolve(new Response('replacement atlas')); tree = await settle(ui);
+    const replacement = find(tree, 'img'); assert.notEqual(replacement.props.src, failed.props.src);
+    replacement.props.onLoad({}); tree = ui.flush(); assert.equal(find(tree, 'CardFan').props.source, replacement.props.src);
+    retry.props.onClick(click); await settle(ui); assert.equal(state.requests.length, 2, 'A previously failed image cannot retry the successful replacement.');
+    ui.unmount(); assert.deepEqual(state.revoked, state.created);
+  } finally { ui.unmount(); state.restore(); }
+});
+
+test('a retained retry action cannot cross identity invalidation or component unmount', async () => {
+  const state = fixture(), ui = host(() => LazyImage({ image: descriptor }), state.target);
+  const click = { preventDefault() {}, stopPropagation() {} };
+  try {
+    ui.flush(); state.visible(); await settle(ui); state.requests[0].resolve(new Response('{}', { status: 403 }));
+    let tree = await settle(ui); const oldRetry = find(tree, 'button');
+    state.auth = { ...state.auth, accessToken: 'owner-two', user: { sub: 'owner-two' } }; state.invalidate();
+    assert.equal(find(ui.render(), 'button'), undefined); oldRetry.props.onClick(click); await settle(ui);
+    assert.equal(state.requests.length, 1, 'Old identity failure must not launch a request under a new principal.');
+    state.visible(); await settle(ui); assert.equal(state.requests.length, 2);
+    state.requests[1].resolve(new Response('{}', { status: 403 })); tree = await settle(ui);
+    const currentRetry = find(tree, 'button'); assert(currentRetry); ui.unmount(); currentRetry.props.onClick(click); await tick();
+    assert.equal(state.requests.length, 2); assert(state.queueSignals[1].aborted);
   } finally { ui.unmount(); state.restore(); }
 });

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from '../client/node_modules/typescript/lib/typescript.js';
+import { imageReadRetryModuleUrl } from './helpers/image-read-retry-module.mjs';
 
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const forbidden = '()=>{throw Error("Source preview must not publish or read full snapshots")}';
@@ -15,6 +16,7 @@ let compiled = ts.transpileModule(fs.readFileSync(new URL('../client/services/im
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
 }).outputText;
 for (const [from, to] of [['../configuration', moduleUrl("export const environment={projectRoot:'/Root/Fixture'};")], ['./nativeApi', native], ['./sensenet', context], ['../utils/posterStripLayout.mjs', new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href]]) compiled = compiled.replaceAll(`'${from}'`, JSON.stringify(to));
+compiled = compiled.replace("from '../utils/imageReadRetry'", `from '${imageReadRetryModuleUrl}'`);
 const { ImagePreviewSourceSession } = await import(moduleUrl(compiled));
 const version = n => 'sha256:' + n.toString(16).padStart(64, '0');
 const signal = () => new AbortController().signal;
@@ -103,6 +105,30 @@ test('private originals obey both LRU count and byte limits; oversized originals
   const oversizedBefore = state.downloads.length;
   await load(await oversized.prepare([8], signal())); await load(await oversized.prepare([8], signal()));
   assert.equal(state.downloads.length, oversizedBefore + 2);
+});
+
+test('transient metadata and failed peer reads preserve already verified originals until a fresh ACL batch', async () => {
+  const state = fixture(), session = new ImagePreviewSourceSession(7), request = state.request, response = state.response;
+  await load(await session.prepare([8], signal()));
+  let failures = 0;
+  state.request = async () => { failures++; throw Object.assign(Error('gateway'), { status: 520 }); };
+  await assert.rejects(session.prepare([8], signal()), /temporarily failed/); assert.equal(failures, 2);
+  state.request = request;
+  const next = await session.prepare([8, 9], signal()); await next.fetchSource(next.sources[0], signal());
+  state.response = async function (path, init) { if (path.includes('/9/')) { this.downloads.push(path); throw Object.assign(Error('gateway'), { status: 520 }); } return response.call(this, path, init); };
+  let failure;
+  try { await next.fetchSource(next.sources[1], signal()); } catch (error) { failure = error; }
+  assert.equal(failure.name, 'ImageReadFailure');
+  const peer = new AbortController(); peer.abort(failure);
+  await assert.rejects(next.fetchSource(next.sources[0], peer.signal), error => error === failure);
+  state.response = response;
+  await load(await session.prepare([8, 9], signal()));
+  assert.deepEqual(state.downloads, ['/content/8/cover', '/content/9/cover', '/content/9/cover', '/content/9/cover']);
+  assert.equal(state.metadata.length, 3, 'Retry renews metadata rather than reusing an old authorization decision.');
+  state.request = async () => { throw Object.assign(Error('bad JSON'), { status: 502, code: 'native_response_invalid' }); };
+  await assert.rejects(session.prepare([8], signal()), /bad JSON/);
+  state.request = request; await load(await session.prepare([8], signal()));
+  assert.equal(state.downloads.filter(path => path === '/content/8/cover').length, 2, 'Invalid metadata purges bytes even when its wire status is 502.');
 });
 
 test('cancellation and superseded preparation drain late responses without retaining or exposing their bytes', async () => {

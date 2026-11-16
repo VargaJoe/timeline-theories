@@ -34,6 +34,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
   const [preview, setPreview] = useState<{ set: GeneratedImageSet; url: string }>();
   const previewUrl = preview?.set === generated ? preview?.url : undefined;
   const [busy, setBusy] = useState(false), [status, setStatus] = useState(''), [error, setError] = useState('');
+  const [preparing, setPreparing] = useState(false);
   const [terminal, setTerminal] = useState(false);
   const [stoppedConfirmed, setStoppedConfirmed] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined), intent = useRef<ImagePublication | undefined>(undefined);
@@ -71,14 +72,15 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
     if (!ids.length || busy || intent.current || media && !originalStored) return;
     const checkContext = captureOperationContext();
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort;
-    setBusy(true); setError(''); setStatus('Preparing preview…'); setGenerated(undefined);
+    setBusy(true); setPreparing(true); setError(''); setStatus('Checking selected images…'); setGenerated(undefined);
     try {
       const prepared = await sourceSession.current!.prepare(ids, abort.signal); checkContext();
       previewOwner.current = prepared.owner;
-      const result = await generateImageVariants({ kind, sources: prepared.sources, seed, signal: abort.signal, fetchSource: prepared.fetchSource, assertContext: checkContext });
+      const result = await generateImageVariants({ kind, sources: prepared.sources, seed, signal: abort.signal, fetchSource: prepared.fetchSource, assertContext: checkContext,
+        onProgress: message => { if (!abort.signal.aborted) setStatus(message); } });
       checkContext(); if (!abort.signal.aborted) { setGenerated(result); setStatus('Preview ready. Publish when you are happy with it.'); }
     } catch (caught) { if (!abort.signal.aborted) { setError(caught instanceof Error ? caught.message : 'Preview could not be prepared.'); setStatus(''); } }
-    finally { if (!abort.signal.aborted) setBusy(false); }
+    finally { if (!abort.signal.aborted) { setBusy(false); setPreparing(false); } }
   }
   function randomize() {
     const choices = [...pool], chosen: number[] = [];
@@ -195,6 +197,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
       </div>
       {generated && <ul className="image-editor-sizes">{generated.variants.map(variant => <li key={variant.name}>{variant.width} × {variant.height} · {variant.mimeType.replace('image/', '')} · {size(variant.byteLength)}</li>)}</ul>}
       <div className="image-editor-actions"><button type="button" disabled={busy || !!intent.current || !selected.length || media && !originalStored} onClick={() => void prepare()}>{media ? 'Prepare sizes' : 'Generate preview'}</button><button type="button" className="primary" disabled={busy || !generated} onClick={() => void publish()}>{intent.current ? 'Retry publication' : 'Publish'}</button>{current?.state !== 'legacy' && current?.state !== undefined && <button type="button" disabled={busy || !!intent.current} onClick={() => void restore()}>Use original presentation</button>}</div>
+      {preparing && <button type="button" onClick={() => { controller.current?.abort(); sourceSession.current?.dispose(); sourceSession.current = new ImagePreviewSourceSession(ownerId); setPreparing(false); setBusy(false); setStatus('Preview cancelled. You can change the selection or try again.'); }}>Cancel preview</button>}
       {terminal && <button type="button" disabled={busy} onClick={() => { intent.current = undefined; previewOwner.current = undefined; setGenerated(undefined); setTerminal(false); setError(''); setStatus('Choose the current images and prepare a new preview. Unpublished copies can be removed with Delete unused copies.'); void imageSets(ownerId).then(setSets).catch(() => {}); }}>Start a new preview</button>}
       {!terminal && intent.current?.recovery && <div className="image-editor-recovery">
         <p>Check the saved outcome before starting another image set. Closing a failed attempt keeps all existing images and does not repeat the upload.</p>

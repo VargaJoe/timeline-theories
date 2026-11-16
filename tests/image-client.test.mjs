@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { createHash, webcrypto } from 'node:crypto';
 import ts from '../client/node_modules/typescript/lib/typescript.js';
 import fixtures from '../scripts/helpers/image-variant-fixture.cjs';
+import { imageReadRetryModuleUrl } from './helpers/image-read-retry-module.mjs';
 
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 function compile(path, imports = {}) {
@@ -15,7 +16,7 @@ function compile(path, imports = {}) {
 }
 const config = moduleUrl("export const repositoryUrl='https://repository.fixture.invalid'; export const siteConfig={imageCache:{concurrencyLimit:2}};");
 const native = moduleUrl('export const nativeResponse=(...args)=>globalThis.__imageNative(...args);');
-const loadingUrl = compile('utils/imageLoading.ts', { '../configuration': config, '../services/nativeApi': native });
+const loadingUrl = compile('utils/imageLoading.ts', { '../configuration': config, '../services/nativeApi': native, './imageReadRetry': imageReadRetryModuleUrl });
 const { createImageRequestQueue, fetchImageBlob, nativeImagePresentationTarget } = await import(loadingUrl);
 const stripUrl = new URL('../client/utils/posterStripLayout.mjs', import.meta.url).href;
 const variantsUrl = compile('utils/imageVariants.ts', { './posterStripLayout.mjs': stripUrl });

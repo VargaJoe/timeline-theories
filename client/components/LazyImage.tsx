@@ -20,7 +20,9 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
   useEffect(() => subscribePermissions(() => setRevision(value => value + 1)), []);
   const requestKey = JSON.stringify([src, descriptor, accessToken, user?.Id, user?.sub, isLoading, revision]);
   const [slot, setSlot] = useState<{ key: string; width: number; dpr: number; visible: boolean }>();
-  const [image, setImage] = useState<{ key: string; source?: string; loaded: boolean; error: boolean }>();
+  const [image, setImage] = useState<{ key: string; source?: string; loaded: boolean; error: boolean; retry?: () => void }>();
+  const [attempt, setAttempt] = useState(0);
+  const retryImage = useRef<(() => void) | undefined>(undefined);
   const currentSource = useRef<string | undefined>(undefined);
   const current = image?.key === requestKey ? image : undefined;
   const blocked = !!descriptor && !['active', 'legacy'].includes(descriptor.state);
@@ -82,6 +84,7 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
     let objectUrl: string | undefined;
     const release = () => {
       controller.abort();
+      if (retryImage.current === retry) retryImage.current = undefined;
       if (objectUrl) {
         if (currentSource.current === objectUrl) currentSource.current = undefined;
         URL.revokeObjectURL(objectUrl); objectUrl = undefined;
@@ -91,17 +94,22 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
       if (controller.signal.aborted) return false;
       try { checkContext(); return true; } catch { return false; }
     };
+    const retry = () => {
+      if (retryImage.current !== retry || !active()) return;
+      retryImage.current = undefined;
+      setImage(undefined); setAttempt(value => value + 1);
+    };
     void imageRequestQueue.run(async () => {
       const blob = await fetchImageBlob(selection.url, { signal: controller.signal, accessToken, assertContext: checkContext });
       if (!active()) return;
       objectUrl = URL.createObjectURL(blob);
       currentSource.current = objectUrl;
-      setImage({ key: requestKey, source: objectUrl, loaded: false, error: false });
+      setImage({ key: requestKey, source: objectUrl, loaded: false, error: false, retry });
     }, controller.signal).catch(() => {
-      if (active()) setImage({ key: requestKey, loaded: false, error: true });
+      if (active()) { retryImage.current = retry; setImage({ key: requestKey, loaded: false, error: true, retry }); }
     });
     return release;
-  }, [selection, requestKey, isLoading, blocked, accessToken]);
+  }, [selection, requestKey, isLoading, blocked, accessToken, attempt]);
 
   const isLoaded = current?.loaded === true;
   const imageStyle: React.CSSProperties = { display: 'block', width: '100%', height: '100%', objectFit: style?.objectFit ?? 'cover', transition: 'opacity 0.3s ease-in-out', opacity: isLoaded ? 1 : 0 };
@@ -114,14 +122,19 @@ export const LazyImage: React.FC<LazyImageProps> = ({ src = '', image: descripto
       style={renderImage ? { ...imageStyle, position: 'absolute', opacity: 0, pointerEvents: 'none' } : imageStyle}
       onLoad={event => {
         if (currentSource.current !== current.source) return;
+        if (retryImage.current === current.retry) retryImage.current = undefined;
         setImage(previous => previous?.key === requestKey && previous.source === current.source ? { ...previous, loaded: true, error: false } : previous);
         onLoad?.(event);
       }}
       onError={event => {
         if (currentSource.current !== current.source) return;
+        retryImage.current = current.retry;
         setImage(previous => previous?.key === requestKey && previous.source === current.source ? { ...previous, error: true, loaded: false } : previous);
         onError?.(event);
       }} />}
+    {current?.error && current.retry && !blocked && !isLoading && <button type="button"
+      style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1, padding: '6px 10px', border: '1px solid #999', borderRadius: 4, background: '#fff', color: '#333', cursor: 'pointer' }}
+      onClick={event => { event.preventDefault(); event.stopPropagation(); current.retry?.(); }}>Retry image</button>}
     {isLoaded && current?.source && renderImage?.(current.source)}
   </div>;
 };
