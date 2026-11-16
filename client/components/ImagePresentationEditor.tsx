@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { LazyImage } from './LazyImage';
 import { TimelineCover } from './TimelineCover';
 import { PosterFan } from './PosterFan';
+import { PendingImageRecovery } from './PendingImageRecovery';
 import { imageCapabilities, imagePresentation, imageSets, deleteImageSet, ImagePreviewSourceSession, ImagePublication, OriginalImageUpload, restoreOriginalPresentation, type ImagePresentation, type ImageSetSummary } from '../services/imageVariantService';
 import { captureOperationContext, invalidatePermissions, subscribePermissions } from '../services/sensenet';
 import { useSharedAuth } from '../context/useSharedAuth';
@@ -99,15 +100,20 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
       if (abort.signal.aborted) return;
       await onSaved(owner); setCurrent(image); intent.current = undefined; setGenerated(undefined); setStatus('Published. The original images are preserved.'); invalidatePermissions();
     } catch (caught) { if (!abort.signal.aborted) {
+      const blockedBeforeWrite = intent.current?.blockedBeforeWrite === true;
       const beforeDispatch = !intent.current?.hasStartedMutation;
       const uncertain = caught instanceof NativeApiError && caught.details && typeof caught.details === 'object' && 'uncertain' in caught.details && caught.details.uncertain === true;
       const confirmed = caught instanceof NativeApiError && [400, 403, 409].includes(caught.status) && !uncertain && !caught.transportFailure &&
         ['revision_conflict', 'image_source_changed', 'image_source_not_public', 'image_owner_privacy_conflict', 'image_storage_collision', 'image_set_state', 'image_stale', 'image_draft_changed', 'permission_denied', 'backend_denied', 'image_integrity', 'invalid_image_asset', 'function_deadline', 'image_publication_abandoned', 'image_publication_not_prepared'].includes(caught.code) && !caught.applyResult?.retrySamePlan && !caught.applyResult?.uncertainTargets?.length;
-      if (beforeDispatch) intent.current = undefined;
-      const next = beforeDispatch ? ' No image changes were sent. You can retry or change the selection.'
+      if (blockedBeforeWrite) { intent.current = undefined; previewOwner.current = undefined; setGenerated(undefined); }
+      else if (beforeDispatch) intent.current = undefined;
+      const next = blockedBeforeWrite ? ' This publication step was blocked before writing. You can change the selection; prepare a new preview after the original operation is recovered.'
+        : beforeDispatch ? ' No image changes were sent. You can retry or change the selection.'
         : confirmed ? ' Prepare a new preview with the current images.'
         : ' Retry publication checks and continues this same image set. Selection stays locked until the saved outcome is resolved.';
-      setTerminal(confirmed); setError((caught instanceof Error ? caught.message : 'Publication could not finish.') + next); setStatus('');
+      const message = blockedBeforeWrite ? 'A previous application write needs recovery. Open “Recover an unfinished publication” below to check your saved cover drafts.'
+        : caught instanceof Error ? caught.message : 'Publication could not finish.';
+      setTerminal(confirmed); setError(message + next); setStatus('');
     } }
     finally { if (!abort.signal.aborted) setBusy(false); }
   }
@@ -197,6 +203,7 @@ function ImagePresentationEditorSession({ ownerId, kind, candidates, originalSto
         <div className="image-editor-actions"><button type="button" disabled={busy} onClick={() => void recoverPublication()}>Check saved outcome</button><button type="button" disabled={busy || !stoppedConfirmed} onClick={() => void recoverPublication(true)}>Close failed attempt</button></div>
       </div>}
       {!!sets.filter(set => set.deletable).length && <div className="image-editor-toolbar"><button type="button" disabled={busy || !!intent.current} onClick={() => void cleanup()}>Delete unused copies</button><span>{sets.filter(set => set.deletable).length} inactive image set(s). Published and original images are kept.</span></div>}
+      <PendingImageRecovery disabled={busy || !!intent.current} onResolved={() => setError('')} />
     </>}
     {status && <p role="status">{status}</p>}{error && <p role="alert" className="image-editor-error">{error}</p>}
   </section>;

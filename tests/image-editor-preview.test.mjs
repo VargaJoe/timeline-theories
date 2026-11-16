@@ -28,6 +28,7 @@ export class OriginalImageUpload{constructor(){throw Error('Upload is forbidden 
 `);
 const imports = {
   react, 'react/jsx-runtime': jsx, './LazyImage': widget('LazyImage'), './PosterFan': widget('PosterFan'), './TimelineCover': widget('TimelineCover'),
+  './PendingImageRecovery': widget('PendingImageRecovery'),
   '../services/imageVariantService': services,
   '../services/sensenet': moduleUrl(`export const captureOperationContext=()=>()=>{};export const invalidatePermissions=${forbidden};
 export const subscribePermissions=listener=>{const state=globalThis.__editorPreviewState;state.listeners.add(listener);return()=>state.listeners.delete(listener);};`),
@@ -123,6 +124,8 @@ test('pending notPrepared recovery keeps selection locked until explicit stopped
     ui.flush(); await tick(); let tree = ui.flush();
     button(tree, 'Generate preview').props.onClick(); await tick(); state.generations[0].resolve(state.result(0)); await tick();
     button(ui.flush(), 'Publish').props.onClick(); await tick(); tree = ui.flush();
+    assert.equal(rawButton(tree, 'Retry publication').props.disabled, false);
+    assert.equal(rawButton(tree, 'Random selection').props.disabled, true);
     button(tree, 'Check saved outcome').props.onClick(); await tick(); tree = ui.flush();
     assert.equal(rawButton(tree, 'Start a new preview'), undefined);
     assert.equal(rawButton(tree, 'Generate preview').props.disabled, true);
@@ -135,6 +138,32 @@ test('pending notPrepared recovery keeps selection locked until explicit stopped
     assert.deepEqual(calls[1], { stopped: true, abandon: false });
     button(tree, 'Start a new preview').props.onClick(); tree = ui.flush();
     assert.equal(button(tree, 'Generate preview').props.disabled, false);
+  } finally { ui.unmount(); state.restore(); }
+});
+
+test('an older global write blocks publication without falsely locking selection or offering current-job recovery', async () => {
+  const state = fixture(), rawButton = (tree, label) => find(tree, node => node.type === 'button' && node.props.children === label);
+  state.publication = { hasStartedMutation: true, blockedBeforeWrite: true, recovery: undefined, async publish() { throw Error('A previous application write must be recovered by its original caller.'); }, async recover() { throw Error('A blocked current job must not be recovered as the older operation.'); } };
+  const ui = host({ ownerId: 90, kind: 'timeline-composite', candidates: [11, 12, 13].map(id => ({ id, title: 'Poster ' + id, url: '/original/' + id })), onSaved: () => { throw Error('The blocked step must not publish'); } });
+  try {
+    ui.flush(); await tick(); let tree = ui.flush();
+    button(tree, 'Generate preview').props.onClick(); await tick(); state.generations[0].resolve(state.result(0)); await tick();
+    button(ui.flush(), 'Publish').props.onClick(); await tick(); tree = ui.flush();
+    assert.equal(rawButton(tree, 'Retry publication'), undefined);
+    assert.equal(rawButton(tree, 'Check saved outcome'), undefined);
+    assert.equal(rawButton(tree, 'Close failed attempt'), undefined);
+    assert.equal(rawButton(tree, 'Publish').props.disabled, true, 'The failed generation must be discarded before a fresh publication.');
+    assert.equal(button(tree, 'Generate preview').props.disabled, false);
+    assert.equal(button(tree, 'Random selection').props.disabled, false);
+    const message = find(tree, node => node.props?.role === 'alert').props.children;
+    assert.match(message, /previous application write/); assert.match(message, /step was blocked before writing/); assert.match(message, /after the original operation is recovered/);
+    assert.doesNotMatch(message, /Selection stays locked|Retry publication checks/);
+    find(tree, node => node.type === 'PendingImageRecovery').props.onResolved(); tree = ui.flush();
+    assert.equal(find(tree, node => node.props?.role === 'alert'), undefined, 'Recovering the older operation clears its stale editor error.');
+    const candidate = find(tree, node => node.type === 'input' && node.props.type === 'checkbox' && !node.props.checked);
+    assert.equal(candidate.props.disabled, false); candidate.props.onChange(); tree = ui.flush();
+    button(tree, 'Generate preview').props.onClick(); await tick();
+    assert.deepEqual(state.generations[1].input.sources.map(source => source.id), [11, 12, 13]);
   } finally { ui.unmount(); state.restore(); }
 });
 

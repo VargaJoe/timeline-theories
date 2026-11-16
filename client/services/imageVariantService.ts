@@ -127,8 +127,10 @@ export class ImagePublication {
   private sealed = false;
   private completed?: NativeSnapshot;
   private mutationStarted = false;
+  private writeBlocked = false;
   private recoveryStep?: { key: string; operationId: string; stoppedRequestId: string };
   get hasStartedMutation(): boolean { return this.mutationStarted; }
+  get blockedBeforeWrite(): boolean { return this.writeBlocked; }
   get recovery(): Readonly<{ operationId: string; stoppedRequestId: string }> | undefined { return this.recoveryStep && { operationId: this.recoveryStep.operationId, stoppedRequestId: this.recoveryStep.stoppedRequestId }; }
   private readonly checkContext = captureOperationContext();
   constructor(ownerId: number, generated: GeneratedImageSet, kind: 'timeline-composite' | 'media-sizes', owner: NativeSnapshot) {
@@ -136,12 +138,16 @@ export class ImagePublication {
   }
 
   private async write<T>(path: string, body: unknown, key: string, signal: AbortSignal): Promise<T> {
+    this.writeBlocked = false;
     if (this.recoveryStep?.key !== key) this.recoveryStep = undefined;
     try { const result = await post<T>(path, body, key, signal); this.recoveryStep = undefined; return result; }
     catch (error) {
       const details = error && typeof error === 'object' && 'details' in error ? error.details as Record<string, unknown> | undefined : undefined;
+      const failure = error as { code?: string; status?: number } | undefined;
+      this.writeBlocked = failure?.code === 'pending_recovery_required' && failure.status === 409 && details?.blockedBeforeWrite === true && details.uncertain !== true;
       const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-      if (details && uuid(details.operationId) && uuid(details.stoppedRequestId)) this.recoveryStep = { key, operationId: details.operationId, stoppedRequestId: details.stoppedRequestId };
+      if (this.writeBlocked) this.recoveryStep = undefined;
+      else if (details && uuid(details.operationId) && uuid(details.stoppedRequestId)) this.recoveryStep = { key, operationId: details.operationId, stoppedRequestId: details.stoppedRequestId };
       throw error;
     }
   }
@@ -159,6 +165,7 @@ export class ImagePublication {
   }
 
   async publish(signal: AbortSignal, progress: (message: string) => void): Promise<NativeSnapshot> {
+    this.writeBlocked = false;
     const check = () => { this.checkContext(); signal.throwIfAborted(); };
     check();
     if (this.completed) return this.completed;

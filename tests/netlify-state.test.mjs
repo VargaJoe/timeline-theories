@@ -92,7 +92,11 @@ test('durable pending fence precedes dispatch and immutable receipts precede fen
   assert.equal((await store.prepareMutation(principal, command, beforeSnapshot)).created, true);
   assert.equal((await restarted.prepareMutation(principal, command, beforeSnapshot)).created, false);
   assert.equal((await restarted.pendingMutations()).length, 1);
-  await rejectsCode(restarted.prepareMutation('session:99:other', payload(), beforeSnapshot), 'pending_recovery_required');
+  const blocked = payload();
+  await assert.rejects(restarted.prepareMutation('session:99:other', blocked, beforeSnapshot), error => {
+    assert.equal(error.code, 'pending_recovery_required'); assert.deepEqual(error.details, { blockedBeforeWrite: true }); return true;
+  });
+  assert.equal(await restarted.mutationRow('session:99:other', blocked.operationId), null);
   await rejectsCode(restarted.prepareMutation(principal, payload(), beforeSnapshot), 'pending_recovery_required');
   const result = { id: 10, revision: 'after' };
   await restarted.completeMutation(principal, command, result);
@@ -102,6 +106,22 @@ test('durable pending fence precedes dispatch and immutable receipts precede fen
   const partial = payload(); await store.prepareMutation(principal, partial, beforeSnapshot);
   await store.partialMutation(principal, partial, { ok: false, completed: [{ id: 10 }] });
   assert.equal((await restarted.mutationRow(principal, partial.operationId)).state, 'partial');
+});
+
+test('global recovery rejection identifies only an absent single current operation and preserves the older fence', async () => {
+  const store = new Store(config()), principal = 'session:42:current', journal = new MutationJournal(store, principal, {}), previous = payload(), completed = payload();
+  await store.prepareMutation(principal, completed, beforeSnapshot);
+  await store.completeMutation(principal, completed, { id: 10, revision: 'after' });
+  await store.prepareMutation('session:99:private-original', previous, beforeSnapshot);
+  const before = await store.pendingMutations(), absent = randomUUID();
+  await assert.rejects(journal.assertRecoveryBoundary([absent]), error => {
+    assert.equal(error.code, 'pending_recovery_required'); assert.deepEqual(error.details, { blockedBeforeWrite: true }); return true;
+  });
+  for (const ids of [[completed.operationId], [absent, randomUUID()]]) await assert.rejects(journal.assertRecoveryBoundary(ids), error => {
+    assert.equal(error.code, 'pending_recovery_required'); assert.equal(error.details, undefined); return true;
+  });
+  assert.deepEqual(await store.pendingMutations(), before);
+  assert.equal(await store.mutationRow(principal, absent), null);
 });
 
 test('interrupted receipt archive retains a recoverable pending fence and never redispatches', async () => {
